@@ -20,6 +20,23 @@ public sealed class CliMachineBoundaryTests
         Assert.Equal("quantized", PocServerPreset.Variants["translation"]);
         Assert.Equal("cpu", PocServerPreset.Providers["vad"]);
     }
+
+    [Fact]
+    public void QualityPresetModelsResolveInBundledInventory()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Join(root, "AGENTS.md"))) root = Path.GetDirectoryName(root);
+        Assert.NotNull(root);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Join(root, "src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json")));
+        var models = manifest.RootElement.GetProperty("models").EnumerateArray().ToArray();
+        foreach (string alias in PocServerQualityPreset.Create().Models!.Values)
+            Assert.Contains(models, model => model.GetProperty("aliases").EnumerateArray().Any(a => a.GetString() == alias));
+        Assert.Equal("qwen3-tts-1.7b-customvoice", PocServerQualityPreset.Create().Models!["tts"]);
+        Assert.Equal("quantized", PocServerQualityPreset.Variants["translation"]);
+        Assert.Equal("cuda", PocServerQualityPreset.Providers["tts"]);
+        Assert.True(PocPresets.TryResolve(PocServerQualityPreset.Name, out _, out _, out _));
+        Assert.True(PocPresets.TryResolve(PocServerPreset.Name, out _, out _, out _));
+    }
     [Fact]
     public void PipelineAcceptsDedicatedMachineFiles()
     {

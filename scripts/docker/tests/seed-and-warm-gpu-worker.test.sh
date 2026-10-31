@@ -32,7 +32,7 @@ run_case() {
     exit 1
   fi
   grep -q 'models download fixture-model' "$TEST_LOG"
-  if [[ "$expected" == server ]]; then
+  if [[ "$expected" == "server" ]]; then
     grep -q 'cache warm --provider tensorrt' "$TEST_LOG"
     ! grep -q 'providers trt-rtx install' "$TEST_LOG"
   else
@@ -40,10 +40,34 @@ run_case() {
   fi
 }
 
+run_default_seed_case() {
+  local profile="$1"
+  : > "$TEST_LOG"
+  env -u TRACKDUB_MODEL_SET TRACKDUB_GPU_PROFILE="$profile" TRACKDUB_GPU_TARGET="$profile" \
+    bash "$REPO_ROOT/scripts/docker/seed-and-warm-gpu-worker.sh" > "$TEST_ROOT/output" 2>&1
+  test -s "$TEST_LOG"
+}
+
 run_case server '' server
 run_case '' server server
 run_case rtx rtx rtx
 run_case '' '' rtx
+
+# Without an explicit TRACKDUB_MODEL_SET, each profile seeds its own pinned list.
+run_default_seed_case server
+grep -q 'models download google/madlad400-3b-mt --variant quantized' "$TEST_LOG"
+! grep -q 'trt-fp16' "$TEST_LOG"
+! grep -qi 'cosyvoice' "$TEST_LOG"
+
+run_default_seed_case rtx
+grep -q 'models download google/madlad400-3b-mt --variant trt-fp16' "$TEST_LOG"
+grep -qi 'models download tonythethompson/CosyVoice-300M-ONNX --variant int8' "$TEST_LOG"
+
+# The classic-TRT warm list must not target an export the server seed does not provide.
+if grep -v '^[[:space:]]*#' "$REPO_ROOT/docker/poc-warm-models.server.txt" | grep -qi 'madlad'; then
+  echo 'Server warm list must not target the unseeded MADLAD export.' >&2
+  exit 1
+fi
 
 : > "$TEST_LOG"
 if TRACKDUB_GPU_PROFILE=server TRACKDUB_GPU_TARGET=rtx \
@@ -55,4 +79,4 @@ else
 fi
 test ! -s "$TEST_LOG"
 grep -q 'does not match' "$TEST_ROOT/output"
-echo 'Provisioning profile/target regression checks passed (5 cases).'
+echo 'Provisioning profile/target regression checks passed (7 cases).'
