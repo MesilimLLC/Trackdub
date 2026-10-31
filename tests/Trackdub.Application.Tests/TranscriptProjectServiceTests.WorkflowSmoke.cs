@@ -12,6 +12,7 @@ using Trackdub.Domain;
 using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.AudioQuality;
 using Trackdub.Domain.Media;
+using Trackdub.Domain.Mixing;
 using Trackdub.Domain.Projects;
 using Trackdub.Domain.Speakers;
 using Trackdub.Domain.StageRuns;
@@ -192,6 +193,8 @@ public partial class TranscriptProjectServiceTests
             Assert.Equal(frenchSegmentIdsByIndex[take.SegmentIndex], take.TranslatedSegmentId);
         }
 
+        TranscriptProjectState synthesized = await AssertLipSynthesisUsesCurrentMixPlanDriverAsync(scope, token);
+
         DubbingPipelineEngine.StageWorkflowResult export = await DubbingPipelineEngine.RunStageWorkflowAsync(
             session, options, StageNames.Export, selections, progress: null, token);
         Assert.Equal(StageStatus.Succeeded, export.Status);
@@ -229,21 +232,6 @@ public partial class TranscriptProjectServiceTests
                 reopened.ProjectState.Project.Id, "es", token))?.Id);
         }
 
-        var lipEngine = new FakeLipSynthesisEngine
-        {
-            OutputDirectory = Path.Join(scope.ArtifactStore.GetPath(string.Empty), "lip-output"),
-        };
-        using var lipWorkflow = new LipSynthesisWorkflow(
-            scope.CreateReopenedStateService(),
-            new LipSynthesisStageHandler(
-                lipEngine, new FakeFaceDetector(), new FakeFaceLandmarkProvider(), new FakeFacePoseEstimator(),
-                scope.ArtifactStore, scope.StageRunStore, new FakeLipSynthesisSegmentRepository(), mediaAssetRepository: scope.MediaAssetRepository),
-            scope.ArtifactStore);
-        TranscriptProjectState synthesized = await lipWorkflow.SynthesizeAllAsync(new LipSynthesisRunRequest(), token);
-        Assert.NotEmpty(lipEngine.Requests);
-        ProjectArtifact driver = Assert.Single(reopened.ProjectState.Artifacts, artifact => artifact.Kind == ArtifactKind.ExportAudio);
-        Assert.All(lipEngine.Requests, request => Assert.Equal(scope.ArtifactStore.GetPath(driver.RelativePath), request.DubbedAudioPath));
-        Assert.Equal(StageRunStatus.Completed, synthesized.StageRuns.Last(run => run.StageName == StageNames.LipSynthesis).Status);
         Assert.Equal(reopened.CurrentTranslationRevision!.Id, synthesized.CurrentTranslationRevision?.Id);
     }
 
@@ -282,6 +270,7 @@ public partial class TranscriptProjectServiceTests
     {
         public object? GetService(Type serviceType) => null;
     }
+
 
     [Fact]
     public async Task SpeakerWorkflow_RenameSpeakerAsync_returns_refreshed_state()

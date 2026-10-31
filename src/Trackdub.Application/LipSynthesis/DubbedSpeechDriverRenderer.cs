@@ -1,3 +1,4 @@
+using Trackdub.Contracts;
 using Trackdub.Application.Mixing;
 using Trackdub.Domain.Mixing;
 
@@ -19,16 +20,18 @@ internal sealed class DubbedSpeechDriverRenderer(
     internal const double MutedSourceGainDb = -200d;
 
     /// <summary>
-    /// Renders the saved mix plan with the original bed and extra media clips muted and timbre
-    /// polish off. Returns null, so the caller keeps the full dubbed mix, when there is no mix plan
-    /// with audible speech or rendering fails.
+    /// Renders the supplied current mix plan with the original bed and extra media clips muted and
+    /// timbre polish off. Returns null when there is no audible speech or rendering fails.
     /// </summary>
-    public async Task<string?> TryRenderAsync(double? mediaDurationSeconds, CancellationToken cancellationToken)
+    public async Task<string?> TryRenderAsync(
+        MixPlan mixPlan,
+        double? mediaDurationSeconds,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(mixPlan);
         try
         {
-            MixPlan? mixPlan = await mixPlanStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-            if (mixPlan is null || !mixPlan.SpeechClips.Any(static clip => !clip.IsSilentGap))
+            if (!mixPlan.SpeechClips.Any(static clip => !clip.IsSilentGap))
             {
                 return null;
             }
@@ -41,16 +44,21 @@ internal sealed class DubbedSpeechDriverRenderer(
                 return null;
             }
 
-            string outputPath = artifactStore.GetPath(RelativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-            PreviewRangeRenderResult rendered = await renderer.RenderAsync(
+            await using ArtifactWriteHandle writeHandle = artifactStore.CreateWriteHandle(RelativePath);
+            await renderer.RenderAsync(
                 new PreviewRangeRenderRequest(
                     mixPlan with { SourceGainDb = MutedSourceGainDb, ApplyTimbrePolish = false, MediaClips = [] },
                     StartSeconds: 0d,
                     EndSeconds: endSeconds,
-                    OutputPath: outputPath),
+                    OutputPath: writeHandle.TemporaryPath),
                 cancellationToken).ConfigureAwait(false);
-            return File.Exists(rendered.OutputPath) ? rendered.OutputPath : null;
+            if (!File.Exists(writeHandle.TemporaryPath))
+            {
+                return null;
+            }
+
+            await artifactStore.CommitAsync(writeHandle, cancellationToken).ConfigureAwait(false);
+            return writeHandle.FinalPath;
         }
         catch (OperationCanceledException)
         {
@@ -61,5 +69,16 @@ internal sealed class DubbedSpeechDriverRenderer(
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Renders a saved mix plan for callers that already have a preview or export plan.
+    /// </summary>
+    public async Task<string?> TryRenderAsync(double? mediaDurationSeconds, CancellationToken cancellationToken)
+    {
+        MixPlan? mixPlan = await mixPlanStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return mixPlan is null
+            ? null
+            : await TryRenderAsync(mixPlan, mediaDurationSeconds, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -287,7 +287,7 @@ public sealed class LipSynthesisStageHandlerTests
 
             Assert.Empty(result.Segments);
             Assert.Equal(StageRunStatus.Skipped, result.StageRun.Status);
-            Assert.Contains("dubbed mix", result.StageRun.FailureReason, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("dubbed-speech driver", result.StageRun.FailureReason, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(0, engine.CallCount);
         }
         finally { Directory.Delete(directory, recursive: true); }
