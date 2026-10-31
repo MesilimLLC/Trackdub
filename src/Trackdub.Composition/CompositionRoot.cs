@@ -1,5 +1,6 @@
 using Trackdub.Application.Cloud;
 using Trackdub.Contracts;
+using Trackdub.Contracts.Editing;
 using Trackdub.Contracts.Cloud;
 using Trackdub.Contracts.Serving;
 using Trackdub.Contracts.LipSync;
@@ -159,6 +160,7 @@ public static class CompositionRoot
         StemTempCleanup.RegisterProcessExitHandler();
         AddInfrastructure(services);
         AddApplication(services);
+        AddSequenceExport(services);
         AddInference(services);
         AddHardwareRouting(services);
         return services;
@@ -625,6 +627,16 @@ public static class CompositionRoot
         services.TryAddSingleton<ILicenseInitializer>(sp => sp.GetRequiredService<LicenseService>());
         services.TryAddSingleton<ILicenseTierProvider>(sp => sp.GetRequiredService<LicenseService>());
         services.TryAddSingleton<ILicenseTokenStore, LicenseFileStore>();
+    }
+
+    private static void AddSequenceExport(IServiceCollection services)
+    {
+        services.TryAddSingleton<ISequenceExportRenderer>(sp =>
+            new FfmpegSequenceRenderer(
+                sp.GetRequiredService<IMediaProbe>(),
+                sp.GetRequiredService<IMediaGpuHintProvider>(),
+                ffmpegPath: null));
+        services.TryAddScoped<SequenceExportDeliveryService>();
     }
 
     private static void AddInference(IServiceCollection services)

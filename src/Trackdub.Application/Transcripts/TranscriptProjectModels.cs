@@ -33,7 +33,9 @@ public sealed record InferenceModelPreferences(
     bool EnableAsrTextRefinement = false,
     IReadOnlyDictionary<RuntimeStage, ExecutionProviderKind>? PreferredExecutionProviders = null,
     IReadOnlySet<RuntimeStage>? RequiredExecutionProviderStages = null,
-    IReadOnlyDictionary<RuntimeStage, string>? PreferredModelVariantAliases = null)
+    IReadOnlyDictionary<RuntimeStage, string>? PreferredModelVariantAliases = null,
+    ExecutionProviderKind? GlobalPreferredExecutionProvider = null,
+    IReadOnlySet<RuntimeStage>? ExplicitExecutionProviderStages = null)
 {
     public static InferenceModelPreferences Empty { get; } = new();
 
@@ -79,7 +81,8 @@ public sealed record GenerateTranslationRequest(
     ExecutionProviderKind? PreferredExecutionProvider = null,
     bool RequirePreferredExecutionProvider = false,
     string? PreferredModelVariantAlias = null,
-    bool EnableSegmentStreaming = false);
+    bool EnableSegmentStreaming = false,
+    TranslationRunScope Scope = TranslationRunScope.All);
 
 public sealed record RetranslateSegmentRequest(
     Guid TranslationRevisionId,

@@ -1053,18 +1053,14 @@ public sealed partial class DubbingPipelineEngine(
         IProgress<PipelineProgressEvent>? progress,
         CancellationToken cancellationToken)
     {
-        string? normalizedSourceLanguage = NormalizeAsrSourceLanguageCode(options.SourceLanguageCode);
         DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
         TranscriptProjectState vadState = await workspace.RunTranscriptStageAsync(
             StageNames.Vad,
-            enableSpeakerDiarization: false,
-            modelPreferences,
-            cancellationToken,
-            progress,
-            sourceLanguage: normalizedSourceLanguage).ConfigureAwait(false);
+            TranscriptRunOptions.ForDubbingStage(options, StageNames.Vad, modelPreferences, progress),
+            cancellationToken).ConfigureAwait(false);
 
-        // Speech enhancement runs while routing audio for the first transcript stage; surface its
-        // failure before the VAD Completed event so it shows in the progress stream and outcome.
+        // When enabled, speech enhancement runs while routing audio for the first transcript stage;
+        // surface its failure before the VAD Completed event so it shows in progress and outcome.
         IReadOnlyList<string>? enhancementDegradations =
             ExtractSpeechEnhancementDegradations(vadState, stageWorkStartedUtc);
         if (enhancementDegradations is { Count: > 0 })
@@ -1104,15 +1100,11 @@ public sealed partial class DubbingPipelineEngine(
             return BuildStageWorkflowResultFromStageRun(retranscribed, StageNames.Asr, retranscribeStartedUtc);
         }
 
-        string? normalizedSourceLanguage = NormalizeAsrSourceLanguageCode(options.SourceLanguageCode);
         DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
         TranscriptProjectState asrState = await workspace.RunTranscriptStageAsync(
             StageNames.Asr,
-            enableSpeakerDiarization: false,
-            modelPreferences,
-            cancellationToken,
-            progress,
-            sourceLanguage: normalizedSourceLanguage).ConfigureAwait(false);
+            TranscriptRunOptions.ForDubbingStage(options, StageNames.Asr, modelPreferences, progress),
+            cancellationToken).ConfigureAwait(false);
         return BuildStageWorkflowResultFromStageRun(asrState, StageNames.Asr, stageWorkStartedUtc);
     }
 
@@ -1152,15 +1144,11 @@ public sealed partial class DubbingPipelineEngine(
                 StageSkipReasonCodes.DisabledByOption);
         }
 
-        string? normalizedSourceLanguage = NormalizeAsrSourceLanguageCode(options.SourceLanguageCode);
         DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
         TranscriptProjectState diarizationState = await workspace.RunTranscriptStageAsync(
             StageNames.Diarization,
-            enableSpeakerDiarization: options.EnableSpeakerDiarization,
-            modelPreferences,
-            cancellationToken,
-            progress,
-            sourceLanguage: normalizedSourceLanguage).ConfigureAwait(false);
+            TranscriptRunOptions.ForDubbingStage(options, StageNames.Diarization, modelPreferences, progress),
+            cancellationToken).ConfigureAwait(false);
         return BuildStageWorkflowResultFromStageRun(diarizationState, StageNames.Diarization, stageWorkStartedUtc);
     }
 
@@ -1189,15 +1177,11 @@ public sealed partial class DubbingPipelineEngine(
         IProgress<PipelineProgressEvent>? progress,
         CancellationToken cancellationToken)
     {
-        string? normalizedSourceLanguage = NormalizeAsrSourceLanguageCode(options.SourceLanguageCode);
         DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
         TranscriptProjectState refinementState = await workspace.RunTranscriptStageAsync(
             StageNames.TextRefinementAsr,
-            enableSpeakerDiarization: options.EnableSpeakerDiarization,
-            modelPreferences,
-            cancellationToken,
-            progress,
-            sourceLanguage: normalizedSourceLanguage).ConfigureAwait(false);
+            TranscriptRunOptions.ForDubbingStage(options, StageNames.TextRefinementAsr, modelPreferences, progress),
+            cancellationToken).ConfigureAwait(false);
         return BuildStageWorkflowResultFromStageRun(refinementState, StageNames.TextRefinementAsr, stageWorkStartedUtc);
     }
 
@@ -1279,7 +1263,7 @@ public sealed partial class DubbingPipelineEngine(
                 PreferredModelVariantAlias: RuntimeModelSetupCoordinator.ResolvePreferredModelVariantAlias(
                     runtimeSelections,
                     RuntimeStage.Translation),
-                EnableSegmentStreaming: options.EnableTranslationSegmentStreaming),
+                EnableSegmentStreaming: options.EnableTranslationSegmentStreaming, Scope: options.TranslationScope),
             cancellationToken,
             progress,
             segmentObserver).ConfigureAwait(false);

@@ -20,6 +20,13 @@ public sealed class OnnxExecutionSessionFactoryTests
         char tensorRtHashCharacter = 'A') =>
         $"{architecture}|{model}|{driver}|trt-sha256-{new string(tensorRtHashCharacter, 64)}|ort-1.31.0";
 
+    private static string ClassicTensorRtCacheKey(string fingerprint)
+    {
+        byte[] digest = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(fingerprint));
+        return Convert.ToHexString(digest).ToLowerInvariant();
+    }
+
     [Fact]
     public async Task CreatePooledSingleAsync_reuses_pool_hit_without_invoking_session_factory_again()
     {
@@ -772,7 +779,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
             Assert.Equal("1", options["trt_engine_cache_enable"]);
             Assert.Equal(
-                Path.Join(Path.GetFullPath(engineCacheRoot), "classic-trt", CompleteTensorRtFingerprint().Replace('|', '-')),
+                Path.Join(Path.GetFullPath(engineCacheRoot), "classic-trt", ClassicTensorRtCacheKey(CompleteTensorRtFingerprint())),
                 options["trt_engine_cache_path"]);
         }
         finally
@@ -800,7 +807,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
             Assert.Equal(
                 Path.Join(Path.GetFullPath(cacheRoot), "EngineCache", "classic-trt",
-                    CompleteTensorRtFingerprint(architecture: "Ada", driver: "551.86").Replace('|', '-')),
+                    ClassicTensorRtCacheKey(CompleteTensorRtFingerprint(architecture: "Ada", driver: "551.86"))),
                 options["trt_engine_cache_path"]);
         }
         finally
@@ -972,7 +979,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
             string ortOptions = providerOptions.GetOptions();
             string expectedCachePath = Path.Join(
-                Path.GetFullPath(engineCacheRoot), "classic-trt", CompleteTensorRtFingerprint().Replace('|', '-'));
+                Path.GetFullPath(engineCacheRoot), "classic-trt", ClassicTensorRtCacheKey(CompleteTensorRtFingerprint()));
             Assert.Contains("trt_engine_cache_enable=1", ortOptions);
             Assert.Contains($"trt_engine_cache_path={expectedCachePath}", ortOptions);
             Assert.True(Directory.Exists(expectedCachePath));
@@ -1176,7 +1183,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         object result = method.Invoke(
             null,
-            [ExecutionProviderKind.DirectMl, devicePolicy, null, false, null, null])
+            [new OnnxExecutionSessionFactory.SessionOptionsRequest(ExecutionProviderKind.DirectMl, devicePolicy)])
             ?? throw new InvalidOperationException("Session options factory returned null.");
         Type resultType = result.GetType();
         using var options = Assert.IsAssignableFrom<SessionOptions>(
@@ -1219,7 +1226,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         object result = method.Invoke(
             null,
-            [ExecutionProviderKind.Dnnl, WindowsMlExecutionDevicePolicy.Explicit, null, false, null, null])
+            [new OnnxExecutionSessionFactory.SessionOptionsRequest(ExecutionProviderKind.Dnnl, WindowsMlExecutionDevicePolicy.Explicit)])
             ?? throw new InvalidOperationException("Session options factory returned null.");
         Type resultType = result.GetType();
         using var options = Assert.IsAssignableFrom<SessionOptions>(

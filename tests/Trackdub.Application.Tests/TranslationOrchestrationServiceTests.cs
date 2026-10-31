@@ -159,6 +159,39 @@ public sealed class TranslationOrchestrationServiceTests
     }
 
     [Fact]
+    public async Task RetranslateSegmentAsync_WhenTargetLanguageDiffersFromCurrentRevision_ThrowsWithoutStartingStage()
+    {
+        var stageRunStore = new FakeProjectStageRunStore();
+        var artifactStore = new FakeArtifactStore();
+        var service = new TranslationOrchestrationService(
+            new FakeTranslationRepository(),
+            new GlossaryService(new FakeGlossaryRepository()),
+            new GlossaryTermMatcher(),
+            new FakeTranslationLanguageRouter(),
+            new FakeTranslationEngine(),
+            new FakeTtsTakeRepository(),
+            stageRunStore,
+            artifactStore,
+            new TranscriptArtifactWriter(
+                artifactStore,
+                new FakeFileFingerprintService(),
+                new FakeMediaAssetRepository()),
+            commitBoundary: TestAtomicCommitBoundary.Create(new FakeTranslationRepository(), new FakeTtsTakeRepository(), artifactStore, new FakeMediaAssetRepository()));
+
+        TranscriptProjectState state = BuildStateWithTranslationRevision();
+        RetranslateSegmentRequest request = new(
+            state.CurrentTranslationRevision!.Id,
+            state.TranscriptSegments[0].Id,
+            SourceLanguage: "en",
+            TargetLanguage: "fr");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RetranslateSegmentAsync(state, request, TestContext.Current.CancellationToken));
+
+        Assert.Empty(stageRunStore.All);
+    }
+
+    [Fact]
     public async Task GenerateTranslationAsync_WhenEngineThrowsOceUnderCancelledToken_MarksStageAsCanceled()
     {
         using var cts = new CancellationTokenSource();
@@ -413,9 +446,8 @@ public sealed class TranslationOrchestrationServiceTests
         await harness.Service.GenerateTranslationAsync(
             harness.State,
             new GenerateTranslationRequest(SourceLanguage: "auto", TargetLanguage: "es", EnableSegmentStreaming: true),
-            TestContext.Current.CancellationToken,
-            progress: null,
-            observer);
+            new TranslationOrchestrationService.TranslationRunProgress(Progress: null, observer),
+            TestContext.Current.CancellationToken);
 
         Assert.Equal([0, 1, 2], observer.Segments.Select(segment => segment.Index).ToArray());
         TranslationRevision revision = Assert.Single(harness.TranslationRepository.Revisions);

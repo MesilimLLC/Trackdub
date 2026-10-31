@@ -25,7 +25,7 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace Trackdub.Inference.Onnx;
 
-internal static class OnnxExecutionSessionFactory
+internal static partial class OnnxExecutionSessionFactory
 {
     private static string ExtractLogId(string modelPath)
     {
@@ -229,8 +229,8 @@ internal static class OnnxExecutionSessionFactory
         ExecutionProviderKind sessionProvider =
             ResolveSessionOptionsProvider(provider, bootstrapResult.SelectedProvider);
         return new DualOptionsSelections(
-            CreateSessionOptions(sessionProvider, devicePolicy, additionalTrtEncoderOptions, enableEncoderCudaGraph, encoderLogId, encoderModelPath),
-            CreateSessionOptions(sessionProvider, devicePolicy, additionalTrtDecoderOptions, enableCudaGraph: false, decoderLogId, decoderModelPath));
+            CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, additionalTrtEncoderOptions, enableEncoderCudaGraph, encoderLogId, encoderModelPath)),
+            CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, additionalTrtDecoderOptions, EnableCudaGraph: false, decoderLogId, decoderModelPath)));
     }
 
     private static DualSessionMetadata ResolveDualSessionMetadata(
@@ -363,12 +363,12 @@ internal static class OnnxExecutionSessionFactory
         WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
             .ConfigureAwait(false);
         string logId = ExtractLogId(modelPath);
-        SessionOptionsSelection sessionOptionsSelection = CreateSessionOptions(
+        SessionOptionsSelection sessionOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(
             ResolveSessionOptionsProvider(provider, bootstrapResult.SelectedProvider),
             devicePolicy,
             additionalTrtOptions,
-            logId: logId,
-            trtModelPath: modelPath);
+            LogId: logId,
+            TrtModelPath: modelPath));
         InferenceSession? session = null;
         try
         {
@@ -559,7 +559,7 @@ internal static class OnnxExecutionSessionFactory
     {
         Exception? lastFailure = null;
         foreach (SessionOptionsSelection fallbackSelection in EnumerateTrtInitFallbackProviders()
-                     .Select(provider => CreateSessionOptions(provider, devicePolicy, additionalTrtOptions: null, logId: logId)))
+                     .Select(provider => CreateSessionOptions(new SessionOptionsRequest(provider, devicePolicy, LogId: logId))))
         {
             try
             {
@@ -592,7 +592,7 @@ internal static class OnnxExecutionSessionFactory
         TensorRtRtxTeardownGuard.MarkPoisonedIfCudaOutOfMemory(originalFailure);
         Exception lastFailure = originalFailure;
         foreach (SessionOptionsSelection fallbackSelection in EnumerateTrtInitFallbackProviders()
-                     .Select(provider => CreateSessionOptions(provider, devicePolicy, additionalTrtOptions: null, logId: logId)))
+                     .Select(provider => CreateSessionOptions(new SessionOptionsRequest(provider, devicePolicy, LogId: logId))))
         {
             try
             {
@@ -833,6 +833,840 @@ internal static class OnnxExecutionSessionFactory
         }
     }
 
+    internal sealed record SessionOptionsFactoryBundle(
+        Func<SessionOptions> CreateOptions,
+        ExecutionProviderKind RequestedProvider,
+        ExecutionProviderKind SelectedProvider,
+        string BootstrapDetail);
+
+    internal static async Task<SessionOptionsFactoryBundle> CreateSessionOptionsFactoryAsync(
+        ExecutionProviderKind requestedProvider,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions = null)
+    {
+        var bootstrapResult = await BootstrapTrackedAsync(requestedProvider, allowDownloads: true, cancellationToken)
+            .ConfigureAwait(false);
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
+            .ConfigureAwait(false);
+        ExecutionProviderKind sessionProvider = ResolveSessionOptionsProvider(
+            requestedProvider,
+            bootstrapResult.SelectedProvider);
+        SessionOptionsSelection probeSelection = CreateSessionOptions(new SessionOptionsRequest(
+            sessionProvider,
+            devicePolicy,
+            additionalTrtOptions));
+        ExecutionProviderKind selectedProvider = probeSelection.SelectedProvider;
+        probeSelection.Options.Dispose();
+
+        return new SessionOptionsFactoryBundle(
+            () => CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, additionalTrtOptions)).Options,
+            requestedProvider,
+            selectedProvider,
+            FormatBootstrapDetail(bootstrapResult.Detail, probeSelection.FallbackReason) ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Packaged DirectML is included with Windows ML. Catalog RegisterCertifiedAsync is not a
+    /// prerequisite for GetEpDevices/append, so a bootstrap CPU select must not skip the DML path.
+    /// Native CUDA on Windows still wins when bootstrap selected CUDA.
+    /// </summary>
+    internal static ExecutionProviderKind ResolveSessionOptionsProvider(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind bootstrapSelectedProvider)
+    {
+        if (requestedProvider is ExecutionProviderKind.DirectMl)
+        {
+            return OperatingSystem.IsWindows()
+                ? ExecutionProviderKind.DirectMl
+                : bootstrapSelectedProvider;
+        }
+
+        if (requestedProvider is ExecutionProviderKind.Cuda
+            && bootstrapSelectedProvider is ExecutionProviderKind.Cpu
+            && OperatingSystem.IsWindows())
+        {
+            return ExecutionProviderKind.DirectMl;
+        }
+
+        return bootstrapSelectedProvider;
+    }
+
+    internal static string FormatProviderLabel(ExecutionProviderKind provider) =>
+        provider switch
+        {
+            ExecutionProviderKind.Cpu => "cpu",
+            ExecutionProviderKind.DirectMl => "dml",
+            ExecutionProviderKind.TensorRTRtx => "tensorrt-rtx",
+            ExecutionProviderKind.OpenVino => "openvino",
+            ExecutionProviderKind.CoreMl => "coreml",
+            ExecutionProviderKind.Cuda => "cuda",
+            ExecutionProviderKind.TensorRt => "tensorrt",
+            ExecutionProviderKind.Migraphx => "migraphx",
+            ExecutionProviderKind.Dnnl => "dnnl",
+            ExecutionProviderKind.Qnn => "qnn",
+            ExecutionProviderKind.OpenVinoCatalog => "openvino-catalog",
+            ExecutionProviderKind.VitisAi => "vitisai",
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported execution provider kind.")
+        };
+
+    private static SessionPoolKey WithOpenVinoResidency(SessionPoolKey key) =>
+        key.Provider is ExecutionProviderKind.OpenVino
+            ? key with { UseOpenVinoCpuProxy = _openVinoAvailability.UseOpenVinoCpuProxy }
+            : key;
+
+    private static ExecutionProviderKind ResolveSharedSelectedProvider(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind firstSessionProvider,
+        ExecutionProviderKind secondSessionProvider)
+    {
+        if (firstSessionProvider == secondSessionProvider)
+        {
+            return firstSessionProvider;
+        }
+
+        return requestedProvider is ExecutionProviderKind.TensorRTRtx
+            ? ExecutionProviderKind.Cpu
+            : requestedProvider;
+    }
+
+    internal static ExecutionProviderKind ResolveEffectiveProviderKindFromSession(
+        InferenceSession session,
+        ExecutionProviderKind optionsSelectedProvider,
+        bool usedCatalogDevicePolicy)
+    {
+        // DNNL only claims a subset of ops; ORT can silently place an unsupported graph on
+        // CPU even after AppendExecutionProvider_Dnnl succeeds. Verify actual placement here
+        // rather than trusting the append-time selection, mirroring DnnlReadinessProbe's
+        // smoke-session check.
+        if (optionsSelectedProvider is ExecutionProviderKind.Dnnl)
+        {
+            return ResolveDnnlEffectiveProviderFromSession(session);
+        }
+
+        // Native ORT CUDA / classic TensorRT are not WinML catalog EP names. Probing
+        // GetEpDeviceForInputs through the catalog mapper would treat unmapped names as CPU.
+        if (optionsSelectedProvider is ExecutionProviderKind.Cuda or ExecutionProviderKind.TensorRt)
+        {
+            return optionsSelectedProvider;
+        }
+
+        // Linux OpenVINO is the same OpenVINOExecutionProvider plugin the Windows ML catalog
+        // registers, so the catalog mapper reports it as OpenVinoCatalog.
+        if (optionsSelectedProvider is ExecutionProviderKind.OpenVino)
+        {
+            return ResolveCatalogEffectiveProviderFromSession(session) is ExecutionProviderKind.OpenVinoCatalog
+                ? ExecutionProviderKind.OpenVino
+                : ExecutionProviderKind.Cpu;
+        }
+
+        // Always probe GetEpDeviceForInputs for GPU / catalog routes so TRT sessions that
+        // assigned zero nodes (or fell through) report DirectML/CPU honestly.
+        if (usedCatalogDevicePolicy || ShouldProbeEffectiveEpDevices(optionsSelectedProvider))
+        {
+            return ResolveCatalogEffectiveProviderFromSession(session);
+        }
+
+        return optionsSelectedProvider;
+    }
+
+    private static bool ShouldProbeEffectiveEpDevices(ExecutionProviderKind optionsSelectedProvider) =>
+        optionsSelectedProvider is ExecutionProviderKind.TensorRTRtx
+            or ExecutionProviderKind.DirectMl
+            or ExecutionProviderKind.Migraphx
+            or ExecutionProviderKind.Qnn
+            or ExecutionProviderKind.OpenVinoCatalog
+            or ExecutionProviderKind.VitisAi;
+
+    private static ExecutionProviderKind ResolveDnnlEffectiveProviderFromSession(InferenceSession session)
+    {
+        try
+        {
+            IReadOnlyList<OrtEpDevice> devices = session.GetEpDeviceForInputs();
+            return devices.Any(device => DnnlOrtProbe.IsDnnlExecutionProviderName(device.EpName))
+                ? ExecutionProviderKind.Dnnl
+                : ExecutionProviderKind.Cpu;
+        }
+        catch (OnnxRuntimeException)
+        {
+            return ExecutionProviderKind.Cpu;
+        }
+    }
+
+    private static string? BuildEpFallbackReason(ExecutionProviderKind requestedProvider, ExecutionProviderKind effectiveProvider) =>
+        effectiveProvider != requestedProvider
+            ? $"Requested {FormatProviderLabel(requestedProvider)} but effective {FormatProviderLabel(effectiveProvider)}."
+            : null;
+
+    private static string? BuildSessionOptionsFallbackReason(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind effectiveProvider,
+        SessionOptionsSelection sessionOptionsSelection) =>
+        MergeFallbackReasons(
+            sessionOptionsSelection.FallbackReason,
+            BuildEpFallbackReason(requestedProvider, effectiveProvider));
+
+    // EP-context artifacts are keyed by the provider options their engines were built with, so
+    // session creation needs the options appended here, not a re-derivation from the model.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SessionOptions, IReadOnlyDictionary<string, string>>
+        AppendedTensorRtRtxOptions = new();
+
+    internal static IReadOnlyDictionary<string, string>? TryGetAppendedTensorRtRtxOptions(SessionOptions options) =>
+        AppendedTensorRtRtxOptions.TryGetValue(options, out IReadOnlyDictionary<string, string>? trtOptions) ? trtOptions : null;
+
+    internal static ExecutionProviderKind AppendTensorRtRtxOrFallbackProvider(
+        SessionOptions options,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
+        bool enableCudaGraph = false)
+    {
+#if WINDOWS
+        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
+#endif
+        var devices = OrtEnv.Instance().GetEpDevices();
+        var trtDevice = devices.FirstOrDefault(d => IsTensorRtRtxDeviceCandidate(d.EpName, d.HardwareDevice.Type));
+        if (trtDevice != null)
+        {
+            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtRtxOptions(additionalTrtOptions, enableCudaGraph);
+            options.AppendExecutionProvider(OrtEnv.Instance(), new[] { trtDevice }, trtOptions);
+            AppendedTensorRtRtxOptions.AddOrUpdate(options, trtOptions);
+            return ExecutionProviderKind.TensorRTRtx;
+        }
+
+        if (_logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            foreach (OrtEpDevice device in devices.Where(d => d.HardwareDevice.Type is OrtHardwareDeviceType.GPU))
+            {
+                if (!TryMapCatalogEpNameToExecutionProviderKind(device.EpName, out _))
+                {
+                    ReportUnmappedCatalogEpName(device.EpName, CatalogEpNameSource.GetEpDevices, devices.Count);
+                }
+            }
+        }
+
+        // TensorRT RTX plugin device not available; fallback to DirectML if possible, else CPU is default.
+        return TryAppendDirectMlProvider(options, out _)
+            ? ExecutionProviderKind.DirectMl
+            : ExecutionProviderKind.Cpu;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SessionOptions, IReadOnlyDictionary<string, string>>
+        AppendedTensorRtOptions = new();
+
+    internal static IReadOnlyDictionary<string, string>? TryGetAppendedTensorRtOptions(SessionOptions options) =>
+        AppendedTensorRtOptions.TryGetValue(options, out IReadOnlyDictionary<string, string>? trtOptions) ? trtOptions : null;
+
+    internal static bool IsTensorRtDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
+        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
+        string.Equals(epName, ClassicTensorRtExecutionProviderName, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Appends the classic TensorRT EP with the persistent engine-cache options from
+    /// <see cref="BuildTensorRtOptions"/>. Prefers the generic EP-device append when the
+    /// classic TRT device is enumerated by <c>OrtEnv.GetEpDevices()</c>; otherwise uses the
+    /// built-in provider-options append (<see cref="OrtTensorRTProviderOptions"/>), because
+    /// the built-in EP is reported by <c>GetAvailableProviders()</c> but is NOT enumerated
+    /// as an EP device (verified live on ORT 1.31 in the GPU container: only the CPU device
+    /// is enumerated), so the generic branch is normally unreachable for classic TRT. There is
+    /// no TensorRT append without the cache options: when the provider-options append fails,
+    /// this falls back to DirectML/CPU so callers can report the fallback instead of claiming
+    /// a cached TensorRT session.
+    /// </summary>
+    internal static ExecutionProviderKind AppendTensorRtOrFallbackProvider(
+        SessionOptions options,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
+        string? trtModelPath = null)
+    {
+#if WINDOWS
+        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
+#endif
+        var devices = OrtEnv.Instance().GetEpDevices();
+        var trtDevice = devices.FirstOrDefault(d => IsTensorRtDeviceCandidate(d.EpName, d.HardwareDevice.Type));
+        if (trtDevice != null)
+        {
+            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtOptionsForModel(additionalTrtOptions, trtModelPath);
+            EnsureClassicTensorRtCacheDirectory(trtOptions);
+            options.AppendExecutionProvider(OrtEnv.Instance(), new[] { trtDevice }, trtOptions);
+            AppendedTensorRtOptions.AddOrUpdate(options, trtOptions);
+            return ExecutionProviderKind.TensorRt;
+        }
+
+        try
+        {
+            using OrtTensorRTProviderOptions providerOptions = new();
+            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtOptionsAfterProviderLoad(
+                additionalTrtOptions, trtModelPath,
+                () =>
+                {
+                    // Creating provider options only allocates an options struct. Append to
+                    // disposable options to load ORT's actual TensorRT dependency before hashing
+                    // it. No inference session is created and no model engines are compiled here.
+                    using SessionOptions preloadOptions = new();
+                    preloadOptions.AppendExecutionProvider_Tensorrt(providerOptions);
+                },
+                BuildClassicTensorRtEnvironmentFingerprint);
+            EnsureClassicTensorRtCacheDirectory(trtOptions);
+            providerOptions.UpdateOptions(new Dictionary<string, string>(trtOptions, StringComparer.Ordinal));
+            options.AppendExecutionProvider_Tensorrt(providerOptions);
+            AppendedTensorRtOptions.AddOrUpdate(options, trtOptions);
+            return ExecutionProviderKind.TensorRt;
+        }
+        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Built-in TensorRT EP provider-options append is not usable; report a fallback.
+        }
+
+        return TryAppendDirectMlProvider(options, out _)
+            ? ExecutionProviderKind.DirectMl
+            : ExecutionProviderKind.Cpu;
+    }
+
+    internal static OrtTensorRTProviderOptions BuildTensorRtProviderOptions(
+        IReadOnlyDictionary<string, string>? additionalTrtOptions,
+        string environmentFingerprint,
+        string? trtModelPath = null) =>
+        BuildTensorRtProviderOptions(BuildTensorRtOptions(additionalTrtOptions, environmentFingerprint, trtModelPath));
+
+    internal static OrtTensorRTProviderOptions BuildTensorRtProviderOptions(
+        IReadOnlyDictionary<string, string> trtOptions)
+    {
+        EnsureClassicTensorRtCacheDirectory(trtOptions);
+        var providerOptions = new OrtTensorRTProviderOptions();
+        providerOptions.UpdateOptions(new Dictionary<string, string>(trtOptions, StringComparer.Ordinal));
+        return providerOptions;
+    }
+
+    private static void EnsureClassicTensorRtCacheDirectory(IReadOnlyDictionary<string, string> trtOptions)
+    {
+        if (trtOptions.TryGetValue("trt_engine_cache_path", out string? cachePath) &&
+            !string.IsNullOrWhiteSpace(cachePath))
+        {
+            Directory.CreateDirectory(cachePath);
+        }
+    }
+
+    internal static void AppendDirectMlProvider(SessionOptions options)
+    {
+#if WINDOWS
+        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
+#endif
+        var devices = OrtEnv.Instance().GetEpDevices();
+        OrtEpDevice? directMlDevice = devices.FirstOrDefault(d => IsDirectMlDeviceCandidate(d.EpName, d.HardwareDevice.Type))
+            ?? devices.FirstOrDefault(d => IsDirectMlExecutionProviderName(d.EpName));
+        if (directMlDevice is not null)
+        {
+            options.AppendExecutionProvider(
+                OrtEnv.Instance(),
+                new[] { directMlDevice },
+                new Dictionary<string, string>(StringComparer.Ordinal));
+            return;
+        }
+
+        try
+        {
+            options.AppendExecutionProvider(DirectMlExecutionProviderName);
+        }
+        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            throw new InvalidOperationException(
+                "DirectML catalog execution provider is not visible in OrtEnv.GetEpDevices().",
+                ex);
+        }
+    }
+
+    internal sealed record SessionOptionsSelection(
+        SessionOptions Options,
+        ExecutionProviderKind SelectedProvider,
+        string? FallbackReason = null);
+
+    internal static bool IsTensorRtRtxDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
+        // Only accept the single canonical standalone EP ABI plugin name.
+        // "NvTensorRtExecutionProvider" and "TensorrtExecutionProvider" are the old CUDA-based TensorRT EP —
+        // they must NOT be treated as TRT RTX candidates (different EP family, different options).
+        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
+        string.Equals(epName, TensorRtRtxExecutionProviderName, StringComparison.Ordinal);
+
+    private static bool IsDirectMlExecutionProviderName(string epName) =>
+        string.Equals(epName, DirectMlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(epName, DirectMlLongExecutionProviderName, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDirectMlDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
+        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
+        IsDirectMlExecutionProviderName(epName);
+
+    private static bool IsDnnlExecutionProviderName(string epName) =>
+        string.Equals(epName, DnnlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(epName, DnnlUpperExecutionProviderName, StringComparison.OrdinalIgnoreCase);
+
+    // Classic TensorRT EP uses trt_profile_*. NvTensorRTRTX rejects those keys.
+    // Same shape grammar: "input:dim1xdim2x...,input2:..."
+    // https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html
+    private static readonly IReadOnlyDictionary<string, string> ClassicTrtProfileKeysToNvRtx =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["trt_profile_min_shapes"] = "nv_profile_min_shapes",
+            ["trt_profile_max_shapes"] = "nv_profile_max_shapes",
+            ["trt_profile_opt_shapes"] = "nv_profile_opt_shapes",
+        };
+
+    private static string BuildSessionOptionsFingerprint(
+        ExecutionProviderKind selectedProviderKind,
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions,
+        bool enableCudaGraph = false)
+    {
+        if (selectedProviderKind is ExecutionProviderKind.TensorRTRtx)
+        {
+            var combinedOptions = new Dictionary<string, string>(
+                BuildTensorRtRtxOptions(additionalTrtOptions, enableCudaGraph), StringComparer.Ordinal);
+
+            return SessionPoolKey.HashOptions(combinedOptions);
+        }
+
+        if (selectedProviderKind is ExecutionProviderKind.TensorRt)
+        {
+            var combinedOptions = new Dictionary<string, string>(
+                BuildTensorRtOptions(additionalTrtOptions), StringComparer.Ordinal);
+
+            return SessionPoolKey.HashOptions(combinedOptions);
+        }
+
+        if (ShouldIncludePolicyInFingerprint(devicePolicy, selectedProviderKind))
+        {
+            return SessionPoolKey.HashOptions(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["windows_ml_device_policy"] = WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)
+            });
+        }
+
+        return SessionPoolKey.HashOptions(null);
+    }
+
+    private static bool ShouldIncludePolicyInFingerprint(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        ExecutionProviderKind selectedProviderKind) =>
+        ShouldUseCatalogDevicePolicy(devicePolicy, selectedProviderKind);
+
+    private static string? MergeFallbackReasons(string? encoder, string? decoder) =>
+        (encoder, decoder) switch
+        {
+            (null, null) => null,
+            ({ } e, null) => e,
+            (null, { } d) => d,
+            ({ } e, { } d) when e == d => e,
+            ({ } e, { } d) => $"Encoder: {e} Decoder: {d}"
+        };
+
+    private static string? FormatBootstrapDetail(
+        string? bootstrapDetail,
+        string? sessionOptionsFallbackReason)
+    {
+        if (string.IsNullOrWhiteSpace(sessionOptionsFallbackReason))
+        {
+            return bootstrapDetail;
+        }
+
+        return string.IsNullOrWhiteSpace(bootstrapDetail)
+            ? $"Session options fallback reason: {sessionOptionsFallbackReason}"
+            : $"{bootstrapDetail} Session options fallback reason: {sessionOptionsFallbackReason}";
+    }
+
+    private static SessionOptions CreateBaseSessionOptions(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        out bool devicePolicyApplied,
+        bool tensorRtRtx = false, string? logId = null)
+    {
+        SessionOptions options = new()
+        {
+            // ORT_ENABLE_ALL re-fuses LayerNormalization+Skip / Bias+Gelu into com.microsoft
+            // contrib ops (SkipLayerNormalization, BiasGelu) at graph resolve. TensorRT-RTX
+            // cannot import those, so the TRT session gets a parse-error storm and falls back.
+            // BASIC keeps standard Add / LayerNormalization / Gelu nodes the TRT-RTX parser accepts.
+            GraphOptimizationLevel = tensorRtRtx
+                ? GraphOptimizationLevel.ORT_ENABLE_BASIC
+                : GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            LogId = logId ?? string.Empty,
+            // MS "Efficiency tips for Windows ML inference" memory lever: opt-in arena disable
+            // for memory-footprint-sensitive deployments (throughput tradeoff). Default: arena on.
+            EnableCpuMemArena = !Common.SessionEfficiencyEnvironment.DisableCpuMemArena
+        };
+
+        devicePolicyApplied = false;
+#if WINDOWS
+        devicePolicyApplied = WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded(options, devicePolicy);
+#endif
+        return options;
+    }
+
+    /// <summary>
+    /// Reports the truth about whether a requested extended Windows ML device policy
+    /// (<see cref="WindowsMlExecutionDevicePolicy.DefaultRender"/> /
+    /// <see cref="WindowsMlExecutionDevicePolicy.MinPower"/>) actually took effect on the
+    /// session. <see cref="WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded"/> silently skips
+    /// <c>SetEpSelectionPolicy</c> when the loaded ORT managed binding lacks the required enum
+    /// members, so callers must not report the policy as active without checking
+    /// <paramref name="devicePolicyApplied"/> — otherwise diagnostics/fingerprints would claim a
+    /// device-selection behavior that never actually happened.
+    /// </summary>
+    private static string? BuildDevicePolicyFallbackReason(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        bool devicePolicyApplied) =>
+        !devicePolicyApplied &&
+        devicePolicy is WindowsMlExecutionDevicePolicy.DefaultRender or WindowsMlExecutionDevicePolicy.MinPower
+            ? $"Requested Windows ML device policy '{WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)}' " +
+              "was not applied: the loaded ONNX Runtime managed binding does not expose the required " +
+              "extended ExecutionProviderDevicePolicy members (DEFAULT_RENDER/MIN_POWER); the session " +
+              "falls back to Explicit EP selection instead."
+            : null;
+
+    private static async Task<WindowsMlExecutionDevicePolicy> ResolveDevicePolicyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _devicePolicyProvider.GetPolicyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return WindowsMlExecutionDevicePolicy.Explicit;
+        }
+    }
+
+    private static bool IsCatalogGpuProvider(ExecutionProviderKind provider) =>
+        provider is ExecutionProviderKind.DirectMl
+            or ExecutionProviderKind.Migraphx;
+
+    private static bool IsNativeGpuProvider(ExecutionProviderKind provider) =>
+        !OperatingSystem.IsMacOS() && provider is (ExecutionProviderKind.Cuda or ExecutionProviderKind.TensorRt);
+
+    internal static bool ShouldUseCatalogDevicePolicy(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        ExecutionProviderKind provider) =>
+        OperatingSystem.IsWindows() &&
+        devicePolicy != WindowsMlExecutionDevicePolicy.Explicit &&
+        IsWindowsMlCatalogProvider(provider);
+
+    /// <summary>
+    /// WinML catalog EPs that can take ORT <c>SetEpSelectionPolicy</c> (device auto-select among
+    /// registered catalog devices). DirectML stays on the legacy explicit-append path; native
+    /// CUDA/TensorRT/TensorRT RTX/DNNL/CoreML are not Windows ML catalog routes.
+    /// </summary>
+    private static bool IsWindowsMlCatalogProvider(ExecutionProviderKind provider) =>
+        provider is ExecutionProviderKind.Migraphx
+            or ExecutionProviderKind.Qnn
+            or ExecutionProviderKind.VitisAi
+            or ExecutionProviderKind.OpenVinoCatalog;
+
+    private sealed class NullWindowsMlEpDevicePolicyProvider : IWindowsMlEpDevicePolicyProvider
+    {
+        internal static readonly NullWindowsMlEpDevicePolicyProvider Instance = new();
+
+        public Task<WindowsMlExecutionDevicePolicy> GetPolicyAsync(CancellationToken cancellationToken = default) =>
+            cancellationToken.IsCancellationRequested
+                ? Task.FromCanceled<WindowsMlExecutionDevicePolicy>(cancellationToken)
+                : Task.FromResult(WindowsMlExecutionDevicePolicy.Explicit);
+
+        public void InvalidateCache()
+        {
+        }
+    }
+
+    internal static IExecutionProviderBootstrapper GetPlatformBootstrapper()
+    {
+#if WINDOWS
+        return new ExecutionProviders.Windows.WindowsExecutionProviderBootstrapper();
+#else
+        if (OperatingSystem.IsMacOSVersionAtLeast(10, 15))
+        {
+            return new ExecutionProviders.Mac.MacExecutionProviderBootstrapper();
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return new ExecutionProviders.Linux.LinuxExecutionProviderBootstrapper(
+                NullOpenVinoAvailabilityProvider.Instance);
+        }
+
+        return new ExecutionProviders.PortableExecutionProviderBootstrapper(
+            TensorRtRtx.TensorRtRtxProviderBootstrapFactory.CreateWithDefaultInstallPath(
+                ResolveProductDataRoot()));
+#endif
+    }
+
+    /// <summary>
+    /// Product data root that owns runtime component installs (the TensorRT-RTX plugin, and
+    /// anything else installed beside it). Honors the same relocation variables as the engine
+    /// cache; a host that moved its data root must keep resolving installed providers, or the
+    /// plugin becomes invisible and every TensorRT stage silently falls back to another EP.
+    /// </summary>
+    internal static string ResolveProductDataRoot()
+    {
+        string? dataRoot = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(dataRoot))
+        {
+            dataRoot = Environment.GetEnvironmentVariable(CacheRootEnvironmentVariable);
+        }
+
+        if (!string.IsNullOrWhiteSpace(dataRoot))
+        {
+            return NormalizePath(dataRoot);
+        }
+
+        string localAppDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppDataRoot))
+        {
+            localAppDataRoot = AppContext.BaseDirectory;
+        }
+
+        return Path.Join(localAppDataRoot, "Trackdub");
+    }
+
+    private sealed class NullOpenVinoAvailabilityProvider : IOpenVinoAvailabilityProvider
+    {
+        public static readonly NullOpenVinoAvailabilityProvider Instance = new();
+        public bool IsAvailable => false;
+        public bool UseOpenVinoCpuProxy => false;
+    }
+
+    internal sealed record SingleSessionLease(
+        InferenceSession Session,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        internal SessionLease? PoolLease { get; init; }
+
+        /// <summary>Set when the lease came from the shared pool — used for residency pinning.</summary>
+        internal SessionPoolKey? ResolvedPoolKey { get; init; }
+
+        public void Dispose()
+        {
+            if (PoolLease is not null)
+            {
+                PoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(Session);
+            }
+        }
+    }
+
+    internal sealed record Qwen3AsrSessionLease(
+        InferenceSession EncoderSession,
+        InferenceSession DecoderInitSession,
+        InferenceSession DecoderStepSession,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        internal SessionLeaseBundle? PoolBundle { get; init; }
+        internal SessionLease? EncoderPoolLease { get; init; }
+        internal SessionLease? DecoderInitPoolLease { get; init; }
+        internal SessionLease? DecoderStepPoolLease { get; init; }
+
+        public void Dispose()
+        {
+            if (PoolBundle is not null)
+            {
+                PoolBundle.Dispose();
+                return;
+            }
+
+            if (EncoderPoolLease is not null)
+            {
+                EncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
+            }
+
+            if (DecoderInitPoolLease is not null)
+            {
+                DecoderInitPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(DecoderInitSession);
+            }
+
+            if (DecoderStepPoolLease is not null)
+            {
+                DecoderStepPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(DecoderStepSession);
+            }
+        }
+    }
+
+    internal sealed record LatentSyncSessionLease(
+        InferenceSession UNetSession,
+        InferenceSession VaeEncoderSession,
+        InferenceSession VaeDecoderSession,
+        InferenceSession WhisperEncoderSession,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        internal SessionLeaseBundle? PoolBundle { get; init; }
+        internal SessionLease? UNetPoolLease { get; init; }
+        internal SessionLease? VaeEncoderPoolLease { get; init; }
+        internal SessionLease? VaeDecoderPoolLease { get; init; }
+        internal SessionLease? WhisperEncoderPoolLease { get; init; }
+
+        public void Dispose()
+        {
+            if (PoolBundle is not null)
+            {
+                PoolBundle.Dispose();
+                return;
+            }
+
+            if (UNetPoolLease is not null)
+            {
+                UNetPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(UNetSession);
+            }
+
+            if (VaeEncoderPoolLease is not null)
+            {
+                VaeEncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(VaeEncoderSession);
+            }
+
+            if (VaeDecoderPoolLease is not null)
+            {
+                VaeDecoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(VaeDecoderSession);
+            }
+
+            if (WhisperEncoderPoolLease is not null)
+            {
+                WhisperEncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(WhisperEncoderSession);
+            }
+        }
+    }
+
+    internal sealed record NemotronAsrSessionLease(
+        InferenceSession EncoderSession,
+        InferenceSession DecoderJointSession,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        internal SessionLease? EncoderPoolLease { get; init; }
+        internal SessionLease? DecoderJointPoolLease { get; init; }
+
+        public void Dispose()
+        {
+            if (EncoderPoolLease is not null)
+            {
+                EncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
+            }
+
+            if (DecoderJointPoolLease is not null)
+            {
+                DecoderJointPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(DecoderJointSession);
+            }
+        }
+    }
+
+    internal sealed record WhisperSessionLease(
+        InferenceSession EncoderSession,
+        InferenceSession DecoderSession,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        internal SessionLease? EncoderPoolLease { get; init; }
+        internal SessionLease? DecoderPoolLease { get; init; }
+
+        public void Dispose()
+        {
+            if (EncoderPoolLease is not null)
+            {
+                EncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
+            }
+
+            if (DecoderPoolLease is not null)
+            {
+                DecoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(DecoderSession);
+            }
+        }
+    }
+
+    internal sealed record OpusSessionLease(
+        InferenceSession EncoderSession,
+        InferenceSession DecoderSession,
+        string RequestedProvider,
+        string SelectedProvider,
+        string? BootstrapDetail) : IDisposable
+    {
+        /// <summary>Provider the sessions actually run on, after any downgrade.</summary>
+        internal ExecutionProviderKind SelectedProviderKind { get; init; } = ExecutionProviderKind.Cpu;
+
+        internal SessionLease? EncoderPoolLease { get; init; }
+        internal SessionLease? DecoderPoolLease { get; init; }
+
+        public void Dispose()
+        {
+            if (EncoderPoolLease is not null)
+            {
+                EncoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
+            }
+
+            if (DecoderPoolLease is not null)
+            {
+                DecoderPoolLease.Dispose();
+            }
+            else
+            {
+                TensorRtRtxTeardownGuard.DisposeSafely(DecoderSession);
+            }
+        }
+    }
+}
+
+internal static partial class OnnxExecutionSessionFactory
+{
     /// <summary>
     /// Pre-warms a pooled single session and immediately releases it, leaving the warm
     /// session in <see cref="InferenceSessionPool"/> for a later stage run. Use at startup
@@ -875,11 +1709,11 @@ internal static class OnnxExecutionSessionFactory
             .ConfigureAwait(false);
         WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
             .ConfigureAwait(false);
-        SessionOptionsSelection optionsSelection = CreateSessionOptions(
+        SessionOptionsSelection optionsSelection = CreateSessionOptions(new SessionOptionsRequest(
             ResolveSessionOptionsProvider(provider, bootstrapResult.SelectedProvider),
             devicePolicy,
             additionalTrtOptions,
-            trtModelPath: modelPath);
+            TrtModelPath: modelPath));
 
         // Options ownership may transfer to a replacement SessionOptionsSelection when TRT init
         // falls back; keep a movable dispose target managed by a `using` scope.
@@ -1226,20 +2060,20 @@ internal static class OnnxExecutionSessionFactory
             .ConfigureAwait(false);
         WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
             .ConfigureAwait(false);
-        SessionOptionsSelection encoderOptionsSelection = CreateSessionOptions(
+        SessionOptionsSelection encoderOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(
             encoderProvider == bootstrapProvider
                 ? ResolveSessionOptionsProvider(encoderProvider, bootstrapResult.SelectedProvider)
                 : encoderProvider,
             devicePolicy,
             additionalTrtEncoderOptions,
-            trtModelPath: encoderModelPath);
-        SessionOptionsSelection decoderOptionsSelection = CreateSessionOptions(
+            TrtModelPath: encoderModelPath));
+        SessionOptionsSelection decoderOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(
             decoderProvider == bootstrapProvider
                 ? ResolveSessionOptionsProvider(decoderProvider, bootstrapResult.SelectedProvider)
                 : decoderProvider,
             devicePolicy,
             additionalTrtDecoderOptions,
-            trtModelPath: decoderInitModelPath);
+            TrtModelPath: decoderInitModelPath));
 
         using SessionOptions encoderOptions = encoderOptionsSelection.Options;
         using SessionOptions decoderInitOptions = decoderOptionsSelection.Options;
@@ -1273,13 +2107,25 @@ internal static class OnnxExecutionSessionFactory
             [
                 new SessionLeaseRequest(
                     encoderKey,
-                    ct => Task.FromResult(CreateSession(encoderModelPath, encoderOptionsSelection.Options, sessionFactory, ct, encoderOptionsSelection.SelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(encoderModelPath, encoderOptionsSelection.Options, sessionFactory, ct, encoderOptionsSelection.SelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        encoderOptionsSelection.SelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, encoderOptionsSelection.SelectedProvider))),
                 new SessionLeaseRequest(
                     decoderInitKey,
-                    ct => Task.FromResult(CreateSession(decoderInitModelPath, decoderInitOptions, sessionFactory, ct, decoderOptionsSelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(decoderInitModelPath, decoderInitOptions, sessionFactory, ct, decoderOptionsSelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        decoderOptionsSelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, decoderOptionsSelectedProvider))),
                 new SessionLeaseRequest(
                     decoderStepKey,
-                    ct => Task.FromResult(CreateSession(decoderStepModelPath, decoderStepOptions, sessionFactory, ct, decoderOptionsSelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(decoderStepModelPath, decoderStepOptions, sessionFactory, ct, decoderOptionsSelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        decoderOptionsSelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, decoderOptionsSelectedProvider))),
             ],
             cancellationToken).ConfigureAwait(false);
 
@@ -1376,10 +2222,10 @@ internal static class OnnxExecutionSessionFactory
             .ConfigureAwait(false);
 
         ExecutionProviderKind sessionProvider = ResolveSessionOptionsProvider(provider, bootstrapResult.SelectedProvider);
-        SessionOptionsSelection unetOptionsSelection = CreateSessionOptions(sessionProvider, devicePolicy, null, trtModelPath: unetModelPath);
-        SessionOptionsSelection vaeEncOptionsSelection = CreateSessionOptions(sessionProvider, devicePolicy, null, trtModelPath: vaeEncoderModelPath);
-        SessionOptionsSelection vaeDecOptionsSelection = CreateSessionOptions(sessionProvider, devicePolicy, null, trtModelPath: vaeDecoderModelPath);
-        SessionOptionsSelection whisperOptionsSelection = CreateSessionOptions(sessionProvider, devicePolicy, null, trtModelPath: whisperEncoderModelPath);
+        SessionOptionsSelection unetOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, TrtModelPath: unetModelPath));
+        SessionOptionsSelection vaeEncOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, TrtModelPath: vaeEncoderModelPath));
+        SessionOptionsSelection vaeDecOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, TrtModelPath: vaeDecoderModelPath));
+        SessionOptionsSelection whisperOptionsSelection = CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, TrtModelPath: whisperEncoderModelPath));
         using SessionOptions unetOptions = unetOptionsSelection.Options;
         using SessionOptions vaeEncOptions = vaeEncOptionsSelection.Options;
         using SessionOptions vaeDecOptions = vaeDecOptionsSelection.Options;
@@ -1424,16 +2270,32 @@ internal static class OnnxExecutionSessionFactory
             [
                 new SessionLeaseRequest(
                     unetKey,
-                    ct => Task.FromResult(CreateSession(unetModelPath, unetOptions, sessionFactory, ct, unetSelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(unetModelPath, unetOptions, sessionFactory, ct, unetSelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        unetOptionsSelection.SelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, unetOptionsSelection.SelectedProvider))),
                 new SessionLeaseRequest(
                     vaeEncKey,
-                    ct => Task.FromResult(CreateSession(vaeEncoderModelPath, vaeEncOptions, sessionFactory, ct, vaeEncOptionsSelection.SelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(vaeEncoderModelPath, vaeEncOptions, sessionFactory, ct, vaeEncOptionsSelection.SelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        vaeEncOptionsSelection.SelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, vaeEncOptionsSelection.SelectedProvider))),
                 new SessionLeaseRequest(
                     vaeDecKey,
-                    ct => Task.FromResult(CreateSession(vaeDecoderModelPath, vaeDecOptions, sessionFactory, ct, vaeDecOptionsSelection.SelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(vaeDecoderModelPath, vaeDecOptions, sessionFactory, ct, vaeDecOptionsSelection.SelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        vaeDecOptionsSelection.SelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, vaeDecOptionsSelection.SelectedProvider))),
                 new SessionLeaseRequest(
                     whisperKey,
-                    ct => Task.FromResult(CreateSession(whisperEncoderModelPath, whisperOptions, sessionFactory, ct, whisperSelectedProvider, devicePolicy))),
+                    ct => Task.FromResult(CreateSession(whisperEncoderModelPath, whisperOptions, sessionFactory, ct, whisperSelectedProvider, devicePolicy)),
+                    session => ResolveEffectiveProviderKindFromSession(
+                        session,
+                        whisperOptionsSelection.SelectedProvider,
+                        ShouldUseCatalogDevicePolicy(devicePolicy, whisperOptionsSelection.SelectedProvider))),
             ],
             cancellationToken).ConfigureAwait(false);
 
@@ -1619,1577 +2481,5 @@ internal static class OnnxExecutionSessionFactory
             DecoderPoolLease = pair.DecoderLease
         };
     }
-
-    internal sealed record SessionOptionsFactoryBundle(
-        Func<SessionOptions> CreateOptions,
-        ExecutionProviderKind RequestedProvider,
-        ExecutionProviderKind SelectedProvider,
-        string BootstrapDetail);
-
-    internal static async Task<SessionOptionsFactoryBundle> CreateSessionOptionsFactoryAsync(
-        ExecutionProviderKind requestedProvider,
-        CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions = null)
-    {
-        var bootstrapResult = await BootstrapTrackedAsync(requestedProvider, allowDownloads: true, cancellationToken)
-            .ConfigureAwait(false);
-        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
-            .ConfigureAwait(false);
-        ExecutionProviderKind sessionProvider = ResolveSessionOptionsProvider(
-            requestedProvider,
-            bootstrapResult.SelectedProvider);
-        SessionOptionsSelection probeSelection = CreateSessionOptions(
-            sessionProvider,
-            devicePolicy,
-            additionalTrtOptions);
-        ExecutionProviderKind selectedProvider = probeSelection.SelectedProvider;
-        probeSelection.Options.Dispose();
-
-        return new SessionOptionsFactoryBundle(
-            () => CreateSessionOptions(sessionProvider, devicePolicy, additionalTrtOptions).Options,
-            requestedProvider,
-            selectedProvider,
-            FormatBootstrapDetail(bootstrapResult.Detail, probeSelection.FallbackReason) ?? string.Empty);
-    }
-
-    /// <summary>
-    /// Packaged DirectML is included with Windows ML. Catalog RegisterCertifiedAsync is not a
-    /// prerequisite for GetEpDevices/append, so a bootstrap CPU select must not skip the DML path.
-    /// Native CUDA on Windows still wins when bootstrap selected CUDA.
-    /// </summary>
-    internal static ExecutionProviderKind ResolveSessionOptionsProvider(
-        ExecutionProviderKind requestedProvider,
-        ExecutionProviderKind bootstrapSelectedProvider)
-    {
-        if (requestedProvider is ExecutionProviderKind.DirectMl)
-        {
-            return OperatingSystem.IsWindows()
-                ? ExecutionProviderKind.DirectMl
-                : bootstrapSelectedProvider;
-        }
-
-        if (requestedProvider is ExecutionProviderKind.Cuda
-            && bootstrapSelectedProvider is ExecutionProviderKind.Cpu
-            && OperatingSystem.IsWindows())
-        {
-            return ExecutionProviderKind.DirectMl;
-        }
-
-        return bootstrapSelectedProvider;
-    }
-
-    internal static string FormatProviderLabel(ExecutionProviderKind provider) =>
-        provider switch
-        {
-            ExecutionProviderKind.Cpu => "cpu",
-            ExecutionProviderKind.DirectMl => "dml",
-            ExecutionProviderKind.TensorRTRtx => "tensorrt-rtx",
-            ExecutionProviderKind.OpenVino => "openvino",
-            ExecutionProviderKind.CoreMl => "coreml",
-            ExecutionProviderKind.Cuda => "cuda",
-            ExecutionProviderKind.TensorRt => "tensorrt",
-            ExecutionProviderKind.Migraphx => "migraphx",
-            ExecutionProviderKind.Dnnl => "dnnl",
-            ExecutionProviderKind.Qnn => "qnn",
-            ExecutionProviderKind.OpenVinoCatalog => "openvino-catalog",
-            ExecutionProviderKind.VitisAi => "vitisai",
-            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported execution provider kind.")
-        };
-
-    private static SessionPoolKey WithOpenVinoResidency(SessionPoolKey key) =>
-        key.Provider is ExecutionProviderKind.OpenVino
-            ? key with { UseOpenVinoCpuProxy = _openVinoAvailability.UseOpenVinoCpuProxy }
-            : key;
-
-    private static SessionOptionsSelection CreateSessionOptions(
-        ExecutionProviderKind provider,
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
-        bool enableCudaGraph = false, string? logId = null, string? trtModelPath = null)
-    {
-        bool useCatalogDevicePolicy = ShouldUseCatalogDevicePolicy(devicePolicy, provider);
-        SessionOptions options = CreateBaseSessionOptions(
-            useCatalogDevicePolicy ? devicePolicy : WindowsMlExecutionDevicePolicy.Explicit,
-            out bool devicePolicyApplied,
-            tensorRtRtx: provider is ExecutionProviderKind.TensorRTRtx, logId: logId);
-
-        if (provider is ExecutionProviderKind.Cpu)
-        {
-            return new SessionOptionsSelection(options, ExecutionProviderKind.Cpu);
-        }
-
-        if (useCatalogDevicePolicy && IsCatalogGpuProvider(provider))
-        {
-            return new SessionOptionsSelection(
-                options,
-                provider,
-                BuildDevicePolicyFallbackReason(devicePolicy, devicePolicyApplied));
-        }
-
-        return AppendProviderSpecificSelection(options, provider, additionalTrtOptions, enableCudaGraph, trtModelPath)
-            ?? throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported execution provider kind.");
-    }
-
-    private static SessionOptionsSelection? AppendProviderSpecificSelection(
-        SessionOptions options,
-        ExecutionProviderKind provider,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false, string? trtModelPath = null)
-    {
-        return provider switch
-        {
-            ExecutionProviderKind.DirectMl => CreateDirectMlSelection(options),
-            ExecutionProviderKind.Dnnl => CreateDnnlSelection(options),
-            ExecutionProviderKind.TensorRTRtx => CreateTensorRtRtxSelection(options, additionalTrtOptions, enableCudaGraph),
-            ExecutionProviderKind.Migraphx => CreateMigraphxSelection(options),
-            ExecutionProviderKind.CoreMl => CreateCoreMlSelection(options),
-            ExecutionProviderKind.OpenVinoCatalog => CreateOpenVinoCatalogSelection(options),
-            ExecutionProviderKind.Qnn => CreateQnnSelection(options),
-            ExecutionProviderKind.VitisAi => CreateVitisAiSelection(options),
-            ExecutionProviderKind.Cuda when !OperatingSystem.IsMacOS() => CreateCudaSelection(options),
-            ExecutionProviderKind.TensorRt when !OperatingSystem.IsMacOS() => CreateTensorRtSelection(options, additionalTrtOptions, trtModelPath),
-#if LINML
-            ExecutionProviderKind.OpenVino when OperatingSystem.IsLinux() => CreateLinuxOpenVinoSelection(options),
-#endif
-            _ => null,
-        };
-    }
-
-    private static SessionOptionsSelection CreateDirectMlSelection(SessionOptions options)
-    {
-        if (!TryAppendDirectMlProvider(options, out string? catalogFailure) &&
-            !TryAppendDirectMlProviderDirect(options, out string? directFailure))
-        {
-            return new SessionOptionsSelection(
-                options,
-                ExecutionProviderKind.Cpu,
-                "Requested dml but DirectML append failed; CPU fallback activated. "
-                + $"catalog: {catalogFailure ?? "n/a"}; direct: {directFailure ?? "n/a"}");
-        }
-
-        return new SessionOptionsSelection(options, ExecutionProviderKind.DirectMl);
-    }
-
-    private static SessionOptionsSelection CreateDnnlSelection(SessionOptions options)
-    {
-        ExecutionProviderKind selectedProvider = DnnlSessionOptionsExtensions.AppendDnnlOrFallback(
-            options,
-            out string? failureReason);
-        return selectedProvider is ExecutionProviderKind.Dnnl
-            ? new SessionOptionsSelection(options, selectedProvider)
-            : new SessionOptionsSelection(
-                options,
-                ExecutionProviderKind.Cpu,
-                $"Requested dnnl but AppendExecutionProvider_Dnnl failed: {failureReason ?? "unknown failure"}");
-    }
-
-    private static SessionOptionsSelection CreateTensorRtRtxSelection(
-        SessionOptions options,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
-    {
-        ExecutionProviderKind selectedProvider =
-            AppendTensorRtRtxOrFallbackProvider(options, additionalTrtOptions, enableCudaGraph);
-        if (selectedProvider is ExecutionProviderKind.TensorRTRtx)
-        {
-            return new SessionOptionsSelection(options, selectedProvider);
-        }
-
-        string fallbackLabel = FormatProviderLabel(selectedProvider);
-        return new SessionOptionsSelection(
-            options,
-            selectedProvider,
-            $"Requested tensorrt-rtx but TensorRT RTX EP device was unavailable; fell back to {fallbackLabel}.");
-    }
-
-    private static SessionOptionsSelection CreateMigraphxSelection(SessionOptions options)
-    {
-        ExecutionProviderKind selectedProvider = MigraphxSessionOptionsExtensions.AppendMigraphxOrFallback(options);
-        return new SessionOptionsSelection(options, selectedProvider);
-    }
-
-    private static SessionOptionsSelection CreateCoreMlSelection(SessionOptions options)
-    {
-        if (!OperatingSystem.IsMacOS())
-            throw new InvalidOperationException("CoreML EP is only available on macOS.");
-        options.AppendExecutionProvider_CoreML(GetCoreMlFlags());
-        return new SessionOptionsSelection(options, ExecutionProviderKind.CoreMl);
-    }
-
-    private static SessionOptionsSelection CreateCudaSelection(SessionOptions options)
-    {
-        options.AppendExecutionProvider_CUDA(deviceId: 0);
-        return new SessionOptionsSelection(options, ExecutionProviderKind.Cuda);
-    }
-
-    private static SessionOptionsSelection CreateTensorRtSelection(
-        SessionOptions options,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string? trtModelPath = null)
-    {
-        ExecutionProviderKind selectedProvider = AppendTensorRtOrFallbackProvider(options, additionalTrtOptions, trtModelPath);
-        if (selectedProvider is ExecutionProviderKind.TensorRt)
-        {
-            return new SessionOptionsSelection(options, selectedProvider);
-        }
-
-        string fallbackLabel = FormatProviderLabel(selectedProvider);
-        return new SessionOptionsSelection(
-            options,
-            selectedProvider,
-            $"Requested tensorrt but classic TensorRT EP device was unavailable; fell back to {fallbackLabel}.");
-    }
-
-#if LINML
-    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
-    private static SessionOptionsSelection CreateLinuxOpenVinoSelection(SessionOptions options)
-    {
-        if (!ExecutionProviders.LinMl.LinMlOpenVinoCatalog.Default.TryAppend(
-                options, cpuOnly: _openVinoAvailability.UseOpenVinoCpuProxy, out string? failureReason))
-        {
-            return new SessionOptionsSelection(
-                options,
-                ExecutionProviderKind.Cpu,
-                $"Requested openvino but the OpenVINO plugin EP append failed; CPU fallback activated. {failureReason}");
-        }
-
-        return new SessionOptionsSelection(options, ExecutionProviderKind.OpenVino);
-    }
-#endif
-
-    private static SessionOptionsSelection CreateOpenVinoCatalogSelection(SessionOptions options)
-    {
-        ExecutionProviderKind selectedProvider =
-            WinMlCatalog.WinMlCatalogSessionOptionsExtensions.AppendOpenVinoCatalogOrFallback(options);
-        return new SessionOptionsSelection(options, selectedProvider);
-    }
-
-    private static SessionOptionsSelection CreateQnnSelection(SessionOptions options)
-    {
-        ExecutionProviderKind selectedProvider =
-            WinMlCatalog.WinMlCatalogSessionOptionsExtensions.AppendQnnOrFallback(options);
-        return new SessionOptionsSelection(options, selectedProvider);
-    }
-
-    private static SessionOptionsSelection CreateVitisAiSelection(SessionOptions options)
-    {
-        ExecutionProviderKind selectedProvider =
-            WinMlCatalog.WinMlCatalogSessionOptionsExtensions.AppendVitisAiOrFallback(options);
-        return new SessionOptionsSelection(options, selectedProvider);
-    }
-
-    private static CoreMLFlags GetCoreMlFlags()
-    {
-        const CoreMLFlags appleSiliconFlags =
-            CoreMLFlags.COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE |
-            CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM;
-
-        bool isAppleSilicon = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-            && OperatingSystem.IsMacOS();
-
-        return isAppleSilicon
-            ? appleSiliconFlags
-            : CoreMLFlags.COREML_FLAG_USE_NONE;
-    }
-
-    private static ExecutionProviderKind ResolveSharedSelectedProvider(
-        ExecutionProviderKind requestedProvider,
-        ExecutionProviderKind firstSessionProvider,
-        ExecutionProviderKind secondSessionProvider)
-    {
-        if (firstSessionProvider == secondSessionProvider)
-        {
-            return firstSessionProvider;
-        }
-
-        return requestedProvider is ExecutionProviderKind.TensorRTRtx
-            ? ExecutionProviderKind.Cpu
-            : requestedProvider;
-    }
-
-    internal static ExecutionProviderKind ResolveEffectiveProviderKindFromSession(
-        InferenceSession session,
-        ExecutionProviderKind optionsSelectedProvider,
-        bool usedCatalogDevicePolicy)
-    {
-        // DNNL only claims a subset of ops; ORT can silently place an unsupported graph on
-        // CPU even after AppendExecutionProvider_Dnnl succeeds. Verify actual placement here
-        // rather than trusting the append-time selection, mirroring DnnlReadinessProbe's
-        // smoke-session check.
-        if (optionsSelectedProvider is ExecutionProviderKind.Dnnl)
-        {
-            return ResolveDnnlEffectiveProviderFromSession(session);
-        }
-
-        // Native ORT CUDA / classic TensorRT are not WinML catalog EP names. Probing
-        // GetEpDeviceForInputs through the catalog mapper would treat unmapped names as CPU.
-        if (optionsSelectedProvider is ExecutionProviderKind.Cuda or ExecutionProviderKind.TensorRt)
-        {
-            return optionsSelectedProvider;
-        }
-
-        // Linux OpenVINO is the same OpenVINOExecutionProvider plugin the Windows ML catalog
-        // registers, so the catalog mapper reports it as OpenVinoCatalog.
-        if (optionsSelectedProvider is ExecutionProviderKind.OpenVino)
-        {
-            return ResolveCatalogEffectiveProviderFromSession(session) is ExecutionProviderKind.OpenVinoCatalog
-                ? ExecutionProviderKind.OpenVino
-                : ExecutionProviderKind.Cpu;
-        }
-
-        // Always probe GetEpDeviceForInputs for GPU / catalog routes so TRT sessions that
-        // assigned zero nodes (or fell through) report DirectML/CPU honestly.
-        if (usedCatalogDevicePolicy || ShouldProbeEffectiveEpDevices(optionsSelectedProvider))
-        {
-            return ResolveCatalogEffectiveProviderFromSession(session);
-        }
-
-        return optionsSelectedProvider;
-    }
-
-    private static bool ShouldProbeEffectiveEpDevices(ExecutionProviderKind optionsSelectedProvider) =>
-        optionsSelectedProvider is ExecutionProviderKind.TensorRTRtx
-            or ExecutionProviderKind.DirectMl
-            or ExecutionProviderKind.Migraphx
-            or ExecutionProviderKind.Qnn
-            or ExecutionProviderKind.OpenVinoCatalog
-            or ExecutionProviderKind.VitisAi;
-
-    private static ExecutionProviderKind ResolveDnnlEffectiveProviderFromSession(InferenceSession session)
-    {
-        try
-        {
-            IReadOnlyList<OrtEpDevice> devices = session.GetEpDeviceForInputs();
-            return devices.Any(device => DnnlOrtProbe.IsDnnlExecutionProviderName(device.EpName))
-                ? ExecutionProviderKind.Dnnl
-                : ExecutionProviderKind.Cpu;
-        }
-        catch (OnnxRuntimeException)
-        {
-            return ExecutionProviderKind.Cpu;
-        }
-    }
-
-    internal static ExecutionProviderKind ResolveCatalogEffectiveProviderFromSession(InferenceSession session)
-    {
-        IReadOnlyList<OrtEpDevice> devices;
-        try
-        {
-            devices = session.GetEpDeviceForInputs();
-        }
-        catch (OnnxRuntimeException)
-        {
-            return ExecutionProviderKind.Cpu;
-        }
-
-        if (devices.Count == 0)
-        {
-            return ExecutionProviderKind.Cpu;
-        }
-
-        ExecutionProviderKind? bestProvider = null;
-        int bestRank = int.MaxValue;
-        foreach (OrtEpDevice device in devices)
-        {
-            if (!TryMapCatalogEpNameToExecutionProviderKind(device.EpName, out ExecutionProviderKind mappedProvider))
-            {
-                ReportUnmappedCatalogEpName(device.EpName, CatalogEpNameSource.GetEpDeviceForInputs, devices.Count);
-                continue;
-            }
-
-            int rank = GetCatalogEpHonestyRank(mappedProvider, device.HardwareDevice.Type);
-            if (rank >= bestRank)
-            {
-                continue;
-            }
-
-            bestRank = rank;
-            bestProvider = mappedProvider;
-        }
-
-        return bestProvider ?? ExecutionProviderKind.Cpu;
-    }
-
-    internal static bool TryMapCatalogEpNameToExecutionProviderKind(
-        string epName,
-        out ExecutionProviderKind executionProviderKind)
-    {
-        if (IsTensorRtRtxDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
-        {
-            executionProviderKind = ExecutionProviderKind.TensorRTRtx;
-            return true;
-        }
-
-        if (string.Equals(epName, MigraphxProviderConstants.OrtExecutionProviderName, StringComparison.OrdinalIgnoreCase))
-        {
-            executionProviderKind = ExecutionProviderKind.Migraphx;
-            return true;
-        }
-
-        if (IsDnnlExecutionProviderName(epName))
-        {
-            executionProviderKind = ExecutionProviderKind.Dnnl;
-            return true;
-        }
-
-        if (IsDirectMlDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
-        {
-            executionProviderKind = ExecutionProviderKind.DirectMl;
-            return true;
-        }
-
-        if (string.Equals(epName, OpenVinoCatalogProviderConstants.OrtExecutionProviderName, StringComparison.OrdinalIgnoreCase))
-        {
-            executionProviderKind = ExecutionProviderKind.OpenVinoCatalog;
-            return true;
-        }
-
-        if (string.Equals(epName, QnnProviderConstants.OrtExecutionProviderName, StringComparison.OrdinalIgnoreCase))
-        {
-            executionProviderKind = ExecutionProviderKind.Qnn;
-            return true;
-        }
-
-        if (string.Equals(epName, VitisAiProviderConstants.OrtExecutionProviderName, StringComparison.OrdinalIgnoreCase))
-        {
-            executionProviderKind = ExecutionProviderKind.VitisAi;
-            return true;
-        }
-
-        if (string.Equals(epName, "CPUExecutionProvider", StringComparison.OrdinalIgnoreCase))
-        {
-            executionProviderKind = ExecutionProviderKind.Cpu;
-            return true;
-        }
-
-        executionProviderKind = default;
-        return false;
-    }
-
-    internal enum CatalogEpNameSource
-    {
-        GetEpDeviceForInputs,
-        GetEpDevices
-    }
-
-    internal static void ReportUnmappedCatalogEpName(
-        string epName,
-        CatalogEpNameSource source,
-        int deviceCount)
-    {
-        if (string.IsNullOrWhiteSpace(epName))
-        {
-            return;
-        }
-
-        if (!WarnedUnmappedCatalogEpNames.TryAdd(epName, 0))
-        {
-            return;
-        }
-
-        _logger?.LogWarning(
-            "Unmapped Windows ML catalog EP name '{EpName}' encountered ({Source}, deviceCount={DeviceCount}); treating as CPU only for honesty resolution. Add a mapping in TryMapCatalogEpNameToExecutionProviderKind if this EP is supported. See docs/internal/windows-ml-phase-5-catalog-eps.md.",
-            epName,
-            source,
-            deviceCount);
-    }
-
-    private static int GetCatalogEpHonestyRank(ExecutionProviderKind provider, OrtHardwareDeviceType deviceType) =>
-        (provider, deviceType) switch
-        {
-            (ExecutionProviderKind.TensorRTRtx, _) => 0,
-            (ExecutionProviderKind.Migraphx, _) => 1,
-            (ExecutionProviderKind.Qnn, OrtHardwareDeviceType.NPU) => 2,
-            (ExecutionProviderKind.OpenVinoCatalog, OrtHardwareDeviceType.NPU) => 3,
-            (ExecutionProviderKind.VitisAi, _) => 4,
-            (ExecutionProviderKind.DirectMl, _) => 5,
-            (ExecutionProviderKind.Qnn, OrtHardwareDeviceType.GPU) => 6,
-            (ExecutionProviderKind.OpenVinoCatalog, OrtHardwareDeviceType.GPU) => 7,
-            (ExecutionProviderKind.OpenVinoCatalog, OrtHardwareDeviceType.CPU) => 8,
-            (ExecutionProviderKind.Dnnl, OrtHardwareDeviceType.CPU) => 9,
-            (ExecutionProviderKind.Cpu, _) => 10,
-            _ => 11
-        };
-
-    private static string? BuildEpFallbackReason(ExecutionProviderKind requestedProvider, ExecutionProviderKind effectiveProvider) =>
-        effectiveProvider != requestedProvider
-            ? $"Requested {FormatProviderLabel(requestedProvider)} but effective {FormatProviderLabel(effectiveProvider)}."
-            : null;
-
-    private static string? BuildSessionOptionsFallbackReason(
-        ExecutionProviderKind requestedProvider,
-        ExecutionProviderKind effectiveProvider,
-        SessionOptionsSelection sessionOptionsSelection) =>
-        MergeFallbackReasons(
-            sessionOptionsSelection.FallbackReason,
-            BuildEpFallbackReason(requestedProvider, effectiveProvider));
-
-    internal static bool TryAppendDirectMlProvider(SessionOptions options, out string? failureReason)
-    {
-        try
-        {
-            AppendDirectMlProvider(options);
-            failureReason = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
-        {
-            failureReason = ex.Message;
-            return false;
-        }
-    }
-
-    // Direct DML path — no WinML catalog/WinAppSDK bootstrap required.
-    // Used when the catalog path is unavailable (e.g., test processes, headless runners).
-    internal static bool TryAppendDirectMlProviderDirect(SessionOptions options, out string? failureReason)
-    {
-        try
-        {
-            options.AppendExecutionProvider_DML(deviceId: 0);
-            failureReason = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
-        {
-            failureReason = ex.Message;
-            return false;
-        }
-    }
-
-    // EP-context artifacts are keyed by the provider options their engines were built with, so
-    // session creation needs the options appended here, not a re-derivation from the model.
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SessionOptions, IReadOnlyDictionary<string, string>>
-        AppendedTensorRtRtxOptions = new();
-
-    internal static IReadOnlyDictionary<string, string>? TryGetAppendedTensorRtRtxOptions(SessionOptions options) =>
-        AppendedTensorRtRtxOptions.TryGetValue(options, out IReadOnlyDictionary<string, string>? trtOptions) ? trtOptions : null;
-
-    internal static ExecutionProviderKind AppendTensorRtRtxOrFallbackProvider(
-        SessionOptions options,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
-        bool enableCudaGraph = false)
-    {
-#if WINDOWS
-        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
-#endif
-        var devices = OrtEnv.Instance().GetEpDevices();
-        var trtDevice = devices.FirstOrDefault(d => IsTensorRtRtxDeviceCandidate(d.EpName, d.HardwareDevice.Type));
-        if (trtDevice != null)
-        {
-            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtRtxOptions(additionalTrtOptions, enableCudaGraph);
-            options.AppendExecutionProvider(OrtEnv.Instance(), new[] { trtDevice }, trtOptions);
-            AppendedTensorRtRtxOptions.AddOrUpdate(options, trtOptions);
-            return ExecutionProviderKind.TensorRTRtx;
-        }
-
-        if (_logger?.IsEnabled(LogLevel.Debug) == true)
-        {
-            foreach (OrtEpDevice device in devices.Where(d => d.HardwareDevice.Type is OrtHardwareDeviceType.GPU))
-            {
-                if (!TryMapCatalogEpNameToExecutionProviderKind(device.EpName, out _))
-                {
-                    ReportUnmappedCatalogEpName(device.EpName, CatalogEpNameSource.GetEpDevices, devices.Count);
-                }
-            }
-        }
-
-        // TensorRT RTX plugin device not available; fallback to DirectML if possible, else CPU is default.
-        return TryAppendDirectMlProvider(options, out _)
-            ? ExecutionProviderKind.DirectMl
-            : ExecutionProviderKind.Cpu;
-    }
-
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SessionOptions, IReadOnlyDictionary<string, string>>
-        AppendedTensorRtOptions = new();
-
-    internal static IReadOnlyDictionary<string, string>? TryGetAppendedTensorRtOptions(SessionOptions options) =>
-        AppendedTensorRtOptions.TryGetValue(options, out IReadOnlyDictionary<string, string>? trtOptions) ? trtOptions : null;
-
-    internal static bool IsTensorRtDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
-        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
-        string.Equals(epName, ClassicTensorRtExecutionProviderName, StringComparison.Ordinal);
-
-    /// <summary>
-    /// Appends the classic TensorRT EP with the persistent engine-cache options from
-    /// <see cref="BuildTensorRtOptions"/>. Prefers the generic EP-device append when the
-    /// classic TRT device is enumerated by <c>OrtEnv.GetEpDevices()</c>; otherwise uses the
-    /// built-in provider-options append (<see cref="OrtTensorRTProviderOptions"/>), because
-    /// the built-in EP is reported by <c>GetAvailableProviders()</c> but is NOT enumerated
-    /// as an EP device (verified live on ORT 1.31 in the GPU container: only the CPU device
-    /// is enumerated), so the generic branch is normally unreachable for classic TRT. There is
-    /// no TensorRT append without the cache options: when the provider-options append fails,
-    /// this falls back to DirectML/CPU so callers can report the fallback instead of claiming
-    /// a cached TensorRT session.
-    /// </summary>
-    internal static ExecutionProviderKind AppendTensorRtOrFallbackProvider(
-        SessionOptions options,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
-        string? trtModelPath = null)
-    {
-#if WINDOWS
-        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
-#endif
-        var devices = OrtEnv.Instance().GetEpDevices();
-        var trtDevice = devices.FirstOrDefault(d => IsTensorRtDeviceCandidate(d.EpName, d.HardwareDevice.Type));
-        if (trtDevice != null)
-        {
-            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtOptionsForModel(additionalTrtOptions, trtModelPath);
-            EnsureClassicTensorRtCacheDirectory(trtOptions);
-            options.AppendExecutionProvider(OrtEnv.Instance(), new[] { trtDevice }, trtOptions);
-            AppendedTensorRtOptions.AddOrUpdate(options, trtOptions);
-            return ExecutionProviderKind.TensorRt;
-        }
-
-        try
-        {
-            using OrtTensorRTProviderOptions providerOptions = new();
-            IReadOnlyDictionary<string, string> trtOptions = BuildTensorRtOptionsAfterProviderLoad(
-                additionalTrtOptions, trtModelPath,
-                () =>
-                {
-                    // Creating provider options only allocates an options struct. Append to
-                    // disposable options to load ORT's actual TensorRT dependency before hashing
-                    // it. No inference session is created and no model engines are compiled here.
-                    using SessionOptions preloadOptions = new();
-                    preloadOptions.AppendExecutionProvider_Tensorrt(providerOptions);
-                },
-                BuildClassicTensorRtEnvironmentFingerprint);
-            EnsureClassicTensorRtCacheDirectory(trtOptions);
-            providerOptions.UpdateOptions(new Dictionary<string, string>(trtOptions, StringComparer.Ordinal));
-            options.AppendExecutionProvider_Tensorrt(providerOptions);
-            AppendedTensorRtOptions.AddOrUpdate(options, trtOptions);
-            return ExecutionProviderKind.TensorRt;
-        }
-        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
-        {
-            // Built-in TensorRT EP provider-options append is not usable; report a fallback.
-        }
-
-        return TryAppendDirectMlProvider(options, out _)
-            ? ExecutionProviderKind.DirectMl
-            : ExecutionProviderKind.Cpu;
-    }
-
-    internal static OrtTensorRTProviderOptions BuildTensorRtProviderOptions(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string environmentFingerprint,
-        string? trtModelPath = null) =>
-        BuildTensorRtProviderOptions(BuildTensorRtOptions(additionalTrtOptions, environmentFingerprint, trtModelPath));
-
-    internal static OrtTensorRTProviderOptions BuildTensorRtProviderOptions(
-        IReadOnlyDictionary<string, string> trtOptions)
-    {
-        EnsureClassicTensorRtCacheDirectory(trtOptions);
-        var providerOptions = new OrtTensorRTProviderOptions();
-        providerOptions.UpdateOptions(new Dictionary<string, string>(trtOptions, StringComparer.Ordinal));
-        return providerOptions;
-    }
-
-    private static void EnsureClassicTensorRtCacheDirectory(IReadOnlyDictionary<string, string> trtOptions)
-    {
-        if (trtOptions.TryGetValue("trt_engine_cache_path", out string? cachePath) &&
-            !string.IsNullOrWhiteSpace(cachePath))
-        {
-            Directory.CreateDirectory(cachePath);
-        }
-    }
-
-    internal static void AppendDirectMlProvider(SessionOptions options)
-    {
-#if WINDOWS
-        WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
-#endif
-        var devices = OrtEnv.Instance().GetEpDevices();
-        OrtEpDevice? directMlDevice = devices.FirstOrDefault(d => IsDirectMlDeviceCandidate(d.EpName, d.HardwareDevice.Type))
-            ?? devices.FirstOrDefault(d => IsDirectMlExecutionProviderName(d.EpName));
-        if (directMlDevice is not null)
-        {
-            options.AppendExecutionProvider(
-                OrtEnv.Instance(),
-                new[] { directMlDevice },
-                new Dictionary<string, string>(StringComparer.Ordinal));
-            return;
-        }
-
-        try
-        {
-            options.AppendExecutionProvider(DirectMlExecutionProviderName);
-        }
-        catch (Exception ex) when (ex is OnnxRuntimeException or InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
-        {
-            throw new InvalidOperationException(
-                "DirectML catalog execution provider is not visible in OrtEnv.GetEpDevices().",
-                ex);
-        }
-    }
-
-    internal sealed record SessionOptionsSelection(
-        SessionOptions Options,
-        ExecutionProviderKind SelectedProvider,
-        string? FallbackReason = null);
-
-    internal static bool IsTensorRtRtxDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
-        // Only accept the single canonical standalone EP ABI plugin name.
-        // "NvTensorRtExecutionProvider" and "TensorrtExecutionProvider" are the old CUDA-based TensorRT EP —
-        // they must NOT be treated as TRT RTX candidates (different EP family, different options).
-        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
-        string.Equals(epName, TensorRtRtxExecutionProviderName, StringComparison.Ordinal);
-
-    private static bool IsDirectMlExecutionProviderName(string epName) =>
-        string.Equals(epName, DirectMlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(epName, DirectMlLongExecutionProviderName, StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsDirectMlDeviceCandidate(string epName, OrtHardwareDeviceType hardwareDeviceType) =>
-        hardwareDeviceType is OrtHardwareDeviceType.GPU &&
-        IsDirectMlExecutionProviderName(epName);
-
-    private static bool IsDnnlExecutionProviderName(string epName) =>
-        string.Equals(epName, DnnlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(epName, DnnlUpperExecutionProviderName, StringComparison.OrdinalIgnoreCase);
-
-    // Classic TensorRT EP uses trt_profile_*. NvTensorRTRTX rejects those keys.
-    // Same shape grammar: "input:dim1xdim2x...,input2:..."
-    // https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html
-    private static readonly IReadOnlyDictionary<string, string> ClassicTrtProfileKeysToNvRtx =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["trt_profile_min_shapes"] = "nv_profile_min_shapes",
-            ["trt_profile_max_shapes"] = "nv_profile_max_shapes",
-            ["trt_profile_opt_shapes"] = "nv_profile_opt_shapes",
-        };
-
-    /// <summary>
-    /// Builds TensorRT-RTX provider options.
-    /// </summary>
-    /// <param name="enableCudaGraph">
-    /// CUDA graph capture replays a fixed sequence of GPU kernel launches against fixed device
-    /// memory addresses (see ONNX Runtime's TensorRT-RTX EP docs: "Avoid enabling CUDA Graph ...
-    /// if input shapes or device bindings frequently change"). Defaults to <see langword="false"/>
-    /// because most call sites build fresh input tensors on every <c>Run()</c>, which violates that
-    /// precondition and can silently replay stale device buffers. Pass <see langword="true"/> only
-    /// for a session whose call site is verified to feed stable, IoBinding-backed device buffers
-    /// across iterations.
-    /// </param>
-    internal static IReadOnlyDictionary<string, string> BuildTensorRtRtxOptions(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
-    {
-        var trtOptions = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            // Cache compiled TRT-RTX kernels locally to speed up subsequent session loads.
-            ["nv_runtime_cache_path"] = ResolveTensorRtRtxRuntimeCachePath(),
-        };
-
-        // Always write the flag explicitly: the TensorRT RTX EP defaults enable_cuda_graph to
-        // true, so omitting it leaves capture on rather than off.
-        trtOptions["enable_cuda_graph"] = enableCudaGraph ? "1" : "0";
-
-        if (additionalTrtOptions is not null)
-        {
-            MergeAdditionalTensorRtRtxOptions(trtOptions, additionalTrtOptions);
-        }
-
-        TensorRtRtxDriverWorkarounds.Apply(
-            trtOptions,
-            EpContextLoadPathResolver.CurrentHardware.DriverVersion,
-            OperatingSystem.IsWindows());
-        return trtOptions;
-    }
-
-    private static void MergeAdditionalTensorRtRtxOptions(
-        Dictionary<string, string> trtOptions,
-        IReadOnlyDictionary<string, string> additionalTrtOptions)
-    {
-        foreach ((string key, string value) in additionalTrtOptions)
-        {
-            // EP ABI 0.5.0 removed device_id (the device comes from the selected OrtEpDevice);
-            // passing it through would fail session creation on an unknown option.
-            if (ClassicTrtProfileKeysToNvRtx.ContainsKey(key) ||
-                string.Equals(key, "device_id", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            trtOptions[key] = value;
-        }
-
-        foreach ((string classicKey, string nvKey) in ClassicTrtProfileKeysToNvRtx)
-        {
-            if (trtOptions.ContainsKey(nvKey))
-            {
-                continue;
-            }
-
-            if (additionalTrtOptions.TryGetValue(classicKey, out string? shapes))
-            {
-                trtOptions[nvKey] = shapes;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Builds classic TensorRT EP provider options. Caller profile options pass through, but cache
-    /// controls remain authoritative: the persistent cache is enabled only when the full hardware,
-    /// driver, TensorRT binary, and ORT identity is known; otherwise caching is explicitly disabled.
-    /// </summary>
-    internal static IReadOnlyDictionary<string, string> BuildTensorRtOptions(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions) =>
-        BuildTensorRtOptions(additionalTrtOptions, BuildClassicTensorRtEnvironmentFingerprint());
-
-    internal static IReadOnlyDictionary<string, string> BuildTensorRtOptionsForModel(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string? trtModelPath) =>
-        BuildTensorRtOptions(additionalTrtOptions, BuildClassicTensorRtEnvironmentFingerprint(), trtModelPath);
-
-    internal static IReadOnlyDictionary<string, string> BuildTensorRtOptionsAfterProviderLoad(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string? trtModelPath,
-        Action loadProvider,
-        Func<string> resolveEnvironmentFingerprint)
-    {
-        loadProvider();
-        return BuildTensorRtOptions(additionalTrtOptions, resolveEnvironmentFingerprint(), trtModelPath);
-    }
-
-    internal static IReadOnlyDictionary<string, string> BuildTensorRtOptions(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string environmentFingerprint) =>
-        BuildTensorRtOptions(additionalTrtOptions, environmentFingerprint, trtModelPath: null);
-
-    private static IReadOnlyDictionary<string, string> BuildTensorRtOptions(
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        string environmentFingerprint,
-        string? trtModelPath)
-    {
-        var trtOptions = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (additionalTrtOptions is not null)
-        {
-            foreach ((string key, string value) in additionalTrtOptions)
-            {
-                // Caller options are shared with the TensorRT-RTX builder. The classic EP rejects
-                // unknown keys, which makes UpdateOptions throw and drops the session to no-cache.
-                if (string.Equals(key, "enable_cuda_graph", StringComparison.Ordinal))
-                {
-                    trtOptions["trt_cuda_graph_enable"] = value;
-                }
-                else if (!key.StartsWith("nv_", StringComparison.Ordinal))
-                {
-                    trtOptions[key] = value;
-                }
-            }
-        }
-
-        if (!HasCompleteClassicTensorRtCacheIdentity(environmentFingerprint))
-        {
-            // A process-specific TRT identity prevents cross-process reuse only when TRT itself
-            // is unknown. Unknown GPU/driver/ORT identity is equally unsafe, so disable the cache
-            // outright instead of creating a misleading persistent directory.
-            trtOptions["trt_engine_cache_enable"] = "0";
-            trtOptions.Remove("trt_engine_cache_path");
-            trtOptions.Remove("trt_engine_cache_prefix");
-            return trtOptions;
-        }
-
-        trtOptions["trt_engine_cache_enable"] = "1";
-        trtOptions["trt_engine_cache_path"] = ResolveClassicTensorRtEngineCacheDirectory(environmentFingerprint);
-        if (!string.IsNullOrWhiteSpace(trtModelPath))
-        {
-            trtOptions["trt_engine_cache_prefix"] = BuildClassicTensorRtModelCachePrefix(trtModelPath);
-        }
-        return trtOptions;
-    }
-
-    internal static string BuildClassicTensorRtModelCachePrefix(string modelPath)
-    {
-        string normalizedPath = Path.GetFullPath(modelPath);
-        byte[] digest = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalizedPath));
-        return $"trackdub-{Convert.ToHexString(digest.AsSpan(0, 8)).ToLowerInvariant()}-";
-    }
-
-    internal static string ResolveClassicTensorRtEngineCacheDirectory() =>
-        ResolveClassicTensorRtEngineCacheDirectory(BuildClassicTensorRtEnvironmentFingerprint());
-
-    internal static string ResolveClassicTensorRtEngineCacheDirectory(string environmentFingerprint) =>
-        Path.Join(
-            ResolveEngineCacheRoot(),
-            "classic-trt",
-            SanitizeClassicTensorRtCacheKey(environmentFingerprint));
-
-    // Classic engine-cache key components: GPU architecture bucket | exact GPU model name |
-    // GPU driver version | TensorRT binary identity | ONNX Runtime version. This prevents engines
-    // from being reused across two GPUs in the same architecture bucket (e.g. a moved /data volume).
-    // The cache is disabled if any component is unavailable. The TensorRT-RTX EP version in
-    // EpContextLoadPathResolver's fingerprint is deliberately excluded — classic TRT engines do
-    // not depend on it. TensorRT identity is sourced from the mapped TensorRT core binary; an
-    // unresolved identity uses a process-specific namespace so an unverified runtime never reuses
-    // engines from another process.
-    internal static string BuildClassicTensorRtEnvironmentFingerprint()
-    {
-        // The built-in classic TRT provider is not loaded until AppendExecutionProvider_Tensorrt,
-        // but its cache directory must be selected before that call. Preload the ABI library so
-        // the first session and every later process can identify the same native binary.
-        TryLoadTensorRtIdentityLibrary();
-        (string gpuArchitecture, string? driverVersion) = EpContextLoadPathResolver.CurrentHardware;
-        string driver = string.IsNullOrWhiteSpace(driverVersion) ? "unknown" : driverVersion;
-        string gpuModel = AcceleratorVramProbe.QueryNvmlGpuIdentity().DeviceName ?? "unknown";
-        return $"{gpuArchitecture}|{gpuModel}|{driver}|trt-{ResolveTensorRtVersionIdentity()}|ort-{EpContextArtifact.HostOrtRuntimeVersion}";
-    }
-
-    internal static bool HasCompleteClassicTensorRtCacheIdentity(string environmentFingerprint)
-    {
-        string[] parts = environmentFingerprint.Split('|');
-        if (parts.Length != 5 || parts.Any(static part => string.IsNullOrWhiteSpace(part)
-            || string.Equals(part, "unknown", StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        const string tensorRtHashPrefix = "trt-sha256-";
-        if (!parts[3].StartsWith(tensorRtHashPrefix, StringComparison.Ordinal)
-            || parts[3].Length != tensorRtHashPrefix.Length + 64
-            || !parts[3].AsSpan(tensorRtHashPrefix.Length).ToArray().All(Uri.IsHexDigit))
-        {
-            return false;
-        }
-
-        return parts[4].StartsWith("ort-", StringComparison.Ordinal)
-            && parts[4].Length > "ort-".Length
-            && !string.Equals(parts[4], "ort-unknown", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string SanitizeClassicTensorRtCacheKey(string environmentFingerprint)
-    {
-        var builder = new System.Text.StringBuilder(environmentFingerprint.Length);
-        foreach (char c in environmentFingerprint)
-        {
-            builder.Append(char.IsLetterOrDigit(c) || c is '.' or '-' or '_' ? c : '-');
-        }
-
-        string sanitized = builder.ToString().Trim('-');
-        return sanitized.Length == 0 ? "unknown" : sanitized;
-    }
-
-    private static readonly string UnresolvedTensorRtIdentity = $"unknown-process-{Guid.NewGuid():N}";
-    private static readonly ConcurrentDictionary<string, string> LoadedTensorRtBinaryIdentities = new(StringComparer.Ordinal);
-
-    private static bool TryLoadTensorRtIdentityLibrary()
-    {
-        // The current server image ships TensorRT 10. On an unsupported major version, keep the
-        // identity unresolved and let the EP append path proceed without cross-process cache reuse.
-        string libraryName = OperatingSystem.IsLinux()
-            ? "libnvinfer.so.10"
-            : OperatingSystem.IsWindows() ? "nvinfer.dll" : string.Empty;
-        if (libraryName.Length == 0)
-        {
-            return false;
-        }
-
-        lock (TensorRtIdentityLibraryLoadLock)
-        {
-            if (_tensorRtIdentityLibraryHandle != IntPtr.Zero)
-            {
-                return true;
-            }
-
-            try
-            {
-                if (!NativeLibrary.TryLoad(libraryName, out IntPtr handle))
-                {
-                    return false;
-                }
-
-                // Keep a reference for process lifetime so ORT's provider append sees the same
-                // module and the resolved identity cannot become stale before session creation.
-                _tensorRtIdentityLibraryHandle = handle;
-                return true;
-            }
-            catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException
-                or FileLoadException or EntryPointNotFoundException)
-            {
-                return false;
-            }
-        }
-    }
-
-    internal static string ResolveTensorRtVersionIdentity()
-    {
-        try
-        {
-            using Process process = Process.GetCurrentProcess();
-            return ResolveTensorRtVersionIdentity(
-                process.Modules.Cast<ProcessModule>().Select(static module => module.FileName),
-                static path => LoadedTensorRtBinaryIdentities.GetOrAdd(path, static loadedPath =>
-                {
-                    using FileStream stream = File.OpenRead(loadedPath);
-                    return $"sha256-{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream))}";
-                }));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
-            or NotSupportedException or System.ComponentModel.Win32Exception)
-        {
-            return UnresolvedTensorRtIdentity;
-        }
-    }
-
-    // Only mapped TensorRT core binaries count. Do not inspect PATH, LD_LIBRARY_PATH or
-    // installed filenames: those can describe a different runtime from the one ORT loaded.
-    // Hashing the actual binary also distinguishes builds with identical sonames. Missing or
-    // ambiguous identities get a process-specific namespace, preventing cross-process reuse.
-    internal static string ResolveTensorRtVersionIdentity(
-        IEnumerable<string> loadedModulePaths,
-        Func<string, string> readBinaryIdentity)
-    {
-        string[] candidates = loadedModulePaths
-            .Where(static path => IsTensorRtCoreLibrary(Path.GetFileName(path)))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        return candidates.Length == 1 ? readBinaryIdentity(candidates[0]) : UnresolvedTensorRtIdentity;
-    }
-
-    private static bool IsTensorRtCoreLibrary(string name) =>
-        name.Equals("libnvinfer.so", StringComparison.Ordinal)
-        || name.StartsWith("libnvinfer.so.", StringComparison.Ordinal)
-        || name.Equals("nvinfer.dll", StringComparison.OrdinalIgnoreCase)
-        || (name.StartsWith("nvinfer_", StringComparison.OrdinalIgnoreCase)
-            && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-            && name.Length > 12 && name[8..^4].All(char.IsDigit));
-
-    /// <summary>
-    /// Composes enable_cuda_graph onto a caller-supplied TRT option set. Production callsites that
-    /// keep every bound OrtValue at a fixed address opt in here; profile dictionaries themselves
-    /// stay free of the flag so benchmark/AOT consumers keep explicit control of the session mode.
-    /// </summary>
-    internal static IReadOnlyDictionary<string, string> WithCudaGraphsEnabled(
-        IReadOnlyDictionary<string, string> options)
-    {
-        var merged = new Dictionary<string, string>(options, StringComparer.Ordinal)
-        {
-            ["enable_cuda_graph"] = "1",
-        };
-        return merged;
-    }
-
-    // TensorRT-RTX runtime caches are not portable across runtime versions, so each pinned
-    // EP ABI + runtime lineage gets its own directory and an upgrade never feeds old kernels in.
-    internal static string ResolveTensorRtRtxRuntimeCachePath() =>
-        Path.Join(ResolveEngineCacheRoot(), "trt-rtx", TensorRtRtxProviderConstants.BundledFingerprintVersion);
-
-    private static string ResolveEngineCacheRoot()
-    {
-        string? engineCacheRoot = Environment.GetEnvironmentVariable(EngineCacheRootEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(engineCacheRoot))
-        {
-            return NormalizePath(engineCacheRoot);
-        }
-
-        string? cacheRoot = Environment.GetEnvironmentVariable(CacheRootEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(cacheRoot))
-        {
-            return Path.Join(NormalizePath(cacheRoot), "EngineCache");
-        }
-
-        string localAppDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localAppDataRoot))
-        {
-            localAppDataRoot = AppContext.BaseDirectory;
-        }
-
-        return Path.Join(localAppDataRoot, "Trackdub", "EngineCache");
-    }
-
-    private static string NormalizePath(string path) =>
-        Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
-
-    private static string BuildSessionOptionsFingerprint(
-        ExecutionProviderKind selectedProviderKind,
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
-    {
-        if (selectedProviderKind is ExecutionProviderKind.TensorRTRtx)
-        {
-            var combinedOptions = new Dictionary<string, string>(
-                BuildTensorRtRtxOptions(additionalTrtOptions, enableCudaGraph), StringComparer.Ordinal);
-
-            return SessionPoolKey.HashOptions(combinedOptions);
-        }
-
-        if (selectedProviderKind is ExecutionProviderKind.TensorRt)
-        {
-            var combinedOptions = new Dictionary<string, string>(
-                BuildTensorRtOptions(additionalTrtOptions), StringComparer.Ordinal);
-
-            return SessionPoolKey.HashOptions(combinedOptions);
-        }
-
-        if (ShouldIncludePolicyInFingerprint(devicePolicy, selectedProviderKind))
-        {
-            return SessionPoolKey.HashOptions(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["windows_ml_device_policy"] = WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)
-            });
-        }
-
-        return SessionPoolKey.HashOptions(null);
-    }
-
-    private static bool ShouldIncludePolicyInFingerprint(
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        ExecutionProviderKind selectedProviderKind) =>
-        ShouldUseCatalogDevicePolicy(devicePolicy, selectedProviderKind);
-
-    private static string? MergeFallbackReasons(string? encoder, string? decoder) =>
-        (encoder, decoder) switch
-        {
-            (null, null) => null,
-            ({ } e, null) => e,
-            (null, { } d) => d,
-            ({ } e, { } d) when e == d => e,
-            ({ } e, { } d) => $"Encoder: {e} Decoder: {d}"
-        };
-
-    private static string? FormatBootstrapDetail(
-        string? bootstrapDetail,
-        string? sessionOptionsFallbackReason)
-    {
-        if (string.IsNullOrWhiteSpace(sessionOptionsFallbackReason))
-        {
-            return bootstrapDetail;
-        }
-
-        return string.IsNullOrWhiteSpace(bootstrapDetail)
-            ? $"Session options fallback reason: {sessionOptionsFallbackReason}"
-            : $"{bootstrapDetail} Session options fallback reason: {sessionOptionsFallbackReason}";
-    }
-
-    private static SessionOptions CreateBaseSessionOptions(
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        out bool devicePolicyApplied,
-        bool tensorRtRtx = false, string? logId = null)
-    {
-        SessionOptions options = new()
-        {
-            // ORT_ENABLE_ALL re-fuses LayerNormalization+Skip / Bias+Gelu into com.microsoft
-            // contrib ops (SkipLayerNormalization, BiasGelu) at graph resolve. TensorRT-RTX
-            // cannot import those, so the TRT session gets a parse-error storm and falls back.
-            // BASIC keeps standard Add / LayerNormalization / Gelu nodes the TRT-RTX parser accepts.
-            GraphOptimizationLevel = tensorRtRtx
-                ? GraphOptimizationLevel.ORT_ENABLE_BASIC
-                : GraphOptimizationLevel.ORT_ENABLE_ALL,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            LogId = logId ?? string.Empty,
-            // MS "Efficiency tips for Windows ML inference" memory lever: opt-in arena disable
-            // for memory-footprint-sensitive deployments (throughput tradeoff). Default: arena on.
-            EnableCpuMemArena = !Common.SessionEfficiencyEnvironment.DisableCpuMemArena
-        };
-
-        devicePolicyApplied = false;
-#if WINDOWS
-        devicePolicyApplied = WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded(options, devicePolicy);
-#endif
-        return options;
-    }
-
-    /// <summary>
-    /// Reports the truth about whether a requested extended Windows ML device policy
-    /// (<see cref="WindowsMlExecutionDevicePolicy.DefaultRender"/> /
-    /// <see cref="WindowsMlExecutionDevicePolicy.MinPower"/>) actually took effect on the
-    /// session. <see cref="WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded"/> silently skips
-    /// <c>SetEpSelectionPolicy</c> when the loaded ORT managed binding lacks the required enum
-    /// members, so callers must not report the policy as active without checking
-    /// <paramref name="devicePolicyApplied"/> — otherwise diagnostics/fingerprints would claim a
-    /// device-selection behavior that never actually happened.
-    /// </summary>
-    private static string? BuildDevicePolicyFallbackReason(
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        bool devicePolicyApplied) =>
-        !devicePolicyApplied &&
-        devicePolicy is WindowsMlExecutionDevicePolicy.DefaultRender or WindowsMlExecutionDevicePolicy.MinPower
-            ? $"Requested Windows ML device policy '{WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)}' " +
-              "was not applied: the loaded ONNX Runtime managed binding does not expose the required " +
-              "extended ExecutionProviderDevicePolicy members (DEFAULT_RENDER/MIN_POWER); the session " +
-              "falls back to Explicit EP selection instead."
-            : null;
-
-    private static async Task<WindowsMlExecutionDevicePolicy> ResolveDevicePolicyAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await _devicePolicyProvider.GetPolicyAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            return WindowsMlExecutionDevicePolicy.Explicit;
-        }
-    }
-
-    private static bool IsCatalogGpuProvider(ExecutionProviderKind provider) =>
-        provider is ExecutionProviderKind.DirectMl
-            or ExecutionProviderKind.Migraphx;
-
-    private static bool IsNativeGpuProvider(ExecutionProviderKind provider) =>
-        !OperatingSystem.IsMacOS() && provider is (ExecutionProviderKind.Cuda or ExecutionProviderKind.TensorRt);
-
-    internal static bool ShouldUseCatalogDevicePolicy(
-        WindowsMlExecutionDevicePolicy devicePolicy,
-        ExecutionProviderKind provider) =>
-        OperatingSystem.IsWindows() &&
-        devicePolicy != WindowsMlExecutionDevicePolicy.Explicit &&
-        IsWindowsMlCatalogProvider(provider);
-
-    /// <summary>
-    /// WinML catalog EPs that can take ORT <c>SetEpSelectionPolicy</c> (device auto-select among
-    /// registered catalog devices). DirectML stays on the legacy explicit-append path; native
-    /// CUDA/TensorRT/TensorRT RTX/DNNL/CoreML are not Windows ML catalog routes.
-    /// </summary>
-    private static bool IsWindowsMlCatalogProvider(ExecutionProviderKind provider) =>
-        provider is ExecutionProviderKind.Migraphx
-            or ExecutionProviderKind.Qnn
-            or ExecutionProviderKind.VitisAi
-            or ExecutionProviderKind.OpenVinoCatalog;
-
-    private sealed class NullWindowsMlEpDevicePolicyProvider : IWindowsMlEpDevicePolicyProvider
-    {
-        internal static readonly NullWindowsMlEpDevicePolicyProvider Instance = new();
-
-        public Task<WindowsMlExecutionDevicePolicy> GetPolicyAsync(CancellationToken cancellationToken = default) =>
-            cancellationToken.IsCancellationRequested
-                ? Task.FromCanceled<WindowsMlExecutionDevicePolicy>(cancellationToken)
-                : Task.FromResult(WindowsMlExecutionDevicePolicy.Explicit);
-
-        public void InvalidateCache()
-        {
-        }
-    }
-
-    internal static IExecutionProviderBootstrapper GetPlatformBootstrapper()
-    {
-#if WINDOWS
-        return new ExecutionProviders.Windows.WindowsExecutionProviderBootstrapper();
-#else
-        if (OperatingSystem.IsMacOSVersionAtLeast(10, 15))
-        {
-            return new ExecutionProviders.Mac.MacExecutionProviderBootstrapper();
-        }
-
-        if (OperatingSystem.IsLinux())
-        {
-            return new ExecutionProviders.Linux.LinuxExecutionProviderBootstrapper(
-                NullOpenVinoAvailabilityProvider.Instance);
-        }
-
-        return new ExecutionProviders.PortableExecutionProviderBootstrapper(
-            TensorRtRtx.TensorRtRtxProviderBootstrapFactory.CreateWithDefaultInstallPath(
-                ResolveProductDataRoot()));
-#endif
-    }
-
-    /// <summary>
-    /// Product data root that owns runtime component installs (the TensorRT-RTX plugin, and
-    /// anything else installed beside it). Honors the same relocation variables as the engine
-    /// cache; a host that moved its data root must keep resolving installed providers, or the
-    /// plugin becomes invisible and every TensorRT stage silently falls back to another EP.
-    /// </summary>
-    internal static string ResolveProductDataRoot()
-    {
-        string? dataRoot = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(dataRoot))
-        {
-            dataRoot = Environment.GetEnvironmentVariable(CacheRootEnvironmentVariable);
-        }
-
-        if (!string.IsNullOrWhiteSpace(dataRoot))
-        {
-            return NormalizePath(dataRoot);
-        }
-
-        string localAppDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localAppDataRoot))
-        {
-            localAppDataRoot = AppContext.BaseDirectory;
-        }
-
-        return Path.Join(localAppDataRoot, "Trackdub");
-    }
-
-    private sealed class NullOpenVinoAvailabilityProvider : IOpenVinoAvailabilityProvider
-    {
-        public static readonly NullOpenVinoAvailabilityProvider Instance = new();
-        public bool IsAvailable => false;
-        public bool UseOpenVinoCpuProxy => false;
-    }
-
-    internal sealed record SingleSessionLease(
-        InferenceSession Session,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        internal SessionLease? PoolLease { get; init; }
-
-        /// <summary>Set when the lease came from the shared pool — used for residency pinning.</summary>
-        internal SessionPoolKey? ResolvedPoolKey { get; init; }
-
-        public void Dispose()
-        {
-            if (PoolLease is not null)
-            {
-                PoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(Session);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Engine-lifetime residency pin (audit §3A). Keeps the pooled session warm without
-    /// holding an execution lease; call <see cref="AcquireAsync"/> only around each Run().
-    /// </summary>
-    internal sealed class PooledSingleSessionPin : IDisposable
-    {
-        private readonly SessionResidency residency;
-        private readonly Func<CancellationToken, Task<SingleSessionLease>> acquire;
-        private readonly string requestedProvider;
-        private readonly string selectedProvider;
-        private readonly string? bootstrapDetail;
-
-        internal PooledSingleSessionPin(
-            SessionResidency residency,
-            Func<CancellationToken, Task<SingleSessionLease>> acquire,
-            string requestedProvider,
-            string selectedProvider,
-            string? bootstrapDetail)
-        {
-            this.residency = residency;
-            this.acquire = acquire;
-            this.requestedProvider = requestedProvider;
-            this.selectedProvider = selectedProvider;
-            this.bootstrapDetail = bootstrapDetail;
-        }
-
-        public string RequestedProvider => requestedProvider;
-        public string SelectedProvider => selectedProvider;
-        public string? BootstrapDetail => bootstrapDetail;
-
-        public Task<SingleSessionLease> AcquireAsync(CancellationToken cancellationToken) =>
-            acquire(cancellationToken);
-
-        public void Dispose() => residency.Dispose();
-    }
-
-    internal sealed record Qwen3AsrSessionLease(
-        InferenceSession EncoderSession,
-        InferenceSession DecoderInitSession,
-        InferenceSession DecoderStepSession,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        internal SessionLeaseBundle? PoolBundle { get; init; }
-        internal SessionLease? EncoderPoolLease { get; init; }
-        internal SessionLease? DecoderInitPoolLease { get; init; }
-        internal SessionLease? DecoderStepPoolLease { get; init; }
-
-        public void Dispose()
-        {
-            if (PoolBundle is not null)
-            {
-                PoolBundle.Dispose();
-                return;
-            }
-
-            if (EncoderPoolLease is not null)
-            {
-                EncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
-            }
-
-            if (DecoderInitPoolLease is not null)
-            {
-                DecoderInitPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(DecoderInitSession);
-            }
-
-            if (DecoderStepPoolLease is not null)
-            {
-                DecoderStepPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(DecoderStepSession);
-            }
-        }
-    }
-
-    internal sealed record LatentSyncSessionLease(
-        InferenceSession UNetSession,
-        InferenceSession VaeEncoderSession,
-        InferenceSession VaeDecoderSession,
-        InferenceSession WhisperEncoderSession,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        internal SessionLeaseBundle? PoolBundle { get; init; }
-        internal SessionLease? UNetPoolLease { get; init; }
-        internal SessionLease? VaeEncoderPoolLease { get; init; }
-        internal SessionLease? VaeDecoderPoolLease { get; init; }
-        internal SessionLease? WhisperEncoderPoolLease { get; init; }
-
-        public void Dispose()
-        {
-            if (PoolBundle is not null)
-            {
-                PoolBundle.Dispose();
-                return;
-            }
-
-            if (UNetPoolLease is not null)
-            {
-                UNetPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(UNetSession);
-            }
-
-            if (VaeEncoderPoolLease is not null)
-            {
-                VaeEncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(VaeEncoderSession);
-            }
-
-            if (VaeDecoderPoolLease is not null)
-            {
-                VaeDecoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(VaeDecoderSession);
-            }
-
-            if (WhisperEncoderPoolLease is not null)
-            {
-                WhisperEncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(WhisperEncoderSession);
-            }
-        }
-    }
-
-    internal sealed record NemotronAsrSessionLease(
-        InferenceSession EncoderSession,
-        InferenceSession DecoderJointSession,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        internal SessionLease? EncoderPoolLease { get; init; }
-        internal SessionLease? DecoderJointPoolLease { get; init; }
-
-        public void Dispose()
-        {
-            if (EncoderPoolLease is not null)
-            {
-                EncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
-            }
-
-            if (DecoderJointPoolLease is not null)
-            {
-                DecoderJointPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(DecoderJointSession);
-            }
-        }
-    }
-
-    internal sealed record WhisperSessionLease(
-        InferenceSession EncoderSession,
-        InferenceSession DecoderSession,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        internal SessionLease? EncoderPoolLease { get; init; }
-        internal SessionLease? DecoderPoolLease { get; init; }
-
-        public void Dispose()
-        {
-            if (EncoderPoolLease is not null)
-            {
-                EncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
-            }
-
-            if (DecoderPoolLease is not null)
-            {
-                DecoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(DecoderSession);
-            }
-        }
-    }
-
-    internal sealed record OpusSessionLease(
-        InferenceSession EncoderSession,
-        InferenceSession DecoderSession,
-        string RequestedProvider,
-        string SelectedProvider,
-        string? BootstrapDetail) : IDisposable
-    {
-        /// <summary>Provider the sessions actually run on, after any downgrade.</summary>
-        internal ExecutionProviderKind SelectedProviderKind { get; init; } = ExecutionProviderKind.Cpu;
-
-        internal SessionLease? EncoderPoolLease { get; init; }
-        internal SessionLease? DecoderPoolLease { get; init; }
-
-        public void Dispose()
-        {
-            if (EncoderPoolLease is not null)
-            {
-                EncoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(EncoderSession);
-            }
-
-            if (DecoderPoolLease is not null)
-            {
-                DecoderPoolLease.Dispose();
-            }
-            else
-            {
-                TensorRtRtxTeardownGuard.DisposeSafely(DecoderSession);
-            }
-        }
-    }
 }
+

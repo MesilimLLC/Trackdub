@@ -38,6 +38,8 @@ public sealed record TranslatedSegment
 
     public IReadOnlyList<TranslatedWord> Words { get; init; }
 
+    public TranslationSegmentOrigin Origin { get; init; } = TranslationSegmentOrigin.Unknown;
+
     public static TranslatedSegment Create(
         Guid translationRevisionId,
         int segmentIndex,

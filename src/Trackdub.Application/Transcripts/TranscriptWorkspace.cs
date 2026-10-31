@@ -7,7 +7,7 @@ using Trackdub.Domain.StageRuns;
 
 namespace Trackdub.Application.Transcripts;
 
-public sealed class TranscriptWorkspace(
+public sealed partial class TranscriptWorkspace(
     ProjectWorkflow project,
     RuntimeModelWorkflow runtimeModels,
     DiarizationModelWorkflow diarizationModels,
@@ -152,75 +152,6 @@ public sealed class TranscriptWorkspace(
         RunPipelineAsync(
             nameof(EnsureNormalizedProjectAudioAsync),
             ct => Project.EnsureNormalizedProjectAudioAsync(ct, ffmpegThreadBudget),
-            cancellationToken);
-
-    public Task<TranscriptProjectState> RunInitialTranscriptionAsync(
-        bool enableSpeakerDiarization,
-        InferenceModelPreferences? modelPreferences,
-        CancellationToken cancellationToken,
-        IProgress<PipelineProgressEvent>? progress = null,
-        string? sourceLanguage = null) =>
-        RunPipelineAsync(
-            nameof(RunInitialTranscriptionAsync),
-            async ct =>
-            {
-                await EnsureImportModelsForTranscriptionAsync(
-                        modelPreferences,
-                        ct,
-                        sourceLanguage)
-                    .ConfigureAwait(false);
-                return await Project.RunInitialTranscriptionAsync(
-                        enableSpeakerDiarization,
-                        modelPreferences,
-                        ct,
-                        progress,
-                        sourceLanguage)
-                    .ConfigureAwait(false);
-            },
-            cancellationToken);
-
-    public Task<TranscriptProjectState> RunTranscriptStageAsync(
-        string stageName,
-        bool enableSpeakerDiarization,
-        InferenceModelPreferences? modelPreferences,
-        CancellationToken cancellationToken,
-        IProgress<PipelineProgressEvent>? progress = null,
-        string? sourceLanguage = null) =>
-        RunPipelineAsync(
-            nameof(RunTranscriptStageAsync),
-            async ct =>
-            {
-                if (string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase))
-                {
-                    await EnsureDiarizationModelsForTranscriptionAsync(modelPreferences, ct).ConfigureAwait(false);
-                }
-                else if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
-                {
-                    // VAD uses rule-based detection — no ML model provisioning required.
-                    // Skipping import-model provisioning here avoids failing a VAD-only
-                    // run when the ASR model is missing or not yet downloaded.
-                }
-                else if (string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase))
-                {
-                    // Text-refinement model provisioning is handled by the shell before isolated runs.
-                }
-                else
-                {
-                    await EnsureImportModelsForTranscriptionAsync(
-                            modelPreferences,
-                            ct,
-                            sourceLanguage)
-                        .ConfigureAwait(false);
-                }
-                return await Project.RunTranscriptStageAsync(
-                        stageName,
-                        enableSpeakerDiarization,
-                        modelPreferences,
-                        ct,
-                        progress,
-                        sourceLanguage)
-                    .ConfigureAwait(false);
-            },
             cancellationToken);
 
     private Task EnsureImportModelsForTranscriptionAsync(

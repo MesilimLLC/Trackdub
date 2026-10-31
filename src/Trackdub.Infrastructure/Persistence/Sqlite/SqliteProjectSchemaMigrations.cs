@@ -41,8 +41,13 @@ internal static class SqliteProjectSchemaMigrations
         new(27, "rebuild-lip-synthesis-segments-stage-run-key", RebuildLipSynthesisSegmentsStageRunKeyAsync),
         new(28, "add-translation-model-provenance", AddTranslationModelProvenanceAsync),
         new(29, "add-speaker-assignment-origin", AddSpeakerAssignmentOriginAsync),
-        new(30, "preserve-merged-speaker-history", PreserveMergedSpeakerHistoryAsync)
+        new(30, "preserve-merged-speaker-history", PreserveMergedSpeakerHistoryAsync),
+        new(31, "add-translation-segment-origin", AddTranslationSegmentOriginAsync)
     ];
+
+    private static Task AddTranslationSegmentOriginAsync(
+        SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken) =>
+        EnsureColumnAsync(connection, transaction, "translated_segments", "origin", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
 
     private static Task PreserveMergedSpeakerHistoryAsync(
         SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken) =>

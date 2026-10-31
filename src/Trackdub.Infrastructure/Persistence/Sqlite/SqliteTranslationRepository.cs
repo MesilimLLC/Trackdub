@@ -68,7 +68,8 @@ public sealed class SqliteTranslationRepository(
                    start_seconds,
                    end_seconds,
                    text,
-                   source_segment_hash
+                   source_segment_hash,
+                   origin
             FROM translated_segments
             WHERE translation_revision_id = $translationRevisionId
             ORDER BY segment_index;
@@ -86,7 +87,12 @@ public sealed class SqliteTranslationRepository(
                 reader.GetDouble(3),
                 reader.GetDouble(4),
                 reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6)));
+                reader.IsDBNull(6) ? null : reader.GetString(6))
+            {
+                Origin = Enum.IsDefined(typeof(TranslationSegmentOrigin), reader.GetInt32(7))
+                    ? (TranslationSegmentOrigin)reader.GetInt32(7)
+                    : TranslationSegmentOrigin.Unknown,
+            });
         }
 
         if (results.Count == 0)
@@ -217,7 +223,8 @@ public sealed class SqliteTranslationRepository(
                 start_seconds,
                 end_seconds,
                 text,
-                source_segment_hash)
+                source_segment_hash,
+                origin)
             VALUES (
                 $id,
                 $translationRevisionId,
@@ -225,7 +232,8 @@ public sealed class SqliteTranslationRepository(
                 $startSeconds,
                 $endSeconds,
                 $text,
-                $sourceSegmentHash);
+                $sourceSegmentHash,
+                $origin);
             """;
         SqliteParameter segmentIdParameter = segmentCommand.Parameters.Add("$id", SqliteType.Text);
         SqliteParameter translationRevisionIdParameter = segmentCommand.Parameters.Add("$translationRevisionId", SqliteType.Text);
@@ -234,6 +242,8 @@ public sealed class SqliteTranslationRepository(
         SqliteParameter endSecondsParameter = segmentCommand.Parameters.Add("$endSeconds", SqliteType.Real);
         SqliteParameter textParameter = segmentCommand.Parameters.Add("$text", SqliteType.Text);
         SqliteParameter sourceSegmentHashParameter = segmentCommand.Parameters.Add("$sourceSegmentHash", SqliteType.Text);
+
+        SqliteParameter originParameter = segmentCommand.Parameters.Add("$origin", SqliteType.Integer);
 
         await using SqliteCommand wordCommand = connection.CreateCommand();
         wordCommand.Transaction = transaction;
@@ -270,6 +280,7 @@ public sealed class SqliteTranslationRepository(
             endSecondsParameter.Value = segment.EndSeconds;
             textParameter.Value = segment.Text;
             sourceSegmentHashParameter.Value = segment.SourceSegmentHash ?? (object)DBNull.Value;
+            originParameter.Value = (int)segment.Origin;
             await segmentCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             foreach (TranslatedWord word in segment.Words.OrderBy(static word => word.WordIndex))

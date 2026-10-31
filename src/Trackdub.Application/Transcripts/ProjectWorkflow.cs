@@ -93,86 +93,59 @@ public sealed class ProjectWorkflow(
     }
 
     public async Task<TranscriptProjectState> RunInitialTranscriptionAsync(
-        bool enableSpeakerDiarization,
-        InferenceModelPreferences? modelPreferences,
-        CancellationToken cancellationToken,
-        IProgress<PipelineProgressEvent>? progress = null,
-        string? sourceLanguage = null)
+        TranscriptRunOptions options,
+        CancellationToken cancellationToken)
     {
-        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(sourceLanguage);
-        InferenceModelPreferences preferences = modelPreferences ?? InferenceModelPreferences.Empty;
-        TranscriptProjectState currentState = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        MediaAsset mediaAsset = TranscriptWorkflowUtilities.GetRequiredMediaAsset(currentState);
-        IReadOnlyList<ProjectArtifact> artifacts = currentState.ProjectState.Artifacts;
-        PipelineProgressReporter.Phase(progress, StageNames.Asr, "Preparing audio", "Ensuring normalized audio for transcription.");
-        ProjectArtifact normalizedAudio = await EnsureNormalizedAudioForPipelineAsync(
-            mediaAsset,
-            artifacts,
+        ArgumentNullException.ThrowIfNull(options);
+        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(options.SourceLanguage);
+        InferenceModelPreferences preferences = options.ModelPreferences ?? InferenceModelPreferences.Empty;
+        PreparedTranscriptAudio audio = await PrepareTranscriptAudioAsync(
+            StageNames.Asr,
+            "transcription",
+            options,
             cancellationToken).ConfigureAwait(false);
 
-        PipelineProgressReporter.Phase(progress, StageNames.Asr, "Routing speech audio", "Preparing the best speech audio for transcription.");
-        TranscriptAudioRoutingPlan audioRoutingPlan = await TryPrepareSpeechAudioAsync(
-            currentState.ProjectState.Project.Id,
-            mediaAsset,
-            normalizedAudio,
-            artifacts,
-            cancellationToken,
-            stageRuns: currentState.StageRuns).ConfigureAwait(false);
-
         await transcriptGenerationService.GenerateTranscriptAsync(
-            currentState.ProjectState.Project,
-            mediaAsset,
-            normalizedAudio,
-            audioRoutingPlan,
-            enableSpeakerDiarization,
+            audio.ProjectState.ProjectState.Project,
+            audio.MediaAsset,
+            audio.NormalizedAudioArtifact,
+            audio.AudioRoutingPlan,
+            options.EnableSpeakerDiarization,
             preferences,
             cancellationToken,
             normalizedSourceLanguage,
-            progress).ConfigureAwait(false);
+            options.Progress).ConfigureAwait(false);
 
-        return await ReloadAsync(currentState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
+        return await ReloadAsync(audio.ProjectState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<TranscriptProjectState> RunTranscriptStageAsync(
         string stageName,
-        bool enableSpeakerDiarization,
-        InferenceModelPreferences? modelPreferences,
-        CancellationToken cancellationToken,
-        IProgress<PipelineProgressEvent>? progress = null,
-        string? sourceLanguage = null)
+        TranscriptRunOptions options,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stageName);
-        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(sourceLanguage);
-        TranscriptProjectState currentState = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        MediaAsset mediaAsset = TranscriptWorkflowUtilities.GetRequiredMediaAsset(currentState);
-        IReadOnlyList<ProjectArtifact> artifacts = currentState.ProjectState.Artifacts;
-        ProjectArtifact normalizedAudio = await EnsureNormalizedAudioForPipelineAsync(
-            mediaAsset,
-            artifacts,
+        ArgumentNullException.ThrowIfNull(options);
+        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(options.SourceLanguage);
+        PreparedTranscriptAudio audio = await PrepareTranscriptAudioAsync(
+            stageName,
+            "this stage",
+            options,
             cancellationToken).ConfigureAwait(false);
 
-        PipelineProgressReporter.Phase(progress, stageName, "Routing speech audio", "Preparing the best speech audio for this stage.");
-        TranscriptAudioRoutingPlan audioRoutingPlan = await TryPrepareSpeechAudioAsync(
-            currentState.ProjectState.Project.Id,
-            mediaAsset,
-            normalizedAudio,
-            artifacts,
-            cancellationToken,
-            stageRuns: currentState.StageRuns).ConfigureAwait(false);
-
         await transcriptGenerationService.GenerateTranscriptStageAsync(
-            currentState.ProjectState.Project,
-            mediaAsset,
-            normalizedAudio,
-            audioRoutingPlan,
+            audio.ProjectState.ProjectState.Project,
+            audio.MediaAsset,
+            audio.NormalizedAudioArtifact,
+            audio.AudioRoutingPlan,
             stageName,
-            enableSpeakerDiarization,
-            modelPreferences ?? InferenceModelPreferences.Empty,
+            options.EnableSpeakerDiarization,
+            options.ModelPreferences ?? InferenceModelPreferences.Empty,
             cancellationToken,
             normalizedSourceLanguage,
-            progress).ConfigureAwait(false);
+            options.Progress).ConfigureAwait(false);
 
-        return await ReloadAsync(currentState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
+        return await ReloadAsync(audio.ProjectState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<TranscriptProjectState> OpenAsync(CancellationToken cancellationToken) =>
@@ -461,6 +434,65 @@ public sealed class ProjectWorkflow(
         CancellationToken cancellationToken) =>
         projectMediaIngestService.EnsureNormalizedAudioAsync(mediaAsset, artifacts, cancellationToken);
 
+    private async Task<PreparedTranscriptAudio> PrepareTranscriptAudioAsync(
+        string stageName,
+        string audioPurpose,
+        TranscriptRunOptions options,
+        CancellationToken cancellationToken)
+    {
+        TranscriptProjectState projectState = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        MediaAsset mediaAsset = TranscriptWorkflowUtilities.GetRequiredMediaAsset(projectState);
+        IReadOnlyList<ProjectArtifact> artifacts = projectState.ProjectState.Artifacts;
+        PipelineProgressReporter.Phase(
+            options.Progress,
+            stageName,
+            "Preparing audio",
+            $"Ensuring normalized audio for {audioPurpose}.");
+        ProjectArtifact normalizedAudioArtifact = await EnsureNormalizedAudioForPipelineAsync(
+            mediaAsset,
+            artifacts,
+            cancellationToken).ConfigureAwait(false);
+        PipelineProgressReporter.Phase(
+            options.Progress,
+            stageName,
+            options.PrepareSpeechAudio ? "Routing speech audio" : "Using source audio",
+            options.PrepareSpeechAudio
+                ? $"Preparing the best speech audio for {audioPurpose}."
+                : "Source cleanup is off; using normalized source audio.");
+        var routingRequest = new TranscriptAudioRoutingRequest
+        {
+            ProjectId = projectState.ProjectState.Project.Id,
+            MediaAsset = mediaAsset,
+            NormalizedAudioArtifact = normalizedAudioArtifact,
+            ExistingArtifacts = artifacts,
+            StageRuns = projectState.StageRuns,
+            CancellationToken = cancellationToken,
+            PrepareSpeechAudio = options.PrepareSpeechAudio
+        };
+        TranscriptAudioRoutingPlan routingPlan = await PrepareSpeechAudioRoutingAsync(routingRequest)
+            .ConfigureAwait(false);
+
+        return new PreparedTranscriptAudio(projectState, mediaAsset, normalizedAudioArtifact, routingPlan);
+    }
+
+    private Task<TranscriptAudioRoutingPlan> PrepareSpeechAudioRoutingAsync(TranscriptAudioRoutingRequest request)
+    {
+        if (!request.PrepareSpeechAudio)
+        {
+            return Task.FromResult(
+                TranscriptAudioRoutingPlan.Raw(request.NormalizedAudioArtifact, SpeechAudioSourceKind.FullMix)
+                    .WithUnprocessedAsrSource(request.NormalizedAudioArtifact));
+        }
+
+        return TryPrepareSpeechAudioAsync(
+            request.ProjectId,
+            request.MediaAsset,
+            request.NormalizedAudioArtifact,
+            request.ExistingArtifacts,
+            request.CancellationToken,
+            stageRuns: request.StageRuns);
+    }
+
     private async Task<TranscriptAudioRoutingPlan> TryPrepareSpeechAudioAsync(
         Guid projectId,
         MediaAsset mediaAsset,
@@ -470,9 +502,8 @@ public sealed class ProjectWorkflow(
         bool allowExistingReuse = true,
         IReadOnlyList<StageRunRecord>? stageRuns = null)
     {
-        // Transcript stages always route from the full mix: ASR, VAD and diarization all scored
-        // as well or better on the mix (DeepFilterNet-cleaned for VAD/diarization) than on a
-        // separated vocal stem, so separation is not a transcript prerequisite.
+        // Transcript stages route from the full mix, not a separated vocal stem. Optional audio
+        // preparation may enhance and clean that mix before VAD, ASR, and diarization.
         ProjectArtifact selectedSource = normalizedAudioArtifact;
         const SpeechAudioSourceKind sourceKind = SpeechAudioSourceKind.FullMix;
 
@@ -559,4 +590,27 @@ public sealed class ProjectWorkflow(
                 .WithUnprocessedAsrSource(normalizedAudioArtifact);
         }
     }
+
+    private sealed record TranscriptAudioRoutingRequest
+    {
+        public required Guid ProjectId { get; init; }
+
+        public required MediaAsset MediaAsset { get; init; }
+
+        public required ProjectArtifact NormalizedAudioArtifact { get; init; }
+
+        public required IReadOnlyList<ProjectArtifact> ExistingArtifacts { get; init; }
+
+        public IReadOnlyList<StageRunRecord>? StageRuns { get; init; }
+
+        public required CancellationToken CancellationToken { get; init; }
+
+        public required bool PrepareSpeechAudio { get; init; }
+    }
+
+    private sealed record PreparedTranscriptAudio(
+        TranscriptProjectState ProjectState,
+        MediaAsset MediaAsset,
+        ProjectArtifact NormalizedAudioArtifact,
+        TranscriptAudioRoutingPlan AudioRoutingPlan);
 }

@@ -15,7 +15,7 @@ public interface IStudioSettingsService
         CancellationToken cancellationToken);
 }
 
-public sealed record StudioSettings(
+public sealed partial record StudioSettings(
     string? DefaultSourceLanguage,
     string? DefaultTargetLanguage,
     string ModelTierPreference,

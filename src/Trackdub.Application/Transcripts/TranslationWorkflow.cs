@@ -47,33 +47,41 @@ public sealed class TranslationWorkflow(
     {
         TranscriptProjectState currentState = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await translationOrchestrationService
-            .GenerateTranslationAsync(currentState, request, cancellationToken, progress, segmentObserver)
+            .GenerateTranslationAsync(
+                currentState,
+                request,
+                new TranslationOrchestrationService.TranslationRunProgress(progress, segmentObserver),
+                cancellationToken)
             .ConfigureAwait(false);
         return await ReloadAsync(
             TranscriptWorkflowUtilities.NormalizeTranslationTargetLanguageCode(request.TargetLanguage),
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<TranscriptProjectState> RetranslateSegmentAsync(
+    public Task<TranscriptProjectState> RetranslateSegmentAsync(
         RetranslateSegmentRequest request,
-        CancellationToken cancellationToken)
-    {
-        TranscriptProjectState currentState = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await translationOrchestrationService.RetranslateSegmentAsync(currentState, request, cancellationToken).ConfigureAwait(false);
-        return await ReloadAsync(
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            (state, ct) => translationOrchestrationService.RetranslateSegmentAsync(state, request, ct),
             TranscriptWorkflowUtilities.NormalizeTranslationTargetLanguageCode(request.TargetLanguage),
-            cancellationToken).ConfigureAwait(false);
-    }
+            cancellationToken);
 
-    public async Task<TranscriptProjectState> SaveTranslationEditsAsync(
+    public Task<TranscriptProjectState> SaveTranslationEditsAsync(
         SaveTranslationEditsRequest request,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            (state, ct) => translationOrchestrationService.SaveTranslationEditsAsync(state, request, ct),
+            TranscriptWorkflowUtilities.NormalizeTranslationTargetLanguageCode(request.TargetLanguage),
+            cancellationToken);
+
+    private async Task<TranscriptProjectState> ExecuteAsync(
+        Func<TranscriptProjectState, CancellationToken, Task> action,
+        string? targetLanguage,
         CancellationToken cancellationToken)
     {
         TranscriptProjectState currentState = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await translationOrchestrationService.SaveTranslationEditsAsync(currentState, request, cancellationToken).ConfigureAwait(false);
-        return await ReloadAsync(
-            TranscriptWorkflowUtilities.NormalizeTranslationTargetLanguageCode(request.TargetLanguage),
-            cancellationToken).ConfigureAwait(false);
+        await action(currentState, cancellationToken).ConfigureAwait(false);
+        return await ReloadAsync(targetLanguage, cancellationToken).ConfigureAwait(false);
     }
 
     private Task<TranscriptProjectState> OpenAsync(CancellationToken cancellationToken) =>

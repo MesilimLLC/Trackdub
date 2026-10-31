@@ -18,7 +18,7 @@ using Trackdub.TestDoubles;
 
 namespace Trackdub.Infrastructure.Tests;
 
-public sealed class AtomicRevisionCommitBoundaryTests
+public sealed partial class AtomicRevisionCommitBoundaryTests
 {
     [Fact]
     public async Task Streaming_wrong_revision_reaches_real_boundary_after_valid_items_and_changes_no_output()
@@ -607,7 +607,8 @@ public sealed class AtomicRevisionCommitBoundaryTests
                 values.Add(path + ":" + (await Fingerprints.ComputeAsync(path, Ct)).Sha256);
             return string.Join("\n", values);
         }
-        public Task GenerateAsync(ITranslationEngine engine, IAtomicRevisionCommitBoundary boundary, CancellationToken? cancellationToken = null)
+        public Task GenerateAsync(ITranslationEngine engine, IAtomicRevisionCommitBoundary boundary, CancellationToken? cancellationToken = null,
+            TranslationRunScope scope = TranslationRunScope.All)
         {
             var state = new TranscriptProjectState(new OpenProjectResult(Project, Asset, null, SourceMediaStatus.Available, null, [], "en"),
                 Transcript, SourceSegments, [], [], null, [], false, "en", [], [], "es", new HashSet<int>(), null, [], [], [], [], []);
@@ -615,7 +616,7 @@ public sealed class AtomicRevisionCommitBoundaryTests
                 new GlossaryTermMatcher(), new FakeTranslationLanguageRouter(), engine, Takes, new SqliteProjectStageRunStore(Database),
                 Store, new TranscriptArtifactWriter(Store, Fingerprints, Media),
                 degradationWriter: new PipelineDegradationWriter(Store, Fingerprints, Media), commitBoundary: boundary);
-            return service.GenerateTranslationAsync(state, new("auto", "es", EnableSegmentStreaming: true), cancellationToken ?? Ct);
+            return service.GenerateTranslationAsync(state, new("auto", "es", EnableSegmentStreaming: true, Scope: scope), cancellationToken ?? Ct);
         }
         public ValueTask DisposeAsync()
         {

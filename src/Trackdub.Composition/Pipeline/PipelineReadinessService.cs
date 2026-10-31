@@ -580,8 +580,7 @@ public sealed class PipelineReadinessService(
             Stage: stage,
             PreferredModelAlias: modelAlias,
             PreferredExecutionProvider: preferredProvider,
-            RequirePreferredExecutionProvider: preferredProvider is not null
-                && (selections.IsDevBuild || selections.RequirePreferredExecutionProviders),
+            RequirePreferredExecutionProvider: RuntimeModelRequestFactory.IsPreferredExecutionProviderRequired(options, stage),
             PreferredModelVariantAlias: RuntimeModelRequestFactory.ResolvePreferredModelVariantAlias(
                 options,
                 stage,

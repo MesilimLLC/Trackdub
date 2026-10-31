@@ -5,6 +5,7 @@ using Trackdub.Contracts.Dubbing;
 using Trackdub.Domain;
 using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.StageRuns;
+using Trackdub.Domain.Translation;
 
 namespace Trackdub.Application.Dubbing;
 
@@ -55,8 +56,16 @@ internal static class DubbingExecutionSnapshot
             ["TargetLanguageCode"] = options.TargetLanguageCode,
             ["ForceRerun"] = options.ForceRerun.ToString(),
             ["EnableAsrTextRefinement"] = options.EnableAsrTextRefinement.ToString(),
+            ["EnableSpeechAudioPreparation"] = options.EnableSpeechAudioPreparation.ToString(),
             ["UseVoiceCloning"] = options.UseVoiceCloning.ToString(),
         };
+
+        // All is the historical behavior, so omit it from the snapshot and keep existing
+        // translation artifacts resumable after upgrading to the scope-aware contract.
+        if (options.TranslationScope != TranslationRunScope.All)
+        {
+            snapshot["TranslationScope"] = options.TranslationScope.ToString();
+        }
 
         AddTtsTimingEntries(snapshot, options.TtsTiming);
 

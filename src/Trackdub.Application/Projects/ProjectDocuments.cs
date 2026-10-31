@@ -56,9 +56,14 @@ public sealed record ProjectManifest(
         };
 }
 
-public sealed record ProjectPipelineSettings(
-    bool EnableAsrTextRefinement = false)
+public sealed record ProjectPipelineSettings
 {
+    public bool EnableAsrTextRefinement { get; init; }
+
+    public bool EnableSpeechAudioPreparation { get; init; }
+
+    public bool EnableSpeakerDiarization { get; init; } = true;
+
     public ProjectPipelineSettings Normalize() => this;
 }
 

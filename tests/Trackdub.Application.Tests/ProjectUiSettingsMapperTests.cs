@@ -1,4 +1,5 @@
 using Trackdub.Contracts;
+using System.Text.Json;
 using Trackdub.Application.Projects;
 using Trackdub.Application.Transcripts;
 
@@ -120,7 +121,12 @@ public sealed class ProjectUiSettingsMapperTests
     public void CreateProjectUiSettings_round_trips_pipeline_settings()
     {
         var mix = new MixGainSettings();
-        var pipeline = new ProjectPipelineSettings(EnableAsrTextRefinement: true);
+        var pipeline = new ProjectPipelineSettings
+        {
+            EnableAsrTextRefinement = true,
+            EnableSpeechAudioPreparation = true,
+            EnableSpeakerDiarization = false
+        };
 
         ProjectUiSettings settings = ProjectUiSettingsMapper.CreateProjectUiSettings(
             mix,
@@ -129,5 +135,18 @@ public sealed class ProjectUiSettingsMapperTests
         ProjectPipelineSettings read = ProjectUiSettingsMapper.ReadPipelineSettings(settings);
 
         Assert.True(read.EnableAsrTextRefinement);
+        Assert.True(read.EnableSpeechAudioPreparation);
+        Assert.False(read.EnableSpeakerDiarization);
+    }
+
+    [Fact]
+    public void ProjectPipelineSettings_uses_defaults_for_fields_missing_from_older_projects()
+    {
+        ProjectPipelineSettings read = JsonSerializer.Deserialize<ProjectPipelineSettings>(
+            "{\"EnableAsrTextRefinement\":true}")!;
+
+        Assert.True(read.EnableAsrTextRefinement);
+        Assert.False(read.EnableSpeechAudioPreparation);
+        Assert.True(read.EnableSpeakerDiarization);
     }
 }

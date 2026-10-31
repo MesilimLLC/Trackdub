@@ -462,7 +462,8 @@ public sealed class TranscriptArtifactWriter(
                                 word.StartSeconds,
                                 word.EndSeconds,
                                 word.Text))
-                            .ToArray()))
+                            .ToArray(),
+                        segment.Origin))
                     .ToArray());
     }
 
@@ -489,7 +490,8 @@ public sealed class TranscriptArtifactWriter(
         double EndSeconds,
         string Text,
         string? SourceSegmentHash,
-        IReadOnlyList<TranslatedWordArtifactDocument> Words);
+        IReadOnlyList<TranslatedWordArtifactDocument> Words,
+        TranslationSegmentOrigin Origin);
 
     private sealed record TranslatedWordArtifactDocument(
         int WordIndex,

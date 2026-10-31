@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Trackdub.Contracts;
 using Trackdub.Contracts.ApplicationContracts;
+using Trackdub.Infrastructure.Persistence.Repositories;
 
 namespace Trackdub.Infrastructure.Settings;
 
@@ -51,15 +52,50 @@ public sealed class JsonStudioSettingsService(
     public async Task SaveAsync(StudioSettings settings, CancellationToken cancellationToken)
     {
         StudioSettings normalized = Normalize(settings);
+        normalized = normalized with
+        {
+            DefaultModelCacheDirectory = ResolveSavedModelCacheDirectory(normalized.DefaultModelCacheDirectory),
+        };
+        // Hold a settings lock across the migration and the publish so concurrent saves cannot
+        // interleave: each publishes its own content after its matching migration.
+        using FileStream saveLock = await LocalModelCacheRecordStore.AcquireFileLockAsync(
+            storagePaths.SettingsPath + ".lock", cancellationToken).ConfigureAwait(false);
         Directory.CreateDirectory(storagePaths.RootDirectory);
 
-        string tempPath = $"{storagePaths.SettingsPath}.tmp";
-        await using (FileStream stream = File.Create(tempPath))
+        string tempPath = $"{storagePaths.SettingsPath}.{Guid.NewGuid():N}.tmp";
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, normalized, JsonOptions, cancellationToken).ConfigureAwait(false);
-        }
+            await using (FileStream stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, normalized, JsonOptions, cancellationToken).ConfigureAwait(false);
+            }
 
-        File.Move(tempPath, storagePaths.SettingsPath, overwrite: true);
+            // Migrate before publishing settings.json so a failed migration does not leave settings
+            // that point at a cache directory the records were never moved to.
+            TrackdubStoragePathResolver.MigrateModelCacheIfChanged(
+                new TrackdubStorageOptions(
+                    storagePaths.UserDataRoot,
+                    storagePaths.UserCacheRoot,
+                    storagePaths.SharedAssetRoot,
+                    storagePaths.IsPortable,
+                    normalized.DefaultModelCacheDirectory),
+                cancellationToken);
+            File.Move(tempPath, storagePaths.SettingsPath, overwrite: true);
+        }
+        finally
+        {
+            // After a successful publish the temp path no longer exists, so this only removes
+            // the file left behind by a failed save.
+            File.Delete(tempPath);
+        }
+    }
+
+    // The saved value is persisted in its absolute form, so the settings and the cache resolver
+    // read the same directory. A relative value would resolve against the working directory and
+    // is treated as unset.
+    private static string? ResolveSavedModelCacheDirectory(string? configured)
+    {
+        return TrackdubStoragePathResolver.NormalizeSavedModelCacheDirectory(configured);
     }
 
     public async Task<StudioSettings> TouchRecentProjectAsync(

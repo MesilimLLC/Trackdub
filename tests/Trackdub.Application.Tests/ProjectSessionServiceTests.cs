@@ -87,6 +87,53 @@ public sealed class ProjectSessionServiceTests
     }
 
     [Fact]
+    public void CreatePendingSessionForMedia_uses_configured_default_project_directory()
+    {
+        string tempDirectory = Path.Join(Path.GetTempPath(), "Trackdub.Application.Tests", Guid.NewGuid().ToString("N"));
+        string projectDirectory = Path.Join(tempDirectory, "projects");
+        Directory.CreateDirectory(projectDirectory);
+        try
+        {
+            string mediaDirectory = Path.Join(tempDirectory, "media");
+            Directory.CreateDirectory(mediaDirectory);
+            string mediaPath = Path.Join(mediaDirectory, "clip.mp4");
+            var settings = StudioSettings.Default with { DefaultProjectDirectory = projectDirectory };
+            var factory = new FakeWorkspaceSessionFactory();
+            var service = new ProjectSessionService(factory);
+
+            PendingProjectSession pending = service.CreatePendingSessionForMedia(mediaPath, "clip", settings);
+
+            Assert.Equal(Path.Join(projectDirectory, "clip.trackdub"), pending.ProjectRoot.ProjectRootPath);
+            Assert.Equal(pending.ProjectRoot.ProjectRootPath, pending.Session.ProjectRootPath);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreatePendingSessionForMedia_fails_when_configured_default_project_directory_is_unavailable()
+    {
+        string tempDirectory = Path.Join(Path.GetTempPath(), "Trackdub.Application.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            string missingProjectDirectory = Path.Join(tempDirectory, "missing-projects");
+            string mediaPath = Path.Join(tempDirectory, "clip.mp4");
+            var settings = StudioSettings.Default with { DefaultProjectDirectory = missingProjectDirectory };
+            var service = new ProjectSessionService(new FakeWorkspaceSessionFactory());
+
+            Assert.Throws<DirectoryNotFoundException>(
+                () => service.CreatePendingSessionForMedia(mediaPath, "clip", settings));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RecordHistoryTransition_moves_states_between_undo_and_redo_stacks()
     {
         var service = new ProjectSessionService(new FakeWorkspaceSessionFactory());

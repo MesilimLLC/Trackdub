@@ -1,4 +1,5 @@
 using Trackdub.Contracts;
+using Trackdub.Domain.Translation;
 
 namespace Trackdub.Contracts.Dubbing;
 
@@ -123,6 +124,13 @@ public sealed record DubbingSessionOptions
     public bool EnableSpeakerDiarization { get; init; } = true;
 
     /// <summary>
+    /// When true, transcript stages may enhance and prepare source audio before analysis.
+    /// When false, they use normalized source audio directly. Defaults to true for callers
+    /// that do not specify a preference.
+    /// </summary>
+    public bool EnableSpeechAudioPreparation { get; init; } = true;
+
+    /// <summary>
     /// When true, the OverlapRescue stage retranscribes rescued regions and merges
     /// candidates into the transcript. Defaults to false (artifacts only).
     /// </summary>
@@ -154,6 +162,12 @@ public sealed record DubbingSessionOptions
     /// persistence still commits atomically at stage end. Default false keeps the batch path.
     /// </summary>
     public bool EnableTranslationSegmentStreaming { get; init; }
+
+    /// <summary>
+    /// Which translated clips the translation stage should generate. Defaults to all clips
+    /// for existing CLI and automation callers.
+    /// </summary>
+    public TranslationRunScope TranslationScope { get; init; } = TranslationRunScope.All;
 
     /// <summary>
     /// Per-speaker voice-clone map: speaker id -> clone from reference audio (true)

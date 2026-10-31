@@ -59,9 +59,33 @@ public sealed class ProjectSessionService(
         string projectName,
         StudioSettings settings)
     {
-        string projectParentDirectory = ProjectRootNameResolver.ResolveProjectParentDirectory(
-            mediaPath,
-            _storagePaths?.UserDataRoot);
+        ArgumentNullException.ThrowIfNull(settings);
+        string projectParentDirectory;
+        if (string.IsNullOrWhiteSpace(settings.DefaultProjectDirectory))
+        {
+            projectParentDirectory = ProjectRootNameResolver.ResolveProjectParentDirectory(
+                mediaPath,
+                _storagePaths?.UserDataRoot);
+        }
+        else
+        {
+            // A relative value would resolve against the process working directory, which is not
+            // a stable project location, so require an absolute folder.
+            string configuredDirectory = settings.DefaultProjectDirectory.Trim();
+            if (!Path.IsPathFullyQualified(configuredDirectory))
+            {
+                throw new InvalidOperationException(
+                    $"The default project folder must be an absolute path: {configuredDirectory}");
+            }
+
+            projectParentDirectory = Path.GetFullPath(configuredDirectory);
+            if (!Directory.Exists(projectParentDirectory))
+            {
+                throw new DirectoryNotFoundException(
+                    $"The default project folder does not exist: {projectParentDirectory}");
+            }
+        }
+
         ProjectRootNameCandidate projectRoot = ProjectRootNameResolver.CreateAvailableProjectRoot(
             mediaPath,
             projectName,

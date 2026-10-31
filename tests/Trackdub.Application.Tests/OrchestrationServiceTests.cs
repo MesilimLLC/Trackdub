@@ -348,43 +348,6 @@ public sealed partial class OrchestrationServiceTests
     }
 
     [Fact]
-    public async Task TranslationOrchestrationService_SaveTranslationEditsAsync_clears_changed_segment_words_and_preserves_unchanged_segments()
-    {
-        TranslationServiceContext context = CreateTranslationServiceContext(new FakeTranslationEngine());
-        TranscriptProjectState currentState = CreateTranslatedProjectStateWithWords();
-
-        context.TranslationRepository.Seed(currentState.CurrentTranslationRevision!, currentState.TranslatedSegments);
-
-        await context.Service.SaveTranslationEditsAsync(
-            currentState,
-            new SaveTranslationEditsRequest(
-                currentState.CurrentTranslationRevision!.Id,
-                "es",
-                [new EditedTranslatedSegment(0, "Linea editada.")]),
-            TestContext.Current.CancellationToken);
-
-        TranslationRevision savedRevision = Assert.Single(context.TranslationRepository.Revisions, revision => revision.RevisionNumber == 2);
-        IReadOnlyList<TranslatedSegment> savedSegments = await context.TranslationRepository
-            .GetSegmentsAsync(savedRevision.Id, TestContext.Current.CancellationToken);
-
-        Assert.Collection(
-            savedSegments.OrderBy(static segment => segment.SegmentIndex),
-            changedSegment =>
-            {
-                Assert.Equal("Linea editada.", changedSegment.Text);
-                Assert.Empty(changedSegment.Words);
-            },
-            unchangedSegment =>
-            {
-                Assert.Equal("Segunda linea.", unchangedSegment.Text);
-                Assert.Collection(
-                    unchangedSegment.Words,
-                    first => Assert.Equal("Segunda", first.Text),
-                    second => Assert.Equal("linea", second.Text));
-            });
-    }
-
-    [Fact]
     public async Task TranslationOrchestrationService_RetranslateSegmentAsync_preserves_other_segment_words_and_clears_replaced_segment_words()
     {
         var translationEngine = new FakeTranslationEngine((_, segment) =>

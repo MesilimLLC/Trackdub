@@ -254,10 +254,12 @@ public partial class TranscriptProjectServiceTests
 
         await scope.Workspace.RunTranscriptStageAsync(
             StageNames.Asr,
-            enableSpeakerDiarization: false,
-            modelPreferences: null,
-            cancellationToken: TestContext.Current.CancellationToken,
-            sourceLanguage: "fr");
+            new TranscriptRunOptions
+            {
+                EnableSpeakerDiarization = false,
+                SourceLanguage = "fr"
+            },
+            TestContext.Current.CancellationToken);
 
         Assert.Equal("fr", transcriptionEngine.LastSourceLanguage);
     }

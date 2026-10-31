@@ -93,8 +93,10 @@ public partial class TranscriptProjectServiceTests
         Assert.Empty(spine.TranscriptSegments);
 
         TranscriptProjectState result = await scope.Workspace.RunInitialTranscriptionAsync(
-            true,
-            null,
+            new TranscriptRunOptions
+            {
+                EnableSpeakerDiarization = true
+            },
             TestContext.Current.CancellationToken);
 
         Assert.Equal("en", result.TranscriptLanguage);
@@ -120,11 +122,12 @@ public partial class TranscriptProjectServiceTests
             TestContext.Current.CancellationToken);
 
         TranscriptProjectState result = await scope.Workspace.RunInitialTranscriptionAsync(
-            false,
-            null,
-            TestContext.Current.CancellationToken,
-            progress: null,
-            sourceLanguage: "es-MX");
+            new TranscriptRunOptions
+            {
+                EnableSpeakerDiarization = false,
+                SourceLanguage = "es-MX"
+            },
+            TestContext.Current.CancellationToken);
 
         Assert.Equal("es", result.TranscriptLanguage);
         Assert.NotEmpty(result.TranscriptSegments);
@@ -144,11 +147,11 @@ public partial class TranscriptProjectServiceTests
             TestContext.Current.CancellationToken);
 
         TranscriptProjectState result = await scope.Workspace.RunInitialTranscriptionAsync(
-            false,
-            null,
-            TestContext.Current.CancellationToken,
-            progress: null,
-            sourceLanguage: null);
+            new TranscriptRunOptions
+            {
+                EnableSpeakerDiarization = false
+            },
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(0, scope.StemSeparationEngine.CallCount);
         Assert.NotNull(result.CurrentTranscriptRevision);
@@ -175,11 +178,12 @@ public partial class TranscriptProjectServiceTests
             new SetTranscriptLanguageRequest("es-MX"),
             TestContext.Current.CancellationToken);
         TranscriptProjectState result = await scope.Workspace.RunInitialTranscriptionAsync(
-            false,
-            null,
-            TestContext.Current.CancellationToken,
-            progress: null,
-            sourceLanguage: sourceSet.TranscriptLanguage);
+            new TranscriptRunOptions
+            {
+                EnableSpeakerDiarization = false,
+                SourceLanguage = sourceSet.TranscriptLanguage
+            },
+            TestContext.Current.CancellationToken);
 
         Assert.Equal("es", transcriptionEngine.LastSourceLanguage);
         Assert.Equal("en", result.TranscriptLanguage);

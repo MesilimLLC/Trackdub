@@ -40,6 +40,39 @@ public sealed class SqliteProjectDatabaseMigrationTests
     }
 
     [Fact]
+    public async Task Translation_origin_migration_marks_existing_rows_unknown()
+    {
+        string projectRoot = CreateProjectRoot("LegacyTranslationOrigin");
+        var database = new SqliteProjectDatabase(projectRoot);
+        try
+        {
+            await database.InitializeAsync(TestContext.Current.CancellationToken);
+            await using (SqliteConnection connection = await OpenConnectionAsync(database.DatabasePath))
+            {
+                await ExecuteNonQueryAsync(connection, """
+                    PRAGMA foreign_keys = OFF;
+                    ALTER TABLE translated_segments DROP COLUMN origin;
+                    DELETE FROM project_schema_versions WHERE version = 31;
+                    INSERT INTO translated_segments
+                        (id, translation_revision_id, segment_index, start_seconds, end_seconds, text, source_segment_hash)
+                    VALUES ('legacy', 'revision', 0, 0, 1, 'edited text', 'hash');
+                    """);
+            }
+
+            var reopened = new SqliteProjectDatabase(projectRoot);
+            await reopened.InitializeAsync(TestContext.Current.CancellationToken);
+            await using SqliteConnection check = await OpenConnectionAsync(reopened.DatabasePath);
+            await using SqliteCommand command = check.CreateCommand();
+            command.CommandText = "SELECT origin FROM translated_segments WHERE id = 'legacy';";
+            Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            DeleteDirectory(projectRoot);
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_throws_ProjectDatabaseSchemaVersionException_when_schema_is_newer_than_build()
     {
         string projectRoot = CreateProjectRoot("FutureSchema");

@@ -63,7 +63,7 @@ public sealed class SqliteTranslationRepositoryTests
                         TranslatedWord.Create(0, 0.0, 0.7, "Ho"),
                         TranslatedWord.Create(1, 0.7, 1.5, "la")
                     ]),
-                TranslatedSegment.Create(translationRevision.Id, 1, 1.5, 3.0, "Mundo", "hash-1")
+                TranslatedSegment.Create(translationRevision.Id, 1, 1.5, 3.0, "Mundo", "hash-1") with { Origin = TranslationSegmentOrigin.Manual }
             ];
 
             await translationRepository.SaveRevisionAsync(translationRevision, translatedSegments, TestContext.Current.CancellationToken);
@@ -85,13 +85,12 @@ public sealed class SqliteTranslationRepositoryTests
             Assert.Equal(new string('b', 64), current.ModelProvenance.FileHashes["onnx/encoder_model.onnx"]);
             Assert.Equal(">>spa<<", current.ModelProvenance.TargetPrefix);
             Assert.Equal("opus-policy-v1", current.ModelProvenance.CatalogPolicyVersion);
-            Assert.Equal(2, reloadedSegments.Count);
-            Assert.Equal("Hola", reloadedSegments[0].Text);
+            Assert.Equal((2, "Hola", TranslationSegmentOrigin.Unknown), (reloadedSegments.Count, reloadedSegments[0].Text, reloadedSegments[0].Origin));
             Assert.Equal("hash-0", reloadedSegments[0].SourceSegmentHash);
             Assert.Equal(2, reloadedSegments[0].Words.Count);
             Assert.Equal("Ho", reloadedSegments[0].Words[0].Text);
             Assert.Equal("la", reloadedSegments[0].Words[1].Text);
-            Assert.Empty(reloadedSegments[1].Words);
+            Assert.Equal((0, TranslationSegmentOrigin.Manual), (reloadedSegments[1].Words.Count, reloadedSegments[1].Origin));
             Assert.Equal(2, nextSpanishRevision);
             Assert.Equal(1, nextGermanRevision);
         }

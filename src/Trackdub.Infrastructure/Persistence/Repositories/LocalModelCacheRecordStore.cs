@@ -10,6 +10,8 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
 {
     private readonly SemaphoreSlim mutationLock = new(1, 1);
     private int revision;
+    private string? secondaryIndexPath;
+    private IReadOnlyList<LocalModelCacheRecord> mirroredBaseline = [];
 
     internal int Revision => Volatile.Read(ref revision);
 
@@ -50,7 +52,7 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
     /// <summary>
     /// Atomically reads the current cache index, applies <paramref name="mutator"/>, and persists the result.
     /// This is the only thread-safe way to update the index: concurrent calls are serialized through an
-    /// internal lock so read-modify-write sequences cannot lose updates. All production mutations must go
+    /// per-instance and cross-process locks so read-modify-write sequences cannot lose updates. All production mutations must go
     /// through this method.
     /// </summary>
     public async Task MutateAsync(
@@ -62,8 +64,68 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            IReadOnlyList<LocalModelCacheRecord> current = await LoadAsync(cancellationToken).ConfigureAwait(false);
-            await SaveAsync(mutator(current), cancellationToken).ConfigureAwait(false);
+            using var indexLocks = await AcquireIndexLocksAsync(cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<LocalModelCacheRecord> current = Load();
+            if (secondaryIndexPath is not null)
+            {
+                IReadOnlyList<LocalModelCacheRecord> secondary = LoadIndex(secondaryIndexPath);
+                // A record removed from either index since the last mirrored write must stay removed.
+                current = NormalizeRecords([.. current, .. secondary])
+                    .Where(record => !ContainsRecord(mirroredBaseline, record) ||
+                        (ContainsRecord(current, record) && ContainsRecord(secondary, record)))
+                    .ToArray();
+            }
+
+            await SaveLockedAsync(mutator(current), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Copies model-cache index records to a new cache directory without moving model files.
+    /// Existing model roots remain available, while future downloads can use the selected directory.
+    /// </summary>
+    public async Task CopyRecordsToDirectoryAsync(
+        DirectoryInfo destinationModelCacheDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destinationModelCacheDirectory);
+        string destinationDirectory = destinationModelCacheDirectory.FullName;
+        if (RootsEqual(storagePaths.ModelCacheDirectory, destinationDirectory))
+        {
+            return;
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string destinationIndexPath = Path.Join(destinationDirectory, "model-cache-records.json");
+            using var indexLocks = await AcquireIndexLocksAsync(
+                [storagePaths.ModelCacheIndexPath, destinationIndexPath], cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<LocalModelCacheRecord> sourceRecords = Load();
+            IReadOnlyList<LocalModelCacheRecord> destinationRecords = LoadIndex(destinationIndexPath);
+            if (sourceRecords.Count == 0 && destinationRecords.Count == 0)
+            {
+                // Nothing to copy, but still mirror future writes to the new directory.
+                secondaryIndexPath = destinationIndexPath;
+                mirroredBaseline = [];
+                return;
+            }
+
+            IReadOnlyList<LocalModelCacheRecord> combined = NormalizeRecords([.. sourceRecords, .. destinationRecords]);
+            if (combined.Count > 0)
+            {
+                await WriteIndexAsync(storagePaths.ModelCacheIndexPath, combined, cancellationToken).ConfigureAwait(false);
+                Interlocked.Increment(ref revision);
+                await WriteIndexAsync(destinationIndexPath, combined, cancellationToken).ConfigureAwait(false);
+                // Arm the mirror only after the destination copy succeeds so a failed write
+                // does not leave later SaveAsync calls targeting an unwritable directory.
+                secondaryIndexPath = destinationIndexPath;
+                mirroredBaseline = combined;
+            }
         }
         finally
         {
@@ -96,13 +158,18 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
 
     internal IReadOnlyList<LocalModelCacheRecord> Load(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(storagePaths.ModelCacheIndexPath))
+        cancellationToken.ThrowIfCancellationRequested();
+        return LoadIndex(storagePaths.ModelCacheIndexPath);
+    }
+
+    private static IReadOnlyList<LocalModelCacheRecord> LoadIndex(string indexPath)
+    {
+        if (!File.Exists(indexPath))
         {
             return [];
         }
 
-        byte[] payload = File.ReadAllBytes(storagePaths.ModelCacheIndexPath);
-        cancellationToken.ThrowIfCancellationRequested();
+        byte[] payload = File.ReadAllBytes(indexPath);
         ReadOnlySpan<byte> json = payload;
         ReadOnlySpan<byte> preamble = Encoding.UTF8.GetPreamble();
         if (json.StartsWith(preamble))
@@ -118,8 +185,8 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
     }
 
     /// <summary>
-    /// Persists the cache index via temp-file write and replace. Not thread-safe by itself; production code
-    /// must route mutations through <see cref="MutateAsync"/>. Internal so tests can seed initial state.
+    /// Persists the cache index via temp-file write and replace. Production read-modify-write operations
+    /// must route through <see cref="MutateAsync"/>. Internal so tests can seed initial state.
     /// </summary>
     internal async Task SaveAsync(
         IReadOnlyList<LocalModelCacheRecord> records,
@@ -127,8 +194,111 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
     {
         ArgumentNullException.ThrowIfNull(records);
 
-        Directory.CreateDirectory(storagePaths.ModelCacheDirectory);
-        string indexPath = storagePaths.ModelCacheIndexPath;
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var indexLocks = await AcquireIndexLocksAsync(cancellationToken).ConfigureAwait(false);
+            await SaveLockedAsync(records, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    private async Task SaveLockedAsync(IReadOnlyList<LocalModelCacheRecord> records, CancellationToken cancellationToken)
+    {
+        await WriteIndexAsync(storagePaths.ModelCacheIndexPath, records, cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref revision);
+        if (!string.IsNullOrWhiteSpace(secondaryIndexPath) &&
+            !RootsEqual(
+                Path.GetDirectoryName(storagePaths.ModelCacheIndexPath)!,
+                Path.GetDirectoryName(secondaryIndexPath)!))
+        {
+            await WriteIndexAsync(secondaryIndexPath, records, cancellationToken).ConfigureAwait(false);
+            mirroredBaseline = NormalizeRecords(records);
+        }
+    }
+
+    private Task<IDisposable> AcquireIndexLocksAsync(CancellationToken cancellationToken) =>
+        AcquireIndexLocksAsync(secondaryIndexPath is null
+            ? [storagePaths.ModelCacheIndexPath]
+            : [storagePaths.ModelCacheIndexPath, secondaryIndexPath], cancellationToken);
+
+    private static async Task<IDisposable> AcquireIndexLocksAsync(
+        IEnumerable<string> indexPaths, CancellationToken cancellationToken)
+    {
+        var locks = new List<FileStream>();
+        try
+        {
+            // All writers acquire multiple index locks in the same order to avoid deadlocks.
+            foreach (string path in indexPaths.Distinct(RootPathComparer).OrderBy(path => path, RootPathComparer))
+            {
+                locks.Add(await AcquireFileLockAsync(path + ".lock", cancellationToken).ConfigureAwait(false));
+            }
+
+            return new IndexLocks(locks);
+        }
+        catch
+        {
+            foreach (FileStream fileLock in locks)
+            {
+                fileLock.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    internal static async Task<FileStream> AcquireFileLockAsync(string lockPath, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // Keep the lock file in place: deleting it would allow another process to lock a different inode.
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex) when (IsLockContention(ex))
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    // Each code signals contention only on the platform where it means that: Windows sharing or
+    // lock violations, EWOULDBLOCK on Linux (11) and macOS (35). Elsewhere the same numbers mean
+    // other errors (for example EDEADLK or EPIPE), which must not be retried.
+    private static bool IsLockContention(IOException ex)
+    {
+        int code = ex.HResult & 0xffff;
+        return (OperatingSystem.IsWindows() && (code is 32 or 33))
+            || (OperatingSystem.IsLinux() && code == 11)
+            || (OperatingSystem.IsMacOS() && code == 35)
+            || ex.Message.Contains("used by another process", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class IndexLocks(List<FileStream> locks) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (FileStream fileLock in locks)
+            {
+                fileLock.Dispose();
+            }
+        }
+    }
+
+    private static async Task WriteIndexAsync(
+        string indexPath,
+        IReadOnlyList<LocalModelCacheRecord> records,
+        CancellationToken cancellationToken)
+    {
+        string directory = Path.GetDirectoryName(indexPath)
+            ?? throw new ArgumentException("The cache index path must include a directory.", nameof(indexPath));
+        Directory.CreateDirectory(directory);
         string tempPath = indexPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
 
         try
@@ -150,7 +320,6 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
             }
 
             File.Move(tempPath, indexPath, overwrite: true);
-            Interlocked.Increment(ref revision);
         }
         catch
         {
@@ -182,6 +351,12 @@ public sealed class LocalModelCacheRecordStore(TrackdubStoragePaths storagePaths
             .Select(group => group.OrderByDescending(variant => variant.CreatedAtUtc)
                 .ThenByDescending(variant => variant.IntegrityFailed).First())
             .ToArray();
+
+    private static bool ContainsRecord(IReadOnlyList<LocalModelCacheRecord> records, LocalModelCacheRecord candidate) =>
+        records.Any(record => string.Equals(record.ModelId, candidate.ModelId, StringComparison.OrdinalIgnoreCase) &&
+            RootsEqual(record.RootPath, candidate.RootPath) &&
+            string.Equals(record.Revision, candidate.Revision, StringComparison.Ordinal) &&
+            string.Equals(record.Sha256, candidate.Sha256, StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<LocalModelCacheRecord> NormalizeRecords(IReadOnlyList<LocalModelCacheRecord> records) =>
         records.GroupBy(record => record.ModelId, StringComparer.OrdinalIgnoreCase)

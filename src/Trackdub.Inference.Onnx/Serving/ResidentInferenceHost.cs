@@ -111,7 +111,7 @@ internal sealed class ResidentInferenceHost : IResidentInferenceHost
                 var stopwatch = Stopwatch.StartNew();
                 IReadOnlyList<ServeTensor> outputs = Run(session, inputs, cancellationToken);
                 stopwatch.Stop();
-                return new ResidentRunResult(entry.Spec.Name, entry.SelectedProvider, outputs, stopwatch.Elapsed);
+                return new ResidentRunResult(entry.Spec.Name, lease.SelectedProvider, outputs, stopwatch.Elapsed);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -124,7 +124,7 @@ internal sealed class ResidentInferenceHost : IResidentInferenceHost
                 entry.Poisoned = true;
                 throw new ResidentInferenceException(
                     ResidentInferenceErrorReasons.InferFailed,
-                    $"Inference failed on {entry.SelectedProvider}: {ex.Message}",
+                    $"Inference failed on {lease.SelectedProvider}: {ex.Message}",
                     ex);
             }
         }

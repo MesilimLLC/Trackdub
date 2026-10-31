@@ -73,6 +73,28 @@ public sealed class RuntimeModelRequestFactoryTests
     }
 
     [Fact]
+    public void Provider_preferences_round_trip_preserves_global_fallback_and_explicit_stage()
+    {
+        var options = new RuntimeModelRequestOptions(AsrModelOverride.Auto, true,
+            new Dictionary<string, ExecutionProviderKind> { ["Asr"] = ExecutionProviderKind.Cpu },
+            PreferredExecutionProvider: ExecutionProviderKind.DirectMl);
+        InferenceModelPreferences preferences = RuntimeModelRequestFactory.CreateModelPreferences(options);
+        RuntimeModelSelections selections = RuntimeModelRequestFactory.CreateSelectionsFromPreferences(preferences, isDevBuild: true);
+        InferenceModelPreferences result = RuntimeModelRequestFactory.CreateModelPreferences(selections);
+
+        Assert.Equal(ExecutionProviderKind.DirectMl, result.GetPreferredExecutionProvider(RuntimeStage.Tts));
+        Assert.False(result.RequiresPreferredExecutionProvider(RuntimeStage.Tts));
+        Assert.Equal(ExecutionProviderKind.Cpu, result.GetPreferredExecutionProvider(RuntimeStage.Asr));
+        Assert.True(result.RequiresPreferredExecutionProvider(RuntimeStage.Asr));
+        Assert.Single(selections.HardwareOverrides);
+
+        RuntimeModelSelections releaseSelections = RuntimeModelRequestFactory.CreateSelectionsFromPreferences(preferences);
+        InferenceModelPreferences releaseResult = RuntimeModelRequestFactory.CreateModelPreferences(releaseSelections);
+        Assert.True(releaseResult.RequiresPreferredExecutionProvider(RuntimeStage.Asr));
+        Assert.False(releaseResult.RequiresPreferredExecutionProvider(RuntimeStage.Tts));
+    }
+
+    [Fact]
     public void CreateSelectionsFromPreferences_maps_model_aliases()
     {
         var preferences = new InferenceModelPreferences(
@@ -145,6 +167,58 @@ public sealed class RuntimeModelRequestFactoryTests
 
         Assert.Equal("wav2vec2-lv60-espeak-cv-ft-onnx", preferences.LipSyncModelAlias);
         Assert.Equal("ByteDance/LatentSync-1.6", preferences.LipSynthesisModelAlias);
+    }
+
+    [Fact]
+    public void CreateSelectionsFromSettings_applies_global_provider_before_stage_overrides()
+    {
+        StudioSettings settings = StudioSettings.Default with
+        {
+            AsrModelOverride = AsrModelOverride.GenAi,
+            PreferredExecutionProvider = ExecutionProviderKind.DirectMl,
+            HardwareOverrides = new Dictionary<string, ExecutionProviderKind>
+            {
+                ["AsrGenAi"] = ExecutionProviderKind.Cpu,
+                ["Tts"] = ExecutionProviderKind.TensorRTRtx,
+            },
+        };
+
+        RuntimeModelSelections selections = RuntimeModelRequestFactory.CreateSelectionsFromSettings(settings, isDevBuild: true);
+        AssertSelectionPreferences(selections);
+
+        InferenceModelPreferences preferences = RuntimeModelRequestFactory.CreateModelPreferences(selections);
+        AssertGlobalPreferenceIsSoft(preferences);
+        AssertStageOverridesRemainRequired(preferences);
+    }
+
+    [Fact]
+    public void CreateSelectionsFromSettings_maps_undefined_global_provider_to_null()
+    {
+        StudioSettings settings = StudioSettings.Default with
+        {
+            PreferredExecutionProvider = (ExecutionProviderKind)int.MaxValue,
+        };
+
+        RuntimeModelSelections selections = RuntimeModelRequestFactory.CreateSelectionsFromSettings(settings, isDevBuild: true);
+
+        Assert.Null(selections.PreferredExecutionProvider);
+    }
+
+    [Fact]
+    public void CreateDiarizationRequest_maps_undefined_stage_override_to_automatic_selection()
+    {
+        var options = new RuntimeModelRequestOptions(
+            AsrModelOverride: AsrModelOverride.Auto,
+            IsDevBuild: true,
+            HardwareOverrides: new Dictionary<string, ExecutionProviderKind>
+            {
+                [nameof(RuntimeStage.Diarization)] = (ExecutionProviderKind)int.MaxValue,
+            });
+
+        RuntimeModelRequest request = RuntimeModelRequestFactory.CreateDiarizationRequest(options);
+
+        Assert.Null(request.PreferredExecutionProvider);
+        Assert.False(request.RequirePreferredExecutionProvider);
     }
 
     [Fact]
@@ -492,5 +566,31 @@ public sealed class RuntimeModelRequestFactoryTests
         Assert.Equal(RuntimeStage.Tts, request.Stage);
         Assert.Equal("cosyvoice-300m", request.PreferredModelAlias);
         Assert.True(request.RequirePreferredModelAlias);
+    }
+
+    private static void AssertSelectionPreferences(RuntimeModelSelections selections)
+    {
+        Assert.Equal(ExecutionProviderKind.DirectMl, selections.PreferredExecutionProvider);
+        Assert.Equal(ExecutionProviderKind.Cpu, selections.HardwareOverrides["AsrGenAi"]);
+        Assert.Equal(ExecutionProviderKind.TensorRTRtx, selections.HardwareOverrides["Tts"]);
+    }
+
+    private static void AssertGlobalPreferenceIsSoft(InferenceModelPreferences preferences)
+    {
+        Assert.Equal(ExecutionProviderKind.DirectMl, preferences.GetPreferredExecutionProvider(RuntimeStage.Vad));
+        Assert.Equal(ExecutionProviderKind.DirectMl, preferences.GetPreferredExecutionProvider(RuntimeStage.Translation));
+        AssertGlobalPreferenceDoesNotRequireProvider(preferences);
+    }
+
+    private static void AssertGlobalPreferenceDoesNotRequireProvider(InferenceModelPreferences preferences)
+    {
+        Assert.False(preferences.RequiresPreferredExecutionProvider(RuntimeStage.Vad));
+        Assert.False(preferences.RequiresPreferredExecutionProvider(RuntimeStage.Translation));
+    }
+
+    private static void AssertStageOverridesRemainRequired(InferenceModelPreferences preferences)
+    {
+        Assert.True(preferences.RequiresPreferredExecutionProvider(RuntimeStage.Asr));
+        Assert.True(preferences.RequiresPreferredExecutionProvider(RuntimeStage.Tts));
     }
 }
