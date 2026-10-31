@@ -271,7 +271,6 @@ public partial class TranscriptProjectServiceTests
         public object? GetService(Type serviceType) => null;
     }
 
-
     [Fact]
     public async Task SpeakerWorkflow_RenameSpeakerAsync_returns_refreshed_state()
     {
