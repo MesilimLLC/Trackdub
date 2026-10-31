@@ -23,12 +23,12 @@ COPY src/Trackdub.Media.Playback/Trackdub.Media.Playback.csproj src/Trackdub.Med
 COPY src/Trackdub.Analyzers/Trackdub.Analyzers.csproj src/Trackdub.Analyzers/
 COPY src/Trackdub.OnnxRuntime.Dnnl.Native/Trackdub.OnnxRuntime.Dnnl.Native.csproj src/Trackdub.OnnxRuntime.Dnnl.Native/
 
-RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+RUN \
     dotnet restore src/Trackdub.Cli/Trackdub.Cli.csproj -p:TargetFramework=net10.0 -r linux-x64 \
     && dotnet restore src/Trackdub.Analyzers/Trackdub.Analyzers.csproj -p:TargetFramework=netstandard2.0
 
 COPY src ./src
-RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+RUN \
     dotnet publish src/Trackdub.Cli/Trackdub.Cli.csproj \
     --configuration Release \
     --framework net10.0 \
@@ -47,7 +47,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
 # container publish only, with the CUDA-enabled core from the transitive
 # Microsoft.ML.OnnxRuntime.Gpu.Linux package (version = OnnxRuntimeVersion in
 # Directory.Packages.props). Desktop/Windows publishes are unaffected.
-RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+RUN \
     GPU_CORE="$HOME/.nuget/packages/microsoft.ml.onnxruntime.gpu.linux/1.31.0/runtimes/linux-x64/native/libonnxruntime.so" \
     && test -f "$GPU_CORE" \
     && cp "$GPU_CORE" /app/publish/libonnxruntime.so
@@ -59,7 +59,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
 # Copy the base library from the Microsoft.ML.OnnxRuntimeGenAI package, same pattern as the
 # GPU core overwrite above. The build fails if this pin drifts from the CUDA GenAI provider
 # pinned in Directory.Packages.props, so the base library and provider helper stay one version.
-RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+RUN \
     GENAI_VERSION="$(sed -n 's/.*Include="Microsoft.ML.OnnxRuntimeGenAI" Version="\([^"]*\)".*/\1/p' Directory.Packages.props)" \
     && test -n "$GENAI_VERSION" \
     && grep -q "Microsoft.ML.OnnxRuntimeGenAI.Cuda\" Version=\"${GENAI_VERSION}\"" Directory.Packages.props \

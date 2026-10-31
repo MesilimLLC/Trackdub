@@ -34,8 +34,20 @@ public sealed class CliMachineBoundaryTests
         Assert.Equal("qwen3-tts-1.7b-customvoice", PocServerQualityPreset.Create().Models!["tts"]);
         Assert.Equal("quantized", PocServerQualityPreset.Variants["translation"]);
         Assert.Equal("cuda", PocServerQualityPreset.Providers["tts"]);
-        Assert.True(PocPresets.TryResolve(PocServerQualityPreset.Name, out _, out _, out _));
-        Assert.True(PocPresets.TryResolve(PocServerPreset.Name, out _, out _, out _));
+        Assert.True(PocPresets.TryResolve(PocServerQualityPreset.Name, out var qualityPreset, out var qualityProviders, out var qualityVariants));
+        Assert.NotNull(qualityPreset);
+        Assert.Equal("qwen3-tts-1.7b-customvoice", qualityPreset!.Models!["tts"]);
+        Assert.Equal("cuda", qualityProviders!["tts"]);
+        Assert.Equal("default", qualityVariants!["tts"]);
+        Assert.True(PocPresets.TryResolve(PocServerPreset.Name, out var serverPreset, out var serverProviders, out var serverVariants));
+        Assert.NotNull(serverPreset);
+        Assert.Equal("kokoro", serverPreset!.Models!["tts"]);
+        Assert.Equal("cpu", serverProviders!["vad"]);
+        Assert.Equal("quantized", serverVariants!["translation"]);
+        Assert.False(PocPresets.TryResolve("not-a-preset", out var unknownPreset, out var unknownProviders, out var unknownVariants));
+        Assert.Null(unknownPreset);
+        Assert.Null(unknownProviders);
+        Assert.Null(unknownVariants);
     }
     [Fact]
     public void PipelineAcceptsDedicatedMachineFiles()

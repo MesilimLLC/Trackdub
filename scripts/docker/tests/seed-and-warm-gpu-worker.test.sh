@@ -54,14 +54,27 @@ run_case rtx rtx rtx
 run_case '' '' rtx
 
 # Without an explicit TRACKDUB_MODEL_SET, each profile seeds its own pinned list.
+# Assert the full server list from literals, not from the manifest the seed step reads.
 run_default_seed_case server
-grep -q 'models download google/madlad400-3b-mt --variant quantized' "$TEST_LOG"
+expected_server_downloads=(
+  'models download onnx-community/silero-vad'
+  'models download Rikorose/DeepFilterNet3'
+  'models download cgus/diar_streaming_sortformer_4spk-v2.1-onnx'
+  'models download tonythethompson/parakeet-tdt-0.6b-v3-onnx'
+  'models download google/madlad400-3b-mt --variant quantized'
+  'models download csukuangfj/sherpa-onnx-spleeter-2stems'
+  'models download onnx-community/Kokoro-82M-v1.0-ONNX --variant default'
+)
+for expected_download in "${expected_server_downloads[@]}"; do
+  grep -qF -- "$expected_download" "$TEST_LOG"
+done
 ! grep -q 'trt-fp16' "$TEST_LOG"
 ! grep -qi 'cosyvoice' "$TEST_LOG"
 
 run_default_seed_case rtx
 grep -q 'models download google/madlad400-3b-mt --variant trt-fp16' "$TEST_LOG"
 grep -qi 'models download tonythethompson/CosyVoice-300M-ONNX --variant int8' "$TEST_LOG"
+grep -q 'models download tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX' "$TEST_LOG"
 
 # The classic-TRT warm list must not target an export the server seed does not provide.
 if grep -v '^[[:space:]]*#' "$REPO_ROOT/docker/poc-warm-models.server.txt" | grep -qi 'madlad'; then

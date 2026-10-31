@@ -34,7 +34,7 @@ The first GHCR package may default to private. After the first successful publis
 
 ## Curated POC model volume
 
-The initial seed list is `docker/poc-models.txt`, one pinned manifest model per standard pipeline stage for the proposal's EN→ES and EN→ZH test matrix:
+The initial seed list is `docker/poc-models.txt`: one pinned manifest model per standard pipeline stage for the proposal's EN→ES and EN→ZH test matrix, plus the evaluation quality TTS used by the CUDA smoke matrix:
 
 - Silero VAD
 - DeepFilterNet3 speech enhancement
@@ -44,8 +44,9 @@ The initial seed list is `docker/poc-models.txt`, one pinned manifest model per 
 - Spleeter source separation
 - Kokoro 82M TTS (`onnx-community/Kokoro-82M-v1.0-ONNX`), the planner's first TTS preference
 - CosyVoice 300M voice-cloning TTS, seeded as the `int8` variant (covers English, Spanish, and Chinese)
+- Qwen3-TTS-1.7B CustomVoice (`tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX`), the evaluation-only quality TTS used by `poc-server-quality-v1` and the CUDA smoke matrix
 
-The set is intentionally curated, not every one of the 47 model entries or experimental variant in the developer cache. `scripts/docker/seed-model-volume.sh` downloads each exact model through Trackdub's CLI; the list supports `model-id|variant-alias` for pinned variants such as the `trt-fp16` translation export. The CLI resolves pinned revisions and SHA-256 hashes in `bundled-models.manifest.json`; an integrity mismatch fails instead of silently accepting different weights. The manifest marks all eight selected models as commercially usable and redistributable; seven require attribution. Preserve each model's license/attribution notice alongside the seeded weights. Silero VAD is intentionally CPU-side as a small model.
+The set is intentionally curated, not every one of the 47 model entries or experimental variant in the developer cache. `scripts/docker/seed-model-volume.sh` downloads each exact model through Trackdub's CLI; the list supports `model-id|variant-alias` for pinned variants such as the `trt-fp16` translation export. The CLI resolves pinned revisions and SHA-256 hashes in `bundled-models.manifest.json`; an integrity mismatch fails instead of silently accepting different weights. The manifest marks all nine selected models as commercially usable and redistributable; eight require attribution. Preserve each model's license/attribution notice alongside the seeded weights. Silero VAD is intentionally CPU-side as a small model.
 
 The runtime planner now places `parakeet-tdt-0.6b-v3` first in the ASR preference list and admits its `parakeet-tdt` engine family; the planner regression test confirms the EN POC resolves to this model when it is not yet cached. Parakeet passed `providers trt-rtx smoke --model parakeet-tdt-0.6b-v3` on an RTX 5070: 1 attempted, 1 passed, 0 failed, 0 skipped. It verified the selected provider and ran the encoder/decoder probe. That historical run then exited 139 because the CLI left the session in the process-wide pool until native process shutdown. Fixed on 2026-10-20: provider smoke and verify handlers evict idle sessions before returning. Rebuilt current-source container runs passed both DeepFilterNet3 and Parakeet TRT-RTX smokes with exit code 0.
 
@@ -167,7 +168,7 @@ Container CI enforces the profile marker, Ubuntu 24.04 base, `setsid`, classic-T
 
 ## Quality TTS preset (evaluation)
 
-`poc-server-quality-v1` is an opt-in evaluation preset for the server profile. It keeps the `poc-server-v1` pipeline (Parakeet ASR, MADLAD quantized translation, same CUDA pins) and replaces Kokoro with Qwen3-TTS-1.7B CustomVoice (`qwen3-tts-1.7b-customvoice`). Seed it with `TRACKDUB_MODEL_SET=docker/poc-server-quality-models.txt`; the accepted baseline and its evidence are unchanged.
+`poc-server-quality-v1` is an opt-in evaluation preset for the server profile. It keeps the `poc-server-v1` pipeline (Parakeet ASR, MADLAD quantized translation, same CUDA pins) and replaces Kokoro with Qwen3-TTS-1.7B CustomVoice (`qwen3-tts-1.7b-customvoice`). Seed it from the repo root with `TRACKDUB_GPU_PROFILE=server TRACKDUB_MODEL_SET=docker/poc-server-quality-models.txt ./scripts/docker/seed-and-warm-gpu-worker.sh`; the accepted baseline and its evidence are unchanged.
 
 - Nine preset voices (`qwen3:vivian`, `qwen3:serena`, `qwen3:ryan`, and others); `qwen3:ryan` is the default for Spanish. Every preset speaks all ten supported languages (`zh,en,ja,ko,de,fr,ru,pt,es,it`).
 - No voice cloning and no cloning consent. CosyVoice and Chatterbox are cloning-only in this codebase and require a reference clip, so they are not drop-in alternatives.
