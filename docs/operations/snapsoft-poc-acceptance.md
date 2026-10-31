@@ -18,12 +18,10 @@ a second pipeline implementation. `Dockerfile.cloud-worker` requires `SERVER_IMA
 to name an approved **digest built with the new CLI protocol**. Historical server images
 do not have `--result-file` or `--progress-file`; copying the adapter into one is insufficient.
 Existing `server` and `rtx` stages and entrypoints remain intact.
-Container CI verifies the server image contract on every build: the
+Container CI enforces the server image contract before publication: the
 `TRACKDUB_GPU_PROFILE=server` marker, the Ubuntu 24.04 base, `setsid`, the classic
 TensorRT/cuDNN/CUDA sonames, the ONNX Runtime native libraries, and the
-`--result-file`/`--progress-file` machine protocol. On publish events the image is
-pushed before these checks run, so a failing check fails the workflow but does not
-retract the published tag.
+`--result-file`/`--progress-file` machine protocol.
 `poc-server-v1` remains the accepted baseline. `poc-server-quality-v1` is an evaluation-only
 CLI preset and is not part of this acceptance contract until its quality, latency, VRAM and
 cost evidence is reviewed.
