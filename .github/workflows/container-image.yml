@@ -213,6 +213,7 @@ jobs:
           profile="$(docker run --rm --entrypoint sh "$IMAGE_REF" -c 'printf %s "$TRACKDUB_GPU_PROFILE"')"
           test "$profile" = "${{ matrix.profile }}"
           docker run --rm --entrypoint sh "$IMAGE_REF" -c '
+            set -e
             grep -q "^ID=ubuntu$" /etc/os-release
             grep -q "^VERSION_ID=\"24.04\"$" /etc/os-release
           '
