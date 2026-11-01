@@ -281,7 +281,10 @@ jobs:
           while IFS= read -r tag; do
             [[ -z "$tag" ]] && continue
             docker tag "$SOURCE_IMAGE" "$tag"
-            push_output="$(docker push "$tag" 2>&1)"
+            if ! push_output="$(docker push "$tag" 2>&1)"; then
+              printf '%s\n' "$push_output" >&2
+              exit 1
+            fi
             printf '%s\n' "$push_output"
             if [[ -z "$digest" ]]; then
               digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | tail -n 1)"
