@@ -85,10 +85,16 @@ run_default_seed_case rtx
 expect_download 'models download google/madlad400-3b-mt --variant trt-fp16'
 grep -qiE -- 'models download tonythethompson/CosyVoice-300M-ONNX --variant int8$' "$TEST_LOG"
 expect_download 'models download tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX'
+test "$(grep -c 'models download ' "$TEST_LOG")" -eq 9
+grep -qF -- '--model /data/models/google/madlad400-3b-mt/trt_rtx_mixed_fp16_fp32/encoder_model.onnx' "$TEST_LOG"
 
 # The classic-TRT warm list must not target an export the server seed does not provide.
 if grep -v '^[[:space:]]*#' "$REPO_ROOT/docker/poc-warm-models.server.txt" | grep -qi 'madlad'; then
   echo 'Server warm list must not target the unseeded MADLAD export.' >&2
+  exit 1
+fi
+if grep -v '^[[:space:]]*#' "$REPO_ROOT/docker/poc-warm-models.server.txt" | grep -qi 'opus'; then
+  echo 'Server warm list must not target the unseeded OPUS-MT export.' >&2
   exit 1
 fi
 

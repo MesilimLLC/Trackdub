@@ -278,8 +278,18 @@ jobs:
         run: |
           set -euo pipefail
           digest=""
+          # Push the immutable sha- tag first so a failed push leaves mutable tags unchanged.
+          sha_tags=()
+          mutable_tags=()
           while IFS= read -r tag; do
             [[ -z "$tag" ]] && continue
+            if [[ "$tag" == *:sha-* ]]; then
+              sha_tags+=("$tag")
+            else
+              mutable_tags+=("$tag")
+            fi
+          done <<< "$TAGS"
+          for tag in "${sha_tags[@]}" "${mutable_tags[@]}"; do
             docker tag "$SOURCE_IMAGE" "$tag"
             if ! push_output="$(docker push "$tag" 2>&1)"; then
               printf '%s\n' "$push_output" >&2
@@ -289,7 +299,7 @@ jobs:
             if [[ -z "$digest" ]]; then
               digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | tail -n 1)"
             fi
-          done <<< "$TAGS"
+          done
           if [[ -z "$digest" ]]; then
             echo "::error::Could not determine the published digest for $SOURCE_IMAGE"
             exit 1
