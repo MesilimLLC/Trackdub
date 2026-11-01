@@ -87,6 +87,26 @@ public sealed class UnattendedFallbackVoiceTests
     }
 
     [Fact]
+    public void CustomVoice_spanish_assigns_qwen3_ryan_without_kokoro_catalog()
+    {
+        // Quality seed volumes ship CustomVoice only; Spanish catalog listing omits Qwen presets.
+        ProjectSpeaker speaker = CreateSpeaker("Speaker 1");
+        TranscriptProjectState state = BuildState(
+            speakers: [speaker],
+            availableVoices: [],
+            voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "es",
+                Qwen3TtsDefaults.CustomVoice17Alias);
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.Equal("qwen3:ryan", fallbackVoiceIds[speaker.Id]);
+    }
+
+    [Fact]
     public void Chinese_default_stays_vivian_when_the_list_already_contains_every_qwen3_preset()
     {
         ProjectSpeaker speaker = CreateSpeaker("Speaker 1");

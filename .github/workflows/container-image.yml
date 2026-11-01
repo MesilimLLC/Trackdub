@@ -128,7 +128,8 @@ jobs:
         run: |
           set -euo pipefail
           current_bytes="$(docker image inspect "$IMAGE_REF" --format '{{.Size}}')"
-          baseline_state="missing"
+          # PR runs skip the baseline pull, so default to not-captured rather than missing/first-build.
+          baseline_state="not-captured"
           if [[ -f "image-size-baseline-${{ matrix.profile }}.txt" ]]; then
             baseline_state="$(<"image-size-baseline-${{ matrix.profile }}.txt")"
           fi
@@ -163,6 +164,8 @@ jobs:
               elif baseline_state == "error":
                   output.write("- Previous latest: unavailable (registry pull failed; size delta unknown)\n")
                   print("::error::Could not read the previous latest image size; the size delta is unavailable.")
+              elif baseline_state == "not-captured":
+                  output.write("- Previous latest: not captured (baseline pull is skipped on pull requests)\n")
               else:
                   output.write("- Previous latest: unavailable (first build)\n")
               output.write(f"- Record: `{record.name}`\n")
@@ -173,6 +176,8 @@ jobs:
         uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: trackdub-ci:${{ matrix.profile }}
+          # trivy-action v0.33.1 defaults to v0.65.0, whose release assets were removed (404).
+          version: v0.76.1
           format: table
           vuln-type: os,library
           severity: CRITICAL,HIGH
@@ -243,11 +248,12 @@ jobs:
               lib="$1"
               allowed="$2"
               output="$(ldd "$lib" 2>&1)" || { echo "ldd failed for $lib:" >&2; printf "%s\n" "$output" >&2; exit 1; }
-              unresolved="$(printf "%s\n" "$output" | grep "not found")"
-              if [[ -n "$allowed" ]]; then
-                unresolved="$(printf "%s\n" "$unresolved" | grep -v "$allowed")"
+              # Image /bin/sh is dash: tolerate grep no-match under set -e and use POSIX [ ].
+              unresolved="$(printf "%s\n" "$output" | grep "not found" || true)"
+              if [ -n "$allowed" ]; then
+                unresolved="$(printf "%s\n" "$unresolved" | grep -v "$allowed" || true)"
               fi
-              if [[ -n "$unresolved" ]]; then
+              if [ -n "$unresolved" ]; then
                 echo "Unresolved dependencies in $lib:" >&2
                 printf "%s\n" "$unresolved" >&2
                 exit 1
@@ -265,18 +271,27 @@ jobs:
       - name: Publish verified image
         if: github.event_name != 'pull_request'
         id: publish
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          target: ${{ matrix.profile }}
-          platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          push: true
-          cache-from: type=gha,scope=trackdub-linux-amd64-${{ matrix.profile }}
-          provenance: mode=max
-          sbom: true
+        shell: bash
+        env:
+          SOURCE_IMAGE: trackdub-ci:${{ matrix.profile }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          digest=""
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            docker tag "$SOURCE_IMAGE" "$tag"
+            push_output="$(docker push "$tag" 2>&1)"
+            printf '%s\n' "$push_output"
+            if [[ -z "$digest" ]]; then
+              digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | tail -n 1)"
+            fi
+          done <<< "$TAGS"
+          if [[ -z "$digest" ]]; then
+            echo "::error::Could not determine the published digest for $SOURCE_IMAGE"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Record published digest
         if: github.event_name != 'pull_request'
