@@ -43,9 +43,16 @@ run_case() {
 run_default_seed_case() {
   local profile="$1"
   : > "$TEST_LOG"
-  env -u TRACKDUB_MODEL_SET TRACKDUB_GPU_PROFILE="$profile" TRACKDUB_GPU_TARGET="$profile" \
+  env -u TRACKDUB_MODEL_SET -u TRACKDUB_WARM_MODEL_SET \
+    TRACKDUB_GPU_PROFILE="$profile" TRACKDUB_GPU_TARGET="$profile" \
     bash "$REPO_ROOT/scripts/docker/seed-and-warm-gpu-worker.sh" > "$TEST_ROOT/output" 2>&1
   test -s "$TEST_LOG"
+}
+
+expect_download() {
+  local escaped
+  escaped="$(printf '%s' "$1" | sed 's/[][\\.*^$+?(){}|]/\\&/g')"
+  grep -qE -- "${escaped}\$" "$TEST_LOG"
 }
 
 run_case server '' server
@@ -66,15 +73,18 @@ expected_server_downloads=(
   'models download onnx-community/Kokoro-82M-v1.0-ONNX --variant default'
 )
 for expected_download in "${expected_server_downloads[@]}"; do
-  grep -qF -- "$expected_download" "$TEST_LOG"
+  expect_download "$expected_download"
 done
+test "$(grep -c 'models download ' "$TEST_LOG")" -eq "${#expected_server_downloads[@]}"
+# The default server warm list must be selected, not the fixture list.
+grep -qF -- '--model /data/models/Rikorose/DeepFilterNet3/enc.onnx' "$TEST_LOG"
 ! grep -q 'trt-fp16' "$TEST_LOG"
 ! grep -qi 'cosyvoice' "$TEST_LOG"
 
 run_default_seed_case rtx
-grep -q 'models download google/madlad400-3b-mt --variant trt-fp16' "$TEST_LOG"
-grep -qi 'models download tonythethompson/CosyVoice-300M-ONNX --variant int8' "$TEST_LOG"
-grep -q 'models download tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX' "$TEST_LOG"
+expect_download 'models download google/madlad400-3b-mt --variant trt-fp16'
+grep -qiE -- 'models download tonythethompson/CosyVoice-300M-ONNX --variant int8$' "$TEST_LOG"
+expect_download 'models download tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX'
 
 # The classic-TRT warm list must not target an export the server seed does not provide.
 if grep -v '^[[:space:]]*#' "$REPO_ROOT/docker/poc-warm-models.server.txt" | grep -qi 'madlad'; then

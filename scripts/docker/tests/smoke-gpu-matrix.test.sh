@@ -61,6 +61,7 @@ printf '%s\n' '{"attempted":1,"passed":0,"failed":1,"skipped":0,"targets":[{"sta
   > "$TEST_ROOT/passed-evidence/removed-label.stdout.json"
 
 run_matrix passed 0 0
+grep -qx 'run --rm --gpus all -v trackdub_trackdub-data:/data matrix-test-image providers cuda smoke --model tts-qwen-1.7b-custom' "$TEST_ROOT/passed.calls"
 test "$(grep -c '"status": "passed"' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 13
 test "$(grep -c '"exitCode": 0' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 13
 
