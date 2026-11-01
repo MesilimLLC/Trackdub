@@ -31,6 +31,9 @@ public partial class TranscriptProjectServiceTests
             beforeLipRepair.TtsTakes,
             beforeLipRepair.StageRuns,
             SourceGainDb: -8d,
+            DubbedSpeechGainDb: -4d,
+            DuckingLeadSeconds: 0.3d,
+            RestoreOriginalPan: true,
             ApplyTimbrePolish: true,
             CandidateGroups: beforeLipRepair.TtsCandidateGroups,
             MediaDurationSeconds: mediaAsset.DurationSeconds));
@@ -58,6 +61,9 @@ public partial class TranscriptProjectServiceTests
         Assert.Equal(-200d, driverRender.MixPlan.SourceGainDb);
         Assert.False(driverRender.MixPlan.ApplyTimbrePolish);
         Assert.Empty(driverRender.MixPlan.MediaClips);
+        Assert.Equal(-4d, driverRender.MixPlan.DubbedSpeechGainDb);
+        Assert.Equal(0.3d, driverRender.MixPlan.DuckingLeadSeconds);
+        Assert.True(driverRender.MixPlan.RestoreOriginalPan);
         MixPlan persistedUserPlan = Assert.IsType<MixPlan>(await mixPlanStore.LoadAsync(token));
         Assert.Equal(-8d, persistedUserPlan.SourceGainDb);
         Assert.True(persistedUserPlan.ApplyTimbrePolish);

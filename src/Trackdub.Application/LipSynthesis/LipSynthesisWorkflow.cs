@@ -148,6 +148,7 @@ public sealed class LipSynthesisWorkflow(
                 .ConfigureAwait(false);
         }
 
+        MixPlan? savedPlan = currentState.CurrentMixPlan;
         MixPlan mixPlan;
         try
         {
@@ -159,6 +160,13 @@ public sealed class LipSynthesisWorkflow(
                 currentState.TranslatedSegments,
                 currentState.TtsTakes,
                 currentState.StageRuns,
+                SourceGainDb: savedPlan?.SourceGainDb ?? 0d,
+                DubbedSpeechGainDb: savedPlan?.DubbedSpeechGainDb ?? 0d,
+                DuckingGainDb: savedPlan?.DuckingGainDb,
+                DuckingLeadSeconds: savedPlan?.DuckingLeadSeconds ?? 0.05d,
+                DuckingTailSeconds: savedPlan?.DuckingTailSeconds ?? 0.18d,
+                RestoreOriginalPan: savedPlan?.RestoreOriginalPan ?? false,
+                ApplyTimbrePolish: savedPlan?.ApplyTimbrePolish ?? true,
                 CandidateGroups: currentState.TtsCandidateGroups,
                 MediaDurationSeconds: mediaDurationSeconds));
         }
