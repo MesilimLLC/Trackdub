@@ -18,6 +18,13 @@ a second pipeline implementation. `Dockerfile.cloud-worker` requires `SERVER_IMA
 to name an approved **digest built with the new CLI protocol**. Historical server images
 do not have `--result-file` or `--progress-file`; copying the adapter into one is insufficient.
 Existing `server` and `rtx` stages and entrypoints remain intact.
+Container CI enforces the server image contract before publication: the
+`TRACKDUB_GPU_PROFILE=server` marker, the Ubuntu 24.04 base, `setsid`, the classic
+TensorRT/cuDNN/CUDA sonames, the ONNX Runtime native libraries, and the
+`--result-file`/`--progress-file` machine protocol.
+`poc-server-v1` remains the accepted baseline. `poc-server-quality-v1` is an evaluation-only
+CLI preset and is not part of this acceptance contract until its quality, latency, VRAM and
+cost evidence is reviewed.
 
 There is deliberately no production fake scheduler. `IJobScheduler` is the integration
 seam. SnapSoft must select Batch or ECS before one concrete adapter is implemented.

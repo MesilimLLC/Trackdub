@@ -47,13 +47,13 @@ run_matrix() {
   fi
 
   test "$actual_exit_code" -eq "$expected_exit_code"
-  test "$(wc -l < "$command_log")" -eq 12
-  test "$(find "$output_dir" -maxdepth 1 -name '*.exitcode' | wc -l)" -eq 12
+  test "$(wc -l < "$command_log")" -eq 13
+  test "$(find "$output_dir" -maxdepth 1 -name '*.exitcode' | wc -l)" -eq 13
 }
 
 run_matrix failed 139 1
-test "$(grep -c '"status": "failed"' "$TEST_ROOT/failed-evidence/matrix-summary.json")" -eq 12
-test "$(grep -c '"exitCode": 139' "$TEST_ROOT/failed-evidence/matrix-summary.json")" -eq 12
+test "$(grep -c '"status": "failed"' "$TEST_ROOT/failed-evidence/matrix-summary.json")" -eq 13
+test "$(grep -c '"exitCode": 139' "$TEST_ROOT/failed-evidence/matrix-summary.json")" -eq 13
 grep -q 'Container exited with code 139' "$TEST_ROOT/failed-evidence/matrix-summary.json"
 
 # Evidence left by an earlier run in a reused directory must not affect the current verdict.
@@ -61,8 +61,9 @@ printf '%s\n' '{"attempted":1,"passed":0,"failed":1,"skipped":0,"targets":[{"sta
   > "$TEST_ROOT/passed-evidence/removed-label.stdout.json"
 
 run_matrix passed 0 0
-test "$(grep -c '"status": "passed"' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 12
-test "$(grep -c '"exitCode": 0' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 12
+grep -qx 'run --rm --gpus all -v trackdub_trackdub-data:/data matrix-test-image providers cuda smoke --model tts-qwen-1.7b-custom' "$TEST_ROOT/passed.calls"
+test "$(grep -c '"status": "passed"' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 13
+test "$(grep -c '"exitCode": 0' "$TEST_ROOT/passed-evidence/matrix-summary.json")" -eq 13
 
 export FAKE_DOCKER_VERDICT=failed
 run_matrix failed-verdict 0 1

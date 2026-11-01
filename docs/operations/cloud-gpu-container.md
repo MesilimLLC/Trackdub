@@ -3,37 +3,38 @@
 For the asynchronous AWS API/supervisor, use the [SnapSoft application acceptance contract](snapsoft-poc-acceptance.md).
 That path adds a CPU API and derived supervisor image; the CLI image below remains one-shot.
 `poc-server-v1` uses `docker/poc-server-models.txt` (MADLAD quantized/CUDA), distinct from
-the historical TRT warm list. Seed with `TRACKDUB_MODEL_SET=docker/poc-server-models.txt`.
+the historical TRT warm list. `seed-and-warm-gpu-worker.sh` seeds that list by default for
+`TRACKDUB_GPU_PROFILE=server`; `TRACKDUB_MODEL_SET` still overrides it.
 No target AWS GPU readiness is established by packaging or local protocol tests.
 
 Trackdub's Linux GPU worker is a one-shot CLI container. The image contains the application/runtime; model weights, the engine cache, and LinML provider downloads live in persistent Docker volumes. Do not copy TensorRT engine cache files between GPU families, GPU models, or driver versions.
 
 ## Published images
 
-One `Dockerfile` publishes two GPU profiles from a shared `runtime-base` stage: `--target rtx` (`TRACKDUB_GPU_PROFILE=rtx`, the TensorRT-RTX route) and `--target server` (`TRACKDUB_GPU_PROFILE=server`, strict classic TensorRT + CUDA). Neither profile bakes a VRAM budget; the session pool auto-scales its admission budget from detected GPU VRAM.
+One `Dockerfile` publishes two GPU profiles from a shared `runtime-base` stage: `--target rtx` (`TRACKDUB_GPU_PROFILE=rtx`, the TensorRT-RTX route) and `--target server` (`TRACKDUB_GPU_PROFILE=server`, the AWS datacenter-GPU route: classic TensorRT plus CUDA, no TensorRT-RTX plugin or license). Neither profile bakes a VRAM budget; the session pool auto-scales its admission budget from detected GPU VRAM. The `server` image carries the CUDA-pinned `poc-server-v1` baseline; classic TensorRT is available and warmed only for the seeded, TRT-qualified graphs.
 
 `.github/workflows/container-image.yml` builds `linux/amd64` for both profiles on container-related pull requests, checks the runtime, and publishes on `main`, `container-v*` tags, or manual dispatch. Every published tag carries the profile suffix:
 
 ```text
-ghcr.io/Mesililm-LLC/trackdub:main-rtx
-ghcr.io/Mesililm-LLC/trackdub:main-server
-ghcr.io/Mesililm-LLC/trackdub:sha-<commit>-rtx
-ghcr.io/Mesililm-LLC/trackdub:sha-<commit>-server
-ghcr.io/Mesililm-LLC/trackdub:container-vX.Y.Z-rtx
-ghcr.io/Mesililm-LLC/trackdub:container-vX.Y.Z-server
-ghcr.io/Mesililm-LLC/trackdub:pr-N-rtx
-ghcr.io/Mesililm-LLC/trackdub:pr-N-server
-ghcr.io/Mesililm-LLC/trackdub:latest-rtx
-ghcr.io/Mesililm-LLC/trackdub:latest-server
+ghcr.io/mesililm-llc/trackdub:main-rtx
+ghcr.io/mesililm-llc/trackdub:main-server
+ghcr.io/mesililm-llc/trackdub:sha-<commit>-rtx
+ghcr.io/mesililm-llc/trackdub:sha-<commit>-server
+ghcr.io/mesililm-llc/trackdub:container-vX.Y.Z-rtx
+ghcr.io/mesililm-llc/trackdub:container-vX.Y.Z-server
+ghcr.io/mesililm-llc/trackdub:pr-N-rtx
+ghcr.io/mesililm-llc/trackdub:pr-N-server
+ghcr.io/mesililm-llc/trackdub:latest-rtx
+ghcr.io/mesililm-llc/trackdub:latest-server
 ```
 
-The earlier bare tags (`main`, `sha-<commit>`, `container-vX.Y.Z`, `latest`) are retired deliberately: with two profiles, an unsuffixed tag would not say which GPU route the image provisions for. Local Compose builds pick a target with `TRACKDUB_GPU_TARGET` (default `rtx`); `docker-compose.aws.yml` always selects the `server` target and defaults `TRACKDUB_IMAGE` to `ghcr.io/Mesililm-LLC/trackdub:main-server` so AWS workers pull the published server image.
+The earlier bare tags (`main`, `sha-<commit>`, `container-vX.Y.Z`, `latest`) are retired deliberately: with two profiles, an unsuffixed tag would not say which GPU route the image provisions for. Local Compose builds pick a target with `TRACKDUB_GPU_TARGET` (default `rtx`); `docker-compose.aws.yml` always selects the `server` target and defaults `TRACKDUB_IMAGE` to `ghcr.io/mesililm-llc/trackdub:main-server` so AWS workers pull the published server image.
 
-The first GHCR package may default to private. After the first successful publish, set `ghcr.io/Mesililm-LLC/trackdub` visibility to public in the package settings if AWS workers should pull it anonymously. ECR mirroring can be added later without changing the model-volume process.
+The first GHCR package may default to private. After the first successful publish, set `ghcr.io/mesililm-llc/trackdub` visibility to public in the package settings if AWS workers should pull it anonymously. ECR mirroring can be added later without changing the model-volume process.
 
 ## Curated POC model volume
 
-The initial seed list is `docker/poc-models.txt`, one pinned manifest model per standard pipeline stage for the proposal's EN→ES and EN→ZH test matrix:
+The initial seed list is `docker/poc-models.txt`: one pinned manifest model per standard pipeline stage for the proposal's EN→ES and EN→ZH test matrix, plus the evaluation quality TTS used by the CUDA smoke matrix:
 
 - Silero VAD
 - DeepFilterNet3 speech enhancement
@@ -43,8 +44,9 @@ The initial seed list is `docker/poc-models.txt`, one pinned manifest model per 
 - Spleeter source separation
 - Kokoro 82M TTS (`onnx-community/Kokoro-82M-v1.0-ONNX`), the planner's first TTS preference
 - CosyVoice 300M voice-cloning TTS, seeded as the `int8` variant (covers English, Spanish, and Chinese)
+- Qwen3-TTS-1.7B CustomVoice (`tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX`), the evaluation-only quality TTS used by `poc-server-quality-v1` and the CUDA smoke matrix
 
-The set is intentionally curated, not every one of the 47 model entries or experimental variant in the developer cache. `scripts/docker/seed-model-volume.sh` downloads each exact model through Trackdub's CLI; the list supports `model-id|variant-alias` for pinned variants such as the `trt-fp16` translation export. The CLI resolves pinned revisions and SHA-256 hashes in `bundled-models.manifest.json`; an integrity mismatch fails instead of silently accepting different weights. The manifest marks all eight selected models as commercially usable and redistributable; seven require attribution. Preserve each model's license/attribution notice alongside the seeded weights. Silero VAD is intentionally CPU-side as a small model.
+The set is intentionally curated, not every one of the 47 model entries or experimental variant in the developer cache. `scripts/docker/seed-model-volume.sh` downloads each exact model through Trackdub's CLI; the list supports `model-id|variant-alias` for pinned variants such as the `trt-fp16` translation export. The CLI resolves pinned revisions and SHA-256 hashes in `bundled-models.manifest.json`; an integrity mismatch fails instead of silently accepting different weights. The manifest marks all nine selected models as commercially usable and redistributable; eight require attribution. Preserve each model's license/attribution notice alongside the seeded weights. Silero VAD is intentionally CPU-side as a small model.
 
 The runtime planner now places `parakeet-tdt-0.6b-v3` first in the ASR preference list and admits its `parakeet-tdt` engine family; the planner regression test confirms the EN POC resolves to this model when it is not yet cached. Parakeet passed `providers trt-rtx smoke --model parakeet-tdt-0.6b-v3` on an RTX 5070: 1 attempted, 1 passed, 0 failed, 0 skipped. It verified the selected provider and ran the encoder/decoder probe. That historical run then exited 139 because the CLI left the session in the process-wide pool until native process shutdown. Fixed on 2026-10-20: provider smoke and verify handlers evict idle sessions before returning. Rebuilt current-source container runs passed both DeepFilterNet3 and Parakeet TRT-RTX smokes with exit code 0.
 
@@ -151,9 +153,31 @@ The GenAI retest also exposed a container packaging defect: publish output shipp
 
 One related question was evaluated and rejected: serving CosyVoice through TensorRT-LLM or vLLM. CosyVoice `int8` already runs on the CUDA execution provider in Trackdub; what fails is TensorRT engine building from the int8 ModelOpt graphs, which is an export problem. TensorRT-LLM and vLLM host PyTorch LLM weights in a separate Python runtime, which would break the single self-contained binary and container deployment model, and neither would accelerate the HiFT vocoder that stays on CPU either way. If TTS latency ever measures as the bottleneck, the in-architecture path is an fp16 TensorRT-qualified CosyVoice export, qualified by the same isolated retest.
 
+## Server image contract
+
+The `server` stage is the deployable AWS worker base, not just a profile label:
+
+- `TRACKDUB_GPU_PROFILE=server`, on an Ubuntu 24.04 runtime base with CUDA 13, cuDNN, and TensorRT 10.13.3.9 runtime libraries.
+- CUDA and TensorRT ONNX Runtime providers plus the base GenAI native library staged in `/app`; `libonnxruntime.so` is the CUDA-enabled core.
+- `util-linux` (`/usr/bin/setsid`) for the cloud job adapter's process-group supervision.
+- `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` so NVENC export works on G6/G6e; Compose sets the same value.
+- `/data/engine-cache` created under the persistent `/data` mount, matching `TRACKDUB_ENGINE_CACHE_ROOT`.
+- The `run pipeline` machine protocol (`--result-file`, `--progress-file`) required by `Dockerfile.cloud-worker`.
+
+Container CI enforces the profile marker, Ubuntu 24.04 base, `setsid`, classic-TensorRT/cuDNN/CUDA sonames, the ONNX Runtime native libraries, and the machine-protocol flags. These are packaging checks only: the CI runner has no GPU, so provider readiness and engine-cache behavior still require the per-worker verification below.
+
+## Quality TTS preset (evaluation)
+
+`poc-server-quality-v1` is an opt-in evaluation preset for the server profile. It keeps the `poc-server-v1` pipeline (Parakeet ASR, MADLAD quantized translation, same CUDA pins) and replaces Kokoro with Qwen3-TTS-1.7B CustomVoice (`qwen3-tts-1.7b-customvoice`). Seed it from the repo root with `TRACKDUB_GPU_PROFILE=server TRACKDUB_MODEL_SET=docker/poc-server-quality-models.txt ./scripts/docker/seed-and-warm-gpu-worker.sh`; the accepted baseline and its evidence are unchanged.
+
+- Nine preset voices (`qwen3:vivian`, `qwen3:serena`, `qwen3:ryan`, and others); `qwen3:ryan` is the default for Spanish. Every preset speaks all ten supported languages (`zh,en,ja,ko,de,fr,ru,pt,es,it`).
+- No voice cloning and no cloning consent. CosyVoice and Chatterbox are cloning-only in this codebase and require a reference clip, so they are not drop-in alternatives.
+- `qwen3-tts` is excluded from TensorRT families by planner policy; it runs on the CUDA route.
+- Measure quality (round-trip ASR WER plus a Spanish spot check), latency, peak VRAM, and cost per audio minute on the target L4/L40S before promotion. This preset is outside the accepted `poc-server-v1` contract until that evidence is reviewed.
+
 ## Per-worker provider install and engine warm
 
-Provisioning branches on `TRACKDUB_GPU_PROFILE` (default `rtx`), which each published image carries as an environment variable; the same script provisions either profile, with the seed step shared.
+Provisioning branches on `TRACKDUB_GPU_PROFILE` (default `rtx`), which each published image carries as an environment variable; the same script provisions either profile, selecting that profile's default seed and warm lists (`TRACKDUB_MODEL_SET` and `TRACKDUB_WARM_MODEL_SET` override them).
 
 RTX profile (local / TensorRT-RTX): install the NVIDIA driver and NVIDIA Container Toolkit on the host first. Review the NVIDIA TensorRT-RTX and CUDA license terms, then accept them explicitly for this worker:
 
@@ -164,7 +188,9 @@ export TRACKDUB_ACCEPT_NVIDIA_TENSORRT_RTX_LICENSE=1
 
 The script checks for a host-visible NVIDIA GPU, seeds the curated model volume, installs the LinML TensorRT-RTX plugin into the dedicated Compose volume, and runs `trackdub cache warm` against only `docker/poc-warm-models.txt`. This explicit list avoids recursively warming every `.onnx` in the volume: a full scan hit an OPUS-MT decoder that can terminate the host with a native stack overflow, and the Silero VAD graph fails TensorRT import on its `If`/`Squeeze` branches. A failed target stops provisioning; unsupported models are deliberately excluded and listed in comments. Parakeet TDT is in the TRT warm allowlist; the small Silero VAD model intentionally runs on CPU. The NVIDIA acceptance variable is deliberately not defaulted in scripts or CI.
 
-Server profile (AWS / strict classic TensorRT + CUDA): no TensorRT-RTX license acceptance and no plugin install. The server image and the AWS Compose override select this profile; the script seeds the same model volume, then warms classic TensorRT engines with `trackdub cache warm --provider tensorrt` against `docker/poc-warm-models.server.txt`. A warm-list override applies to either profile via `TRACKDUB_WARM_MODEL_SET`.
+Server profile (AWS datacenter GPUs / classic TensorRT + CUDA): no TensorRT-RTX license acceptance and no plugin install. The server image and the AWS Compose override select this profile; the script seeds `docker/poc-server-models.txt` by default (the CUDA-pinned `poc-server-v1` bundle; `TRACKDUB_MODEL_SET` overrides it), then warms classic TensorRT engines with `trackdub cache warm --provider tensorrt` against `docker/poc-warm-models.server.txt`. That warm list covers only server-seeded, classic-TensorRT-qualified graphs (DeepFilterNet3, SortFormer, Spleeter, Parakeet); MADLAD is absent because the server seed uses the quantized export, which is not classic-TensorRT qualified. A warm-list override applies to either profile via `TRACKDUB_WARM_MODEL_SET`.
+
+Before scheduling jobs, verify on the actual G6/G6e host that `/proc/driver/nvidia/gpus` is visible inside the container (the CUDA/TensorRT discovery gate), then run `trackdub providers list` and `trackdub doctor`. The recorded container GPU evidence in this runbook is from WSL2 on an RTX 5070; native-Linux datacenter-GPU visibility is still an acceptance prerequisite.
 
 For AWS, use a dedicated EBS volume mounted on the host at `/mnt/trackdub-data` so weights and GPU-specific engine artifacts survive container replacement. Format/attach/mount it through your normal EC2 provisioning, make the mount persistent, and grant the container's UID/GID 10001 write access:
 
@@ -176,7 +202,7 @@ export TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml
 TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh
 ```
 
-`docker-compose.aws.yml` defaults to the published `ghcr.io/Mesililm-LLC/trackdub:main-server` image (override with `TRACKDUB_IMAGE`) and builds the `server` target when Compose must build instead of pull. The AWS override binds that EBS mount to `/data`; the seed script detects the override and uses it for every CLI invocation. No VRAM budget is pinned anymore: the session pool auto-scales its admission budget from detected GPU VRAM (75% on cards up to 16 GiB, 85% above that, floor 4096 MB), detecting VRAM via /proc and sysfs with an NVML fallback for containers where /proc/driver/nvidia is hidden. Run `trackdub doctor` and check the `accelerator-vram-budget` row to see the detected VRAM, the resolved budget, and its source; it warns when detection failed and the floor fallback is in effect. Set `TRACKDUB_SESSION_VRAM_BUDGET_MB` only as an explicit operator override. MADLAD's TRT-RTX bundle is estimated at ~8069 MB for its encoder/decoder sessions. Treat the resulting engine cache as specific to that instance's GPU and driver.
+`docker-compose.aws.yml` defaults to the published `ghcr.io/mesililm-llc/trackdub:main-server` image (override with `TRACKDUB_IMAGE`) and builds the `server` target when Compose must build instead of pull. The AWS override binds that EBS mount to `/data`; the seed script detects the override and uses it for every CLI invocation. No VRAM budget is pinned anymore: the session pool auto-scales its admission budget from detected GPU VRAM (75% on cards up to 16 GiB, 85% above that, floor 4096 MB), detecting VRAM via /proc and sysfs with an NVML fallback for containers where /proc/driver/nvidia is hidden. Run `trackdub doctor` and check the `accelerator-vram-budget` row to see the detected VRAM, the resolved budget, and its source; it warns when detection failed and the floor fallback is in effect. Set `TRACKDUB_SESSION_VRAM_BUDGET_MB` only as an explicit operator override. MADLAD's TRT-RTX bundle is estimated at ~8069 MB for its encoder/decoder sessions. Treat the resulting engine cache as specific to that instance's GPU and driver.
 
 Run the provisioning script once on each newly provisioned GPU/driver combination, and again after a driver or provider update. It writes the cache under `/data` (the persistent `trackdub-data` volume). The separate `trackdub-linml` volume persists plugin downloads. If changing the Compose project name, carry both volumes forward or the worker will appear unseeded.
 

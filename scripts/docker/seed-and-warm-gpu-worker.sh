@@ -24,8 +24,14 @@ else
   GPU_PROFILE="${TRACKDUB_GPU_TARGET:-rtx}"
 fi
 case "$GPU_PROFILE" in
-  rtx) DEFAULT_WARM_LIST="$REPO_ROOT/docker/poc-warm-models.txt" ;;
-  server) DEFAULT_WARM_LIST="$REPO_ROOT/docker/poc-warm-models.server.txt" ;;
+  rtx)
+    DEFAULT_WARM_LIST="$REPO_ROOT/docker/poc-warm-models.txt"
+    DEFAULT_MODEL_SET="$REPO_ROOT/docker/poc-models.txt"
+    ;;
+  server)
+    DEFAULT_WARM_LIST="$REPO_ROOT/docker/poc-warm-models.server.txt"
+    DEFAULT_MODEL_SET="$REPO_ROOT/docker/poc-server-models.txt"
+    ;;
   *)
     echo "TRACKDUB_GPU_PROFILE must be 'rtx' or 'server': $GPU_PROFILE" >&2
     exit 2
@@ -34,6 +40,8 @@ esac
 export TRACKDUB_GPU_TARGET="$GPU_PROFILE"
 echo "GPU profile: $GPU_PROFILE"
 WARM_LIST="${TRACKDUB_WARM_MODEL_SET:-$DEFAULT_WARM_LIST}"
+MODEL_SET="${TRACKDUB_MODEL_SET:-$DEFAULT_MODEL_SET}"
+echo "Model set: $MODEL_SET"
 if [[ -n "${TRACKDUB_COMPOSE_OVERRIDE:-}" ]]; then
   compose_override="$TRACKDUB_COMPOSE_OVERRIDE"
   if [[ "$compose_override" != /* && ! "$compose_override" =~ ^[A-Za-z]: ]]; then
@@ -66,6 +74,7 @@ fi
 nvidia-smi -L
 
 # Explicit downloads are pinned by the bundled manifest and survive in the Compose /data volume.
+export TRACKDUB_MODEL_SET="$MODEL_SET"
 "$SCRIPT_DIR/seed-model-volume.sh"
 
 # cache warm otherwise recursively scans the whole model volume, which includes families such as

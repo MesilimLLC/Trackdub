@@ -1,0 +1,8 @@
+# poc-server-quality-v1: CUDA baseline with Qwen3-TTS-1.7B CustomVoice instead of Kokoro.
+onnx-community/silero-vad
+Rikorose/DeepFilterNet3
+cgus/diar_streaming_sortformer_4spk-v2.1-onnx
+tonythethompson/parakeet-tdt-0.6b-v3-onnx
+google/madlad400-3b-mt|quantized
+csukuangfj/sherpa-onnx-spleeter-2stems
+tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX

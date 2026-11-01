@@ -6,6 +6,9 @@
 # Kokoro is CUDA/CPU by planner policy, so it gets no TensorRT warm.
 # CosyVoice int8 is a CUDA route and its int8 graphs are not TensorRT-compilable,
 # so CosyVoice gets no classic-TensorRT warm.
+# MADLAD is intentionally absent: the server seed (poc-server-models.txt) uses the
+# quantized export, which is not classic-TensorRT qualified, and the qualified
+# trt-fp16 export is not in this server seed set. MADLAD runs the CUDA baseline.
 # OPUS-MT is classic-TensorRT-qualified but is not in the seed set, so it is not
 # warmed here.
 Rikorose/DeepFilterNet3/enc.onnx
@@ -14,7 +17,3 @@ csukuangfj/sherpa-onnx-spleeter-2stems/accompaniment.onnx
 csukuangfj/sherpa-onnx-spleeter-2stems/vocals.onnx
 tonythethompson/parakeet-tdt-0.6b-v3-onnx/encoder-model.onnx
 tonythethompson/parakeet-tdt-0.6b-v3-onnx/decoder_joint-model.onnx
-# MADLAD pinned trt-fp16 export, qualified on classic TensorRT; its classic
-# engine build takes ~9 minutes.
-google/madlad400-3b-mt/trt_rtx_mixed_fp16_fp32/encoder_model.onnx
-google/madlad400-3b-mt/trt_rtx_mixed_fp16_fp32/decoder_model.onnx

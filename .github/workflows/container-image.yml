@@ -89,7 +89,24 @@ jobs:
             type=sha,format=long,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and publish (main / container tags); load on PR for verification
+      - name: Capture previous latest image size
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="$IMAGE_NAME:latest-${{ matrix.profile }}"
+          baseline_file="image-size-baseline-${{ matrix.profile }}.txt"
+          # Distinguish a missing tag (first build) from a failed pull (registry/access error).
+          if pull_output="$(docker pull "$ref" 2>&1)"; then
+            docker image inspect "$ref" --format '{{.Size}}' > "$baseline_file"
+          elif printf '%s\n' "$pull_output" | grep -qiE 'manifest unknown|not found|no such manifest'; then
+            printf 'missing\n' > "$baseline_file"
+          else
+            printf 'error\n' > "$baseline_file"
+            printf '::warning::Could not pull %s for the size baseline: %s\n' "$ref" "$pull_output"
+          fi
+
+      - name: Build image for verification
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -97,22 +114,88 @@ jobs:
           file: Dockerfile
           target: ${{ matrix.profile }}
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: trackdub-ci:${{ matrix.profile }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          load: true
+          push: false
           cache-from: type=gha,scope=trackdub-linux-amd64-${{ matrix.profile }}
           cache-to: type=gha,mode=max,scope=trackdub-linux-amd64-${{ matrix.profile }}
-          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
-          sbom: ${{ github.event_name != 'pull_request' }}
 
-      - name: Pull the just-published commit image
-        if: github.event_name != 'pull_request'
-        run: docker pull "$IMAGE_NAME:sha-${GITHUB_SHA}-${{ matrix.profile }}"
+      - name: Record image size and compare with latest
+        shell: bash
+        env:
+          IMAGE_REF: trackdub-ci:${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          current_bytes="$(docker image inspect "$IMAGE_REF" --format '{{.Size}}')"
+          # PR runs skip the baseline pull, so default to not-captured rather than missing/first-build.
+          baseline_state="not-captured"
+          if [[ -f "image-size-baseline-${{ matrix.profile }}.txt" ]]; then
+            baseline_state="$(<"image-size-baseline-${{ matrix.profile }}.txt")"
+          fi
+          python3 - "$current_bytes" "$baseline_state" "$GITHUB_STEP_SUMMARY" "$GITHUB_WORKSPACE" "${{ matrix.profile }}" <<'PY'
+          import json
+          import pathlib
+          import sys
+          from datetime import datetime, timezone
+
+          current = int(sys.argv[1])
+          baseline_state, summary, workspace, profile = sys.argv[2:]
+          baseline = int(baseline_state) if baseline_state.isdigit() else None
+          delta = current - baseline if baseline is not None else None
+          result = {
+              "profile": profile,
+              "commit": "${{ github.sha }}",
+              "image_bytes": current,
+              "image_mib": round(current / 1024 / 1024, 2),
+              "baseline_bytes": baseline,
+              "baseline_status": baseline_state if baseline is None else "available",
+              "delta_bytes": delta,
+              "recorded_at": datetime.now(timezone.utc).isoformat(),
+          }
+          record = pathlib.Path(workspace) / f"image-size-{profile}.json"
+          record.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+          with open(summary, "a", encoding="utf-8") as output:
+              output.write(f"### {profile} image size\n\n")
+              output.write(f"- Current: {current / 1024 / 1024:.2f} MiB\n")
+              if baseline is not None:
+                  output.write(f"- Previous latest: {baseline / 1024 / 1024:.2f} MiB\n")
+                  output.write(f"- Change: {delta / 1024 / 1024:+.2f} MiB\n")
+              elif baseline_state == "error":
+                  output.write("- Previous latest: unavailable (registry pull failed; size delta unknown)\n")
+                  print("::error::Could not read the previous latest image size; the size delta is unavailable.")
+              elif baseline_state == "not-captured":
+                  output.write("- Previous latest: not captured (baseline pull is skipped on pull requests)\n")
+              else:
+                  output.write("- Previous latest: unavailable (first build)\n")
+              output.write(f"- Record: `{record.name}`\n")
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          image-ref: trackdub-ci:${{ matrix.profile }}
+          # trivy-action v0.33.1 defaults to v0.65.0, whose release assets were removed (404).
+          version: v0.76.1
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Upload image size record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-size-${{ matrix.profile }}-${{ github.run_id }}
+          path: image-size-${{ matrix.profile }}.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Verify image runtime and bundled tools
         env:
-          IMAGE_REF: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}-${{ matrix.profile }}
+          IMAGE_REF: trackdub-ci:${{ matrix.profile }}
         shell: bash
         run: |
           set -euo pipefail
@@ -131,6 +214,98 @@ jobs:
           jq -e '[.checks[] | select(.id == "model-cache-writable" and .status == "pass")] | length == 1' doctor.json
           jq -e '[.checks[] | select(.id == "pipeline-readiness" and .status == "fail")] | length == 1' doctor.json
 
+      - name: Verify image profile marker and base distribution
+        env:
+          IMAGE_REF: trackdub-ci:${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile="$(docker run --rm --entrypoint sh "$IMAGE_REF" -c 'printf %s "$TRACKDUB_GPU_PROFILE"')"
+          test "$profile" = "${{ matrix.profile }}"
+          docker run --rm --entrypoint sh "$IMAGE_REF" -c '
+            set -e
+            grep -q "^ID=ubuntu$" /etc/os-release
+            grep -q "^VERSION_ID=\"24.04\"$" /etc/os-release
+          '
+
+      - name: Verify server image contract
+        if: matrix.profile == 'server'
+        env:
+          IMAGE_REF: trackdub-ci:${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$IMAGE_REF" -c '
+            set -e
+            test -x /usr/bin/setsid
+            for soname in libnvinfer.so.10 libnvinfer_plugin.so.10 libnvonnxparser.so.10 libcudnn.so.9 libcudart.so.13; do
+              ldconfig -p | grep -q "$soname"
+            done
+            for lib in libonnxruntime.so libonnxruntime-genai.so libonnxruntime_providers_cuda.so libonnxruntime_providers_tensorrt.so; do
+              test -f "/app/$lib"
+            done
+            check_ldd() {
+              lib="$1"
+              allowed="$2"
+              output="$(ldd "$lib" 2>&1)" || { echo "ldd failed for $lib:" >&2; printf "%s\n" "$output" >&2; exit 1; }
+              # Image /bin/sh is dash: tolerate grep no-match under set -e and use POSIX [ ].
+              unresolved="$(printf "%s\n" "$output" | grep "not found" || true)"
+              if [ -n "$allowed" ]; then
+                unresolved="$(printf "%s\n" "$unresolved" | grep -v "$allowed" || true)"
+              fi
+              if [ -n "$unresolved" ]; then
+                echo "Unresolved dependencies in $lib:" >&2
+                printf "%s\n" "$unresolved" >&2
+                exit 1
+              fi
+            }
+            check_ldd /app/libonnxruntime_providers_tensorrt.so ""
+            check_ldd /app/libonnxruntime.so ""
+            check_ldd /app/libonnxruntime-genai.so ""
+            check_ldd /app/libonnxruntime_providers_cuda.so "libcuda.so.1"
+            dotnet /app/Trackdub.Cli.dll run pipeline --help > /tmp/trackdub-machine-help.txt
+            grep -F -- "--result-file" /tmp/trackdub-machine-help.txt
+            grep -F -- "--progress-file" /tmp/trackdub-machine-help.txt
+          '
+
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        id: publish
+        shell: bash
+        env:
+          SOURCE_IMAGE: trackdub-ci:${{ matrix.profile }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          digest=""
+          # Push the immutable sha- tag first so a failed push leaves mutable tags unchanged.
+          sha_tags=()
+          mutable_tags=()
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            if [[ "$tag" == *:sha-* ]]; then
+              sha_tags+=("$tag")
+            else
+              mutable_tags+=("$tag")
+            fi
+          done <<< "$TAGS"
+          for tag in "${sha_tags[@]}" "${mutable_tags[@]}"; do
+            docker tag "$SOURCE_IMAGE" "$tag"
+            if ! push_output="$(docker push "$tag" 2>&1)"; then
+              printf '%s\n' "$push_output" >&2
+              exit 1
+            fi
+            printf '%s\n' "$push_output"
+            if [[ -z "$digest" ]]; then
+              digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | tail -n 1)"
+            fi
+          done
+          if [[ -z "$digest" ]]; then
+            echo "::error::Could not determine the published digest for $SOURCE_IMAGE"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Record published digest
         if: github.event_name != 'pull_request'
-        run: echo "Published $IMAGE_NAME:sha-${GITHUB_SHA}-${{ matrix.profile }} (${{ steps.build.outputs.digest }})" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Published $IMAGE_NAME:sha-${GITHUB_SHA}-${{ matrix.profile }} (${{ steps.publish.outputs.digest }})" >> "$GITHUB_STEP_SUMMARY"
