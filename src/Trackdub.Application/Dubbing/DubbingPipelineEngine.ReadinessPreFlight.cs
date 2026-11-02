@@ -73,12 +73,9 @@ public sealed partial class DubbingPipelineEngine
 
         public DubbingRunResult PreFlightFailed(IReadOnlyList<string> failures) =>
             BuildErrorResult(
-                Run.RunId,
-                Run.RunStart,
-                Run.StageOutcomes,
+                new RunScope(Run.RunId, Run.RunStart, Run.StageOutcomes, Run.ExecutionSnapshot),
                 DubbingRunStatus.PreFlightFailed,
-                failures,
-                Run.ExecutionSnapshot);
+                failures);
 
         public DubbingRunResult ProvisioningCancelled() =>
             PreFlightFailed(["Model provisioning was cancelled during pre-flight."]);
@@ -167,10 +164,8 @@ public sealed partial class DubbingPipelineEngine
 
         return context.Options.ForceRerun ||
             !await HasValidExistingArtifactsAsync(
-                context.Session,
-                context.Options,
+                new ArtifactResumeContext(context.Session, context.Options, context.ExecutionSnapshot),
                 stageName,
-                context.ExecutionSnapshot,
                 context.CancellationToken).ConfigureAwait(false);
     }
 
