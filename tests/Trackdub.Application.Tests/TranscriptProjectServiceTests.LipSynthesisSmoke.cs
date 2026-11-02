@@ -6,6 +6,7 @@ using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.Media;
 using Trackdub.Domain.Mixing;
 using Trackdub.Domain.StageRuns;
+using Trackdub.Domain.Tts;
 using Trackdub.TestDoubles;
 
 namespace Trackdub.Application.Tests;
@@ -38,6 +39,17 @@ public partial class TranscriptProjectServiceTests
             CandidateGroups: beforeLipRepair.TtsCandidateGroups,
             MediaDurationSeconds: mediaAsset.DurationSeconds));
         await mixPlanStore.SaveAsync(savedUserPlan, token);
+
+        // Change the current selection after saving the plan: a newer completed take must win
+        // when the driver is rebuilt from current project state rather than the saved plan.
+        TtsTake savedTake = beforeLipRepair.TtsTakes.First();
+        TtsTake newerTake = savedTake with
+        {
+            Id = Guid.NewGuid(),
+            CreatedAtUtc = savedTake.CreatedAtUtc.AddMinutes(1),
+        };
+        await scope.TtsTakeRepository.SaveAsync(newerTake, token);
+
         var lipEngine = new FakeLipSynthesisEngine
         {
             OutputDirectory = Path.Join(scope.ArtifactStore.GetPath(string.Empty), "lip-output"),
@@ -64,6 +76,10 @@ public partial class TranscriptProjectServiceTests
         Assert.Equal(-4d, driverRender.MixPlan.DubbedSpeechGainDb);
         Assert.Equal(0.3d, driverRender.MixPlan.DuckingLeadSeconds);
         Assert.True(driverRender.MixPlan.RestoreOriginalPan);
+        MixSpeechClip rebuiltClip = Assert.Single(
+            driverRender.MixPlan.SpeechClips,
+            clip => clip.SegmentIndex == newerTake.SegmentIndex);
+        Assert.Equal(newerTake.Id, rebuiltClip.TakeId);
         MixPlan persistedUserPlan = Assert.IsType<MixPlan>(await mixPlanStore.LoadAsync(token));
         Assert.Equal(-8d, persistedUserPlan.SourceGainDb);
         Assert.True(persistedUserPlan.ApplyTimbrePolish);

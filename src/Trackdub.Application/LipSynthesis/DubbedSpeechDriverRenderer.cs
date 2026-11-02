@@ -65,8 +65,10 @@ internal sealed class DubbedSpeechDriverRenderer(
             throw;
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException
-                                       or ArgumentException or System.Text.Json.JsonException)
+                                       or ArgumentException or OverflowException or System.Text.Json.JsonException)
         {
+            // A failed driver render must degrade to the exported-audio fallback instead of
+            // aborting the workflow before the stage can record its prerequisite skip.
             return null;
         }
     }
