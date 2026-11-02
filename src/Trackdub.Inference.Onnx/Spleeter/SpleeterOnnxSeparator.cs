@@ -135,12 +135,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
         CancellationToken cancellationToken)
     {
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                poolKey,
-                modelPath,
-                provider,
-                cancellationToken,
-                allowTrtInitFallback: allowTrtInitFallback)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolKey, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelPath)
             .ConfigureAwait(false);
 
         // Bind by the model's actual input name: the sherpa-onnx spleeter export names its

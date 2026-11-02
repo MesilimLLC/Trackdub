@@ -31,13 +31,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         // Same family + TRT profiles as SortFormerDiarizationEngine so the smoke run warms
         // the session the diarization stage will lease.
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                SortFormerDiarizationEngine.EngineFamilyName,
-                modelPath,
-                provider,
-                cancellationToken,
-                additionalTrtOptions: SortFormerDiarizationEngine.TrtOptions,
-                allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SortFormerDiarizationEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtOptions = SortFormerDiarizationEngine.TrtOptions, AllowTrtInitFallback = true }, modelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
 

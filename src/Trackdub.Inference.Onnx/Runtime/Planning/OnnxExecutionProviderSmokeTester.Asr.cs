@@ -75,14 +75,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         string decoderInitPath = Path.Join(root, "decoder_init.onnx");
         string decoderStepPath = Path.Join(root, "decoder_step.onnx");
         using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledQwen3AsrAsync(
-                "qwen3-asr",
-                encoderModelPath,
-                decoderInitPath,
-                decoderStepPath,
-                provider,
-                cancellationToken,
-                additionalTrtEncoderOptions: Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions)
+            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
 
@@ -106,16 +99,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         // modelId/variant must match NemotronAsrOnnxAudioTranscriptionEngine or the stage
         // misses this pooled session and pays cold load again.
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                "nemotron-asr",
-                encoderModelPath,
-                decoderJointPath,
-                request.ExecutionProvider,
-                cancellationToken,
-                modelId: request.ModelId,
-                variant: request.Variant,
-                additionalTrtEncoderOptions: sessionOptions.Encoder,
-                additionalTrtDecoderOptions: sessionOptions.Decoder)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "nemotron-asr", Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = sessionOptions.Encoder, AdditionalTrtDecoderOptions = sessionOptions.Decoder }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderJointPath })
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -137,24 +121,12 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         // Preprocessor is a separate pooled CPU graph in production; warm the same key so the
         // stage does not rebuild nemo128.onnx after a successful smoke.
         using OnnxExecutionSessionFactory.SingleSessionLease preprocessor = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                "parakeet-tdt-preprocessor",
-                Path.Join(root, "nemo128.onnx"),
-                ExecutionProviderKind.Cpu,
-                cancellationToken)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "parakeet-tdt-preprocessor", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, Path.Join(root, "nemo128.onnx"))
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(ExecutionProviderKind.Cpu, preprocessor.SelectedProvider);
 
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName,
-                encoderModelPath,
-                Path.Join(root, "decoder_joint-model.onnx"),
-                request.ExecutionProvider,
-                cancellationToken,
-                modelId: request.ModelId,
-                variant: request.Variant,
-                additionalTrtEncoderOptions: ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = Path.Join(root, "decoder_joint-model.onnx") })
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 

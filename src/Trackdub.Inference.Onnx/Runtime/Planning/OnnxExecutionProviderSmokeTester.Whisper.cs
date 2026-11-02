@@ -47,14 +47,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         try
         {
             using OnnxExecutionSessionFactory.WhisperSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledWhisperAsync(
-                    WhisperOnnxAudioTranscriptionEngine.EngineFamilyName,
-                    encoderModelPath,
-                    decoderModelPath,
-                    provider,
-                    cancellationToken,
-                    additionalTrtEncoderOptions: encoderOptions,
-                    additionalTrtDecoderOptions: decoderOptions)
+                .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = WhisperOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false);
             try
             {

@@ -37,11 +37,13 @@ public sealed class DubbingPipelineEngineTests
 
         DubbingPipelineEngine.StageWorkflowResult result =
             await DubbingPipelineEngine.RunStageWorkflowAsync(
-                session,
-                options,
+                new DubbingPipelineEngine.StageExecutionContext
+                {
+                    Session = session,
+                    Options = options,
+                    RuntimeSelections = selections,
+                },
                 "bogus-stage",
-                selections,
-                progress: null,
                 CancellationToken.None);
 
         Assert.Equal(StageStatus.Failed, result.Status);
@@ -311,14 +313,16 @@ public sealed class DubbingPipelineEngineTests
         using (ColdStartCapture.Activate(capture))
         {
             result = await DubbingPipelineEngine.RunStageWorkflowAsync(
-                session,
-                options,
+                new DubbingPipelineEngine.StageExecutionContext
+                {
+                    Session = session,
+                    Options = options,
+                    RuntimeSelections = new RuntimeModelSelections(
+                        AsrModelOverride.Auto,
+                        IsDevBuild: false,
+                        new Dictionary<string, ExecutionProviderKind>()),
+                },
                 StageNames.Separation,
-                new RuntimeModelSelections(
-                    AsrModelOverride.Auto,
-                    IsDevBuild: false,
-                    new Dictionary<string, ExecutionProviderKind>()),
-                progress: null,
                 TestContext.Current.CancellationToken);
         }
 

@@ -220,7 +220,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         try
         {
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync(SileroVadPoolFamily, modelPath, provider, cancellationToken, allowTrtInitFallback: true)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SileroVadPoolFamily, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
                 .ConfigureAwait(false);
             try
             {
@@ -252,12 +252,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     {
         string poolFamily = ResolveGenericPoolFamily(request);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                poolFamily,
-                request.EntryPath,
-                request.ExecutionProvider,
-                cancellationToken,
-                allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, request.EntryPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 

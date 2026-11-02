@@ -30,7 +30,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         string runnableModelPath = request.EntryPath;
         string poolFamily = ResolveSeparationPoolFamily(request.EngineFamily, request.ModelId, runnableModelPath);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(poolFamily, runnableModelPath, request.ExecutionProvider, cancellationToken, allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, runnableModelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 

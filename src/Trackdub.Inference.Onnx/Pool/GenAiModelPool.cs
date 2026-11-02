@@ -569,20 +569,10 @@ internal sealed class GenAiModelPool : IDisposable
 
             ExternalMemoryReservation? reservation = nonEvictingWarmup
                 ? await admissionPool
-                    .TryReserveExternalWithoutEvictionAsync(
-                        key.Provider,
-                        key.DeviceId,
-                        key.EstimatedMemoryMb,
-                        cancellationToken,
-                        key.UseOpenVinoCpuProxy)
+                    .TryReserveExternalWithoutEvictionAsync(new(key.Provider, key.DeviceId, key.EstimatedMemoryMb, key.UseOpenVinoCpuProxy), cancellationToken)
                     .ConfigureAwait(false)
                 : await admissionPool
-                    .ReserveExternalAsync(
-                        key.Provider,
-                        key.DeviceId,
-                        key.EstimatedMemoryMb,
-                        cancellationToken,
-                        key.UseOpenVinoCpuProxy)
+                    .ReserveExternalAsync(new(key.Provider, key.DeviceId, key.EstimatedMemoryMb, key.UseOpenVinoCpuProxy), cancellationToken)
                     .ConfigureAwait(false);
             if (reservation is null)
             {
@@ -648,7 +638,9 @@ internal sealed class GenAiModelPool : IDisposable
             // Admission-side eviction for this resource. It must never wait on
             // creationLock — external admission may invoke it while a creation holds
             // that lock — so it uses the entry gate and an exact dictionary remove.
-            if (!reservation.TrySetIdleEvictionCallback(() => TryEvictIdleEntry(key, entry)))
+            if (!await reservation.TrySetIdleEvictionCallbackAsync(
+                    () => TryEvictIdleEntry(key, entry),
+                    CancellationToken.None).ConfigureAwait(false))
             {
                 if (entries.TryRemove(new KeyValuePair<GenAiModelKey, Entry>(key, entry)))
                 {

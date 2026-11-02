@@ -108,14 +108,7 @@ public sealed class LatentSyncOnnxLipSynthesisEngine(
 
         ExecutionProviderKind provider = plan.ExecutionProvider ?? ExecutionProviderKind.Cpu;
 
-        using OnnxExecutionSessionFactory.LatentSyncSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(
-            EngineFamilyName,
-            LatentSyncModelPaths.UNetPath(modelRoot),
-            LatentSyncModelPaths.VaeEncoderPath(modelRoot),
-            LatentSyncModelPaths.VaeDecoderPath(modelRoot),
-            LatentSyncModelPaths.WhisperEncoderPath(modelRoot),
-            provider,
-            cancellationToken)
+        using OnnxExecutionSessionFactory.LatentSyncSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = EngineFamilyName, Provider = provider, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.LatentSyncModelPaths(LatentSyncModelPaths.UNetPath(modelRoot), LatentSyncModelPaths.VaeEncoderPath(modelRoot), LatentSyncModelPaths.VaeDecoderPath(modelRoot), LatentSyncModelPaths.WhisperEncoderPath(modelRoot)))
             .ConfigureAwait(false);
 
         string tempDir = Path.Join(Path.GetTempPath(), $"lipsync_{request.SegmentId:N}");

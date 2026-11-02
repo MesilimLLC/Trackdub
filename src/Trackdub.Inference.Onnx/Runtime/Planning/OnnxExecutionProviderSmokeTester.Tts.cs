@@ -30,7 +30,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         string modelPath = ResolveTtsProbeModelPath(request);
         string poolFamily = ResolveTtsPoolFamily(request);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(poolFamily, modelPath, request.ExecutionProvider, cancellationToken, allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -99,7 +99,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             }
 
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync("cosyvoice", graphPath, request.ExecutionProvider, cancellationToken, allowTrtInitFallback: false)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = false }, graphPath)
                 .ConfigureAwait(false);
             EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
         }
@@ -125,11 +125,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
                 continue;
             }
 
-            await OnnxExecutionSessionFactory.WarmPooledSingleAsync(
-                "chatterbox",
-                graphPath,
-                ExecutionProviderKind.Cpu,
-                cancellationToken).ConfigureAwait(false);
+            await OnnxExecutionSessionFactory.WarmPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, graphPath).ConfigureAwait(false);
         }
     }
 

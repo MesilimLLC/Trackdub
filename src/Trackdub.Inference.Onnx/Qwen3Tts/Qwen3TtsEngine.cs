@@ -249,8 +249,8 @@ public sealed class Qwen3TtsEngine(
             .CreateSessionOptionsFactoryAsync(requestedProvider, cancellationToken)
             .ConfigureAwait(false);
 
-        string requestedLabel = OnnxExecutionSessionFactory.FormatProviderLabel(sessionOptions.RequestedProvider);
-        string selectedLabel = OnnxExecutionSessionFactory.FormatProviderLabel(sessionOptions.SelectedProvider);
+        string requestedLabel = ProviderNames.FormatProviderLabel(sessionOptions.RequestedProvider);
+        string selectedLabel = ProviderNames.FormatProviderLabel(sessionOptions.SelectedProvider);
         string bootstrapDetail = string.IsNullOrWhiteSpace(sessionOptions.BootstrapDetail)
             ? "qwen3-tts"
             : $"qwen3-tts; {sessionOptions.BootstrapDetail}";
