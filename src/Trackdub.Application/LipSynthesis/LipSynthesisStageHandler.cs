@@ -99,7 +99,7 @@ public sealed class LipSynthesisStageHandler(
             if (string.IsNullOrWhiteSpace(request.DubbedAudioPath) || !File.Exists(request.DubbedAudioPath))
             {
                 stageRun = await SkipStageAsync(stageRun,
-                    "Rendered dubbed mix is required for video lip synthesis. Export or re-export dubbed audio after dub changes before running repair lips.",
+                    "A rendered dubbed-speech driver is required for lip repair. Generate current dubbed audio and identify speakers before running repair.",
                     "LipSynthesisNoDubbedMix", request).ConfigureAwait(false);
                 return new LipSynthesisStageResult(stageRun, []);
             }

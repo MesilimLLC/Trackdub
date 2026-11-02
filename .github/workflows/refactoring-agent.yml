@@ -27,7 +27,7 @@ jobs:
       issues: write
     steps:
       - name: Run CodeScene refactoring agent
-        uses: Mesililm-LLC/pr-refactoring-agent@7f41d243c3ff4bfab4abb4c73f9583f35d15cbee # v1.1.9 with isolated project config
+        uses: Mesililm-LLC/pr-refactoring-agent@58bd1554e60d5958fd7cd66e3e81591d662c2dd8 # v1.1.9 with isolated project config
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}

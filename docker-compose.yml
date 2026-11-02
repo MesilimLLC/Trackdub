@@ -9,7 +9,7 @@ services:
         required: false
     environment:
       NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
       TRACKDUB_ACCEPT_NVIDIA_TENSORRT_RTX_LICENSE: "${TRACKDUB_ACCEPT_NVIDIA_TENSORRT_RTX_LICENSE:-}"
     gpus: all
     init: true
