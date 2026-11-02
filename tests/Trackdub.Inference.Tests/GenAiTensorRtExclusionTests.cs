@@ -117,16 +117,17 @@ public sealed class GenAiTensorRtExclusionTests
     [InlineData(ExecutionProviderKind.Cuda, false)]
     public void OpusMt_smoke_guard_refuses_only_tensorrt_rtx(ExecutionProviderKind provider, bool rejected)
     {
-        if (rejected)
-        {
-            Assert.Throws<NotSupportedException>(() => OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily(
-                "opus-mt", provider, "merged-decoder", "onnx/model.onnx"));
-        }
-        else
-        {
-            OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily(
-                "opus-mt", provider, "merged-decoder", "onnx/model.onnx");
-        }
+        var request = new ExecutionProviderSmokeTestRequest(
+            RuntimeStage.Translation,
+            "model-id",
+            "alias",
+            "opus-mt",
+            "merged-decoder",
+            provider,
+            ModelRootPath: "root",
+            EntryPath: "onnx/model.onnx");
+
+        AssertSmokeGuard(request, rejected);
     }
 
     [Fact]
@@ -191,15 +192,17 @@ public sealed class GenAiTensorRtExclusionTests
     public void Madlad_smoke_guard_only_permits_validated_export_on_tensorrt_providers(
         ExecutionProviderKind provider, string variant, string entryPath, bool rejected)
     {
-        if (rejected)
-        {
-            Assert.Throws<NotSupportedException>(() => OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily(
-                "madlad", provider, variant, entryPath));
-        }
-        else
-        {
-            OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily("madlad", provider, variant, entryPath);
-        }
+        AssertSmokeGuard(
+            new ExecutionProviderSmokeTestRequest(
+                RuntimeStage.Translation,
+                "model-id",
+                "alias",
+                "madlad",
+                variant,
+                provider,
+                ModelRootPath: "root",
+                EntryPath: entryPath),
+            rejected);
     }
 
     [Fact]
@@ -245,5 +248,17 @@ public sealed class GenAiTensorRtExclusionTests
 
         Assert.Single(reported);
         Assert.Equal("missing-model", reported[0].Label);
+    }
+
+    private static void AssertSmokeGuard(ExecutionProviderSmokeTestRequest request, bool rejected)
+    {
+        if (rejected)
+        {
+            Assert.Throws<NotSupportedException>(
+                () => OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily(request));
+            return;
+        }
+
+        OnnxExecutionProviderSmokeTester.ThrowIfFatalTensorRtFamily(request);
     }
 }
