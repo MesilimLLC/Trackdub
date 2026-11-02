@@ -71,6 +71,7 @@ CUDA_LABELS=(
   separation-spleeter
   tts-kokoro
   tts-cosyvoice-int8
+  tts-qwen-1.7b-custom
 )
 
 # Same as CUDA minus tts-kokoro (planner policy excludes Kokoro from

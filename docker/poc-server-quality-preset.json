@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "poc-server-quality-v1",
+  "sourceLanguage": "en",
+  "targetLanguage": "es",
+  "exportFormat": "mp4",
+  "voice": "qwen3:ryan",
+  "manifestSha256": "df13b06d7639a46766bf24483f97e81732e2aed9a67e8af077ffd1400aff5fe9",
+  "models": {
+    "asr": {
+      "modelId": "tonythethompson/parakeet-tdt-0.6b-v3-onnx",
+      "variant": null,
+      "provider": "cuda",
+      "revision": "107353b64181b47e250dfa846cf3de6a0b084c73"
+    },
+    "translation": {
+      "modelId": "google/madlad400-3b-mt",
+      "variant": "quantized",
+      "provider": "cuda",
+      "revision": "67037ad42f58d6c0fc3dafaa45f3ec97a46e7eb9"
+    },
+    "tts": {
+      "modelId": "tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX",
+      "variant": "default",
+      "provider": "cuda",
+      "revision": "a2b73f56ffec086c75f154024d5fc7f391f228af"
+    },
+    "vad": {
+      "modelId": "onnx-community/silero-vad",
+      "variant": null,
+      "provider": "cpu",
+      "revision": "e71cae966052b992a7eca6b17738916ce0eca4ec"
+    },
+    "diarization": {
+      "modelId": "cgus/diar_streaming_sortformer_4spk-v2.1-onnx",
+      "variant": null,
+      "provider": "cuda",
+      "revision": "cache-installed"
+    },
+    "separation": {
+      "modelId": "csukuangfj/sherpa-onnx-spleeter-2stems",
+      "variant": null,
+      "provider": "cuda",
+      "revision": "3e5a4dd68259675ab0ddc38269fdae1d0c41f20c"
+    },
+    "speech-enhancement": {
+      "modelId": "Rikorose/DeepFilterNet3",
+      "variant": null,
+      "provider": "cuda",
+      "revision": "dcbbe520263d1061693c4c4a56a6d6a917f30b25"
+    }
+  },
+  "requiredStages": [
+    "asr",
+    "translation",
+    "tts",
+    "export"
+  ],
+  "runtimeQualification": "pending target-GPU acceptance"
+}
