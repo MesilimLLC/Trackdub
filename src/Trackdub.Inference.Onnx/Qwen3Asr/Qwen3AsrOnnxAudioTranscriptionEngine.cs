@@ -139,15 +139,15 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
 
         using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
             .CreatePooledQwen3AsrAsync(
-                EngineFamilyName,
-                modelPaths.EncoderPath,
-                modelPaths.DecoderInitPath,
-                modelPaths.DecoderStepPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                // Keep modelId/variant off the pool key: smoke tests omit them too, so a
-                // verified smoke session is the same entry the ASR stage reuses.
-                additionalTrtEncoderOptions: TrtEncoderOptions)
+                new OnnxExecutionSessionFactory.PooledSessionRequest
+                {
+                    EngineFamily = EngineFamilyName,
+                    Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken,
+                    // Keep modelId/variant off the pool key: smoke tests omit them too, so a
+                    // verified smoke session is the same entry the ASR stage reuses.
+                    AdditionalTrtEncoderOptions = TrtEncoderOptions,
+                },
+                new OnnxExecutionSessionFactory.QwenAsrModelPaths(modelPaths.EncoderPath, modelPaths.DecoderInitPath, modelPaths.DecoderStepPath))
             .ConfigureAwait(false);
 
         // Keep caller-provided regions (VAD or diarization plan). Whisper's nearby-region

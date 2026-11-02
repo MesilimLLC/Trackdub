@@ -16,17 +16,11 @@ public sealed class Qwen3TtsSessionReuseTests
         int createCount = 0;
         byte[] model = BuildIdentityOnnxModel();
 
-        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-            "qwen3-tts-test",
-            "talker_prefill.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: (_, _) =>
+        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-tts-test", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
             {
                 createCount++;
                 return new InferenceSession(model);
-            });
+            } }, "talker_prefill.onnx");
         using var prefill = new QwenPooledSession(pin);
 
         InferenceSession? first = null;
@@ -54,13 +48,7 @@ public sealed class Qwen3TtsSessionReuseTests
     {
         using var pool = new InferenceSessionPool(maxSessions: 2, enableMemoryAdmission: false);
         byte[] model = BuildIdentityOnnxModel();
-        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-            "qwen3-tts-test-disposed",
-            "talker_prefill.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: (_, _) => new InferenceSession(model));
+        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-tts-test-disposed", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) => new InferenceSession(model) }, "talker_prefill.onnx");
         var prefill = new QwenPooledSession(pin);
         using (await prefill.AcquireAsync(TestContext.Current.CancellationToken))
         {

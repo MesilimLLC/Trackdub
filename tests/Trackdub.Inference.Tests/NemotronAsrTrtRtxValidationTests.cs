@@ -126,23 +126,14 @@ public sealed class NemotronAsrTrtRtxValidationTests
         bool enableGraphs)
     {
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease lease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                "nemotron-asr",
-                encoderPath,
-                decoderPath,
-                ExecutionProviderKind.TensorRTRtx,
-                CancellationToken.None,
-                modelId: "diag/nemotron-graph-mode",
-                variant: enableGraphs ? "graphs-on" : "graphs-off",
-                additionalTrtEncoderOptions: enableGraphs
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "nemotron-asr", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, ModelId = "diag/nemotron-graph-mode", Variant = enableGraphs ? "graphs-on" : "graphs-off", AdditionalTrtEncoderOptions = enableGraphs
                     ? OnnxExecutionSessionFactory.WithCudaGraphsEnabled(encoderProfiles)
-                    : encoderProfiles,
-                additionalTrtDecoderOptions: enableGraphs
+                    : encoderProfiles, AdditionalTrtDecoderOptions = enableGraphs
                     ? NemotronAsrEncoderTrtProfiles.DecoderJointCudaGraphOptions
-                    : null);
+                    : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderPath, Decoder = decoderPath });
 
         Assert.Equal(
-            OnnxExecutionSessionFactory.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
+            ProviderNames.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
             lease.SelectedProvider);
 
         var decoder = new NemotronAsrGreedyDecoder(lease, vocab, exportConfig);

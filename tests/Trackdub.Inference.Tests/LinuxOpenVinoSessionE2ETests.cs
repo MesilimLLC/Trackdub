@@ -25,10 +25,7 @@ public sealed class LinuxOpenVinoSessionE2ETests
 
         Assert.True(File.Exists(model), $"{ModelVariable} points at a missing file: {model}");
 
-        using var lease = await OnnxExecutionSessionFactory.CreateSingleAsync(
-            model,
-            ExecutionProviderKind.OpenVino,
-            CancellationToken.None);
+        using var lease = await OnnxExecutionSessionFactory.CreateSingleAsync(model, ExecutionProviderKind.OpenVino, CancellationToken.None);
 
         Assert.Equal("openvino", lease.SelectedProvider);
     }

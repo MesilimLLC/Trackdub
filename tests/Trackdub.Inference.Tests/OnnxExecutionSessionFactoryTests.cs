@@ -33,23 +33,11 @@ public sealed class OnnxExecutionSessionFactoryTests
         using var pool = new InferenceSessionPool(maxSessions: 2);
         int createCount = 0;
 
-        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "test-engine",
-            "single-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession))
+        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession }, "single-model.onnx"))
         {
         }
 
-        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "test-engine",
-            "single-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession))
+        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession }, "single-model.onnx"))
         {
         }
 
@@ -68,25 +56,11 @@ public sealed class OnnxExecutionSessionFactoryTests
         using var pool = new InferenceSessionPool(maxSessions: 2);
         int createCount = 0;
 
-        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "test-engine",
-            "single-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession,
-            allowTrtInitFallback: true))
+        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession, AllowTrtInitFallback = true }, "single-model.onnx"))
         {
         }
 
-        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "test-engine",
-            "single-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession,
-            allowTrtInitFallback: false))
+        using (await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession, AllowTrtInitFallback = false }, "single-model.onnx"))
         {
         }
 
@@ -105,25 +79,11 @@ public sealed class OnnxExecutionSessionFactoryTests
         using var pool = new InferenceSessionPool(maxSessions: 4);
         int createCount = 0;
 
-        using (await OnnxExecutionSessionFactory.CreatePooledOpusAsync(
-            "test-engine",
-            "encoder-model.onnx",
-            "decoder-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession))
+        using (await OnnxExecutionSessionFactory.CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = "encoder-model.onnx", Decoder = "decoder-model.onnx" }))
         {
         }
 
-        using (await OnnxExecutionSessionFactory.CreatePooledOpusAsync(
-            "test-engine",
-            "encoder-model.onnx",
-            "decoder-model.onnx",
-            ExecutionProviderKind.Cpu,
-            CancellationToken.None,
-            pool,
-            sessionFactory: CreateCountingSession))
+        using (await OnnxExecutionSessionFactory.CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateCountingSession }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = "encoder-model.onnx", Decoder = "decoder-model.onnx" }))
         {
         }
 
@@ -143,10 +103,7 @@ public sealed class OnnxExecutionSessionFactoryTests
         await cancellationSource.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            OnnxExecutionSessionFactory.CreateSingleAsync(
-                Path.Join(Path.GetTempPath(), $"{Guid.NewGuid():N}.onnx"),
-                ExecutionProviderKind.DirectMl,
-                cancellationSource.Token));
+            OnnxExecutionSessionFactory.CreateSingleAsync(Path.Join(Path.GetTempPath(), $"{Guid.NewGuid():N}.onnx"), ExecutionProviderKind.DirectMl, cancellationSource.Token));
     }
 
     [Fact]
@@ -166,7 +123,7 @@ public sealed class OnnxExecutionSessionFactoryTests
     [Fact]
     public void IsTensorRtRtxDeviceCandidate_requires_exact_provider_name_and_gpu_hardware_type()
     {
-        MethodInfo method = typeof(OnnxExecutionSessionFactory)
+        MethodInfo method = typeof(ProviderNames)
             .GetMethod("IsTensorRtRtxDeviceCandidate", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("Could not locate TensorRT RTX device filter helper.");
 
@@ -188,7 +145,7 @@ public sealed class OnnxExecutionSessionFactoryTests
     [Fact]
     public void IsDirectMlDeviceCandidate_requires_directml_provider_name_and_gpu_hardware_type()
     {
-        MethodInfo method = typeof(OnnxExecutionSessionFactory)
+        MethodInfo method = typeof(ProviderNames)
             .GetMethod("IsDirectMlDeviceCandidate", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("Could not locate DirectML device filter helper.");
 
@@ -253,10 +210,7 @@ public sealed class OnnxExecutionSessionFactoryTests
         try
         {
             using OnnxExecutionSessionFactory.SingleSessionLease lease =
-                await OnnxExecutionSessionFactory.CreateSingleAsync(
-                    path,
-                    ExecutionProviderKind.DirectMl,
-                    CancellationToken.None);
+                await OnnxExecutionSessionFactory.CreateSingleAsync(path, ExecutionProviderKind.DirectMl, CancellationToken.None);
 
             Assert.Equal("dml", lease.RequestedProvider);
             Assert.Equal("dml", lease.SelectedProvider);
@@ -278,10 +232,7 @@ public sealed class OnnxExecutionSessionFactoryTests
         try
         {
             using OnnxExecutionSessionFactory.SingleSessionLease lease =
-                await OnnxExecutionSessionFactory.CreateSingleAsync(
-                    path,
-                    ExecutionProviderKind.DirectMl,
-                    CancellationToken.None);
+                await OnnxExecutionSessionFactory.CreateSingleAsync(path, ExecutionProviderKind.DirectMl, CancellationToken.None);
 
             Assert.Equal("dml", lease.RequestedProvider);
             Assert.Equal("dml", lease.SelectedProvider);
@@ -679,7 +630,7 @@ public sealed class OnnxExecutionSessionFactoryTests
     [Fact]
     public void ShouldUseCatalogDevicePolicy_is_false_for_explicit_policy_and_native_cuda()
     {
-        MethodInfo method = typeof(OnnxExecutionSessionFactory)
+        MethodInfo method = typeof(ProviderNames)
             .GetMethod("ShouldUseCatalogDevicePolicy", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("Could not locate device policy helper.");
 
@@ -1100,7 +1051,7 @@ public sealed class OnnxExecutionSessionFactoryTests
         ExecutionProviderKind provider,
         bool expected)
     {
-        MethodInfo method = typeof(OnnxExecutionSessionFactory)
+        MethodInfo method = typeof(ProviderNames)
             .GetMethod("ShouldUseCatalogDevicePolicy", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("Could not locate device policy helper.");
 
@@ -1322,12 +1273,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         int createAttempts = 0;
         (InferenceSession session, OnnxExecutionSessionFactory.SessionOptionsSelection selection) =
-            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback(
-                "fake-model.onnx",
-                initialSelection,
-                WindowsMlExecutionDevicePolicy.Explicit,
-                additionalTrtOptions: null,
-                sessionFactory: (_, _) =>
+            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback("fake-model.onnx", new OnnxExecutionSessionFactory.SessionCreateRequest { Selection = initialSelection, DevicePolicy = WindowsMlExecutionDevicePolicy.Explicit, AdditionalTrtOptions = null, SessionFactory = (_, _) =>
                 {
                     createAttempts++;
                     if (createAttempts == 1)
@@ -1337,8 +1283,7 @@ public sealed class OnnxExecutionSessionFactoryTests
                     }
 
                     return CreateMinimalSession();
-                },
-                CancellationToken.None);
+                } }, CancellationToken.None);
 
         using (session)
         using (selection.Options)
@@ -1371,12 +1316,7 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         int createAttempts = 0;
         (InferenceSession session, OnnxExecutionSessionFactory.SessionOptionsSelection selection) =
-            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback(
-                "silero-vad.onnx",
-                initialSelection,
-                WindowsMlExecutionDevicePolicy.Explicit,
-                additionalTrtOptions: null,
-                sessionFactory: (_, _) =>
+            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback("silero-vad.onnx", new OnnxExecutionSessionFactory.SessionCreateRequest { Selection = initialSelection, DevicePolicy = WindowsMlExecutionDevicePolicy.Explicit, AdditionalTrtOptions = null, SessionFactory = (_, _) =>
                 {
                     createAttempts++;
                     if (createAttempts == 1)
@@ -1385,8 +1325,7 @@ public sealed class OnnxExecutionSessionFactoryTests
                     }
 
                     return CreateMinimalSession();
-                },
-                CancellationToken.None);
+                } }, CancellationToken.None);
 
         using (session)
         using (selection.Options)
@@ -1410,19 +1349,12 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         int createAttempts = 0;
         InvalidOperationException thrown = Assert.Throws<InvalidOperationException>(() =>
-            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback(
-                "fake-model.onnx",
-                initialSelection,
-                WindowsMlExecutionDevicePolicy.Explicit,
-                additionalTrtOptions: null,
-                sessionFactory: (_, _) =>
+            OnnxExecutionSessionFactory.CreateInferenceSessionWithTrtInitFallback("fake-model.onnx", new OnnxExecutionSessionFactory.SessionCreateRequest { Selection = initialSelection, DevicePolicy = WindowsMlExecutionDevicePolicy.Explicit, AdditionalTrtOptions = null, SessionFactory = (_, _) =>
                 {
                     createAttempts++;
                     throw new InvalidOperationException(
                         "Kernel not found for op: Squeeze(13) under NvTensorRTRTXExecutionProvider");
-                },
-                CancellationToken.None,
-                allowTrtInitFallback: false));
+                }, AllowTrtInitFallback = false }, CancellationToken.None));
 
         Assert.Equal(1, createAttempts);
         Assert.Contains("Kernel not found", thrown.Message, StringComparison.OrdinalIgnoreCase);
@@ -1674,47 +1606,20 @@ public sealed class OnnxExecutionSessionFactoryTests
                 return new InferenceSession(model);
             }
 
-            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(
-                "latentsync",
-                unet,
-                vaeEncoder,
-                vaeDecoder,
-                whisperEncoder,
-                ExecutionProviderKind.Migraphx,
-                CancellationToken.None,
-                pool,
-                sessionFactory: CreateSession))
+            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "latentsync", Provider = ExecutionProviderKind.Migraphx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateSession }, new OnnxExecutionSessionFactory.LatentSyncModelPaths(unet, vaeEncoder, vaeDecoder, whisperEncoder)))
             {
             }
 
             Assert.Equal(4, creations);
 
-            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(
-                "latentsync",
-                unet,
-                vaeEncoder,
-                vaeDecoder,
-                whisperEncoder,
-                ExecutionProviderKind.Migraphx,
-                CancellationToken.None,
-                pool,
-                sessionFactory: CreateSession))
+            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "latentsync", Provider = ExecutionProviderKind.Migraphx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateSession }, new OnnxExecutionSessionFactory.LatentSyncModelPaths(unet, vaeEncoder, vaeDecoder, whisperEncoder)))
             {
             }
 
             Assert.Equal(4, creations);
 
             policy.Policy = WindowsMlExecutionDevicePolicy.MaxEfficiency;
-            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(
-                "latentsync",
-                unet,
-                vaeEncoder,
-                vaeDecoder,
-                whisperEncoder,
-                ExecutionProviderKind.Migraphx,
-                CancellationToken.None,
-                pool,
-                sessionFactory: CreateSession))
+            using (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "latentsync", Provider = ExecutionProviderKind.Migraphx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateSession }, new OnnxExecutionSessionFactory.LatentSyncModelPaths(unet, vaeEncoder, vaeDecoder, whisperEncoder)))
             {
             }
 

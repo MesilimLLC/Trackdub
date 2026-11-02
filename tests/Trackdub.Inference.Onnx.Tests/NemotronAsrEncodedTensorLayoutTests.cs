@@ -32,7 +32,7 @@ public sealed class NemotronAsrEncodedTensorLayoutTests
             new InferenceSession(Path.Join(fixtureDirectory, "managed-encoder.onnx")),
             new InferenceSession(Path.Join(fixtureDirectory, "managed-decoder.onnx")),
             "cpu",
-            OnnxExecutionSessionFactory.FormatProviderLabel(ExecutionProviderKind.Cpu),
+            ProviderNames.FormatProviderLabel(ExecutionProviderKind.Cpu),
             null);
         using (lease)
         {

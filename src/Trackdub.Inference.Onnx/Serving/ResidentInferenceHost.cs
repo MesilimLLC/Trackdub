@@ -242,24 +242,15 @@ internal sealed class ResidentInferenceHost : IResidentInferenceHost
     {
         List<ExecutionProviderKind> candidates = await BuildCandidatesAsync(spec, cancellationToken).ConfigureAwait(false);
         var fallbackChain = new List<ResidentFallbackStep>();
-        string requestedLabel = OnnxExecutionSessionFactory.FormatProviderLabel(candidates[0]);
+        string requestedLabel = ProviderNames.FormatProviderLabel(candidates[0]);
 
         foreach (ExecutionProviderKind candidate in candidates)
         {
-            string candidateLabel = OnnxExecutionSessionFactory.FormatProviderLabel(candidate);
+            string candidateLabel = ProviderNames.FormatProviderLabel(candidate);
             OnnxExecutionSessionFactory.PooledSingleSessionPin pin;
             try
             {
-                pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-                    EngineFamily,
-                    spec.ModelPath,
-                    candidate,
-                    cancellationToken,
-                    pool,
-                    modelId: spec.Name,
-                    additionalTrtOptions: spec.ProviderOptions,
-                    sessionFactory: sessionFactory,
-                    allowTrtInitFallback: !spec.RequireProvider).ConfigureAwait(false);
+                pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = EngineFamily, Provider = candidate, CancellationToken = cancellationToken, Pool = pool, ModelId = spec.Name, AdditionalTrtOptions = spec.ProviderOptions, SessionFactory = sessionFactory, AllowTrtInitFallback = !spec.RequireProvider }, spec.ModelPath).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

@@ -13,7 +13,7 @@ internal sealed class TensorRtRtxPluginService : ITensorRtRtxProviderBootstrap
 {
     // Must equal the canonical EP name: ORT reports OrtEpDevice.EpName as the registration name passed to
     // RegisterExecutionProviderLibrary (per ORT plugin-EP contract). Registering under a custom handle made
-    // the device invisible to IsPluginProviderListed / IsTensorRtRtxDeviceCandidate, which match this name.
+    // the device invisible to IsPluginProviderListed / ProviderNames.IsTensorRtRtxDeviceCandidate, which match this name.
     private const string RegistrationName = TensorRtRtxProviderConstants.PluginOrtExecutionProviderName;
     private static readonly SemaphoreSlim RegistrationGate = new(1, 1);
     private static string? registeredProviderLibraryPath;

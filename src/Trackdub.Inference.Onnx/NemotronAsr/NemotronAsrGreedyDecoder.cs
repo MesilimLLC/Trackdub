@@ -663,7 +663,7 @@ internal sealed class NemotronAsrGreedyDecoder(
     private static ExecutionProviderKind? ResolveProviderHint(string selectedProviderLabel) =>
         string.Equals(
             selectedProviderLabel,
-            OnnxExecutionSessionFactory.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
+            ProviderNames.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
             StringComparison.Ordinal)
             ? ExecutionProviderKind.TensorRTRtx
             : null;

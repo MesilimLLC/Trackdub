@@ -102,21 +102,18 @@ public sealed class NemotronAsrOnnxAudioTranscriptionEngine(
         NemotronAsrEncoderTrtProfiles.SessionOptions sessionOptions =
             NemotronAsrEncoderTrtProfiles.BuildRuntimeOptions(modelPaths.EncoderPath);
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                EngineFamilyName,
-                modelPaths.EncoderPath,
-                modelPaths.DecoderJointPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                // modelId/variant participate in SessionPoolKey; smoke passes the same values
-                // so a proven smoke session is reused here instead of a second cold create.
-                modelId: plan.ModelId,
-                variant: plan.Variant,
-                // Allocator availability is discovered after creation. Keep capture disabled
-                // so either the device-bound path or its managed fallback can use this lease.
-                // Smoke uses these same options and therefore validates the same pool keys.
-                additionalTrtEncoderOptions: sessionOptions.Encoder,
-                additionalTrtDecoderOptions: sessionOptions.Decoder)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+                {
+                    EngineFamily = EngineFamilyName,
+                    Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken,
+                    // modelId/variant participate in SessionPoolKey; smoke passes the same values
+                    // so a proven smoke session is reused here instead of a second cold create.
+                    ModelId = plan.ModelId, Variant = plan.Variant,
+                    // Allocator availability is discovered after creation. Keep capture disabled
+                    // so either the device-bound path or its managed fallback can use this lease.
+                    // Smoke uses these same options and therefore validates the same pool keys.
+                    AdditionalTrtEncoderOptions = sessionOptions.Encoder, AdditionalTrtDecoderOptions = sessionOptions.Decoder,
+                }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = modelPaths.EncoderPath, Decoder = modelPaths.DecoderJointPath })
             .ConfigureAwait(false);
 
         // Use the original (filtered) caller-provided SpeechRegions for the transcription loop.

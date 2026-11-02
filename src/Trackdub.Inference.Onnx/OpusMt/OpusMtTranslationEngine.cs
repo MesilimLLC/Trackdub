@@ -81,7 +81,7 @@ public sealed class OpusMtTranslationEngine(IRuntimePlanner runtimePlanner,
         }
 
         using OnnxExecutionSessionFactory.OpusSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledOpusAsync("opus-mt", encoderModelPath, decoderModelPath, plan.ExecutionProvider!.Value, cancellationToken)
+            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "opus-mt", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
 
         var translatedSegments = new List<TranslatedTextSegment>(request.Segments.Count);
@@ -171,7 +171,7 @@ public sealed class OpusMtTranslationEngine(IRuntimePlanner runtimePlanner,
 
             TranslatedTextSegment translated;
             using (OnnxExecutionSessionFactory.OpusSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledOpusAsync("opus-mt", encoderModelPath, decoderModelPath, plan.ExecutionProvider!.Value, cancellationToken)
+                .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "opus-mt", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false))
             {
                 string translatedText = await TranslateSegmentAsync(
