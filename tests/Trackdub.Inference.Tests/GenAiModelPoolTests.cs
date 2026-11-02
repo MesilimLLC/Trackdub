@@ -475,8 +475,7 @@ public class GenAiModelPoolTests
 
         // A full-budget external reservation succeeds only if the failed create left no
         // pending or live accounting behind.
-        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 100, CancellationToken.None)
+        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 100), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(probe);
     }
@@ -737,8 +736,7 @@ public class GenAiModelPoolTests
         Assert.Equal(1, fake.DisposeCount);
 
         // No hidden accounting: a full-bucket reservation must fit.
-        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 100, CancellationToken.None)
+        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 100), CancellationToken.None)
             .AwaitWithHangGuard("the post-cancellation accounting probe never completed");
         Assert.NotNull(probe);
     }
@@ -775,8 +773,7 @@ public class GenAiModelPoolTests
         Assert.Equal(1, fake.DisposeCount);
         await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 100, CancellationToken.None)
+        using ExternalMemoryReservation probe = await admission.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 100), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(probe);
     }
