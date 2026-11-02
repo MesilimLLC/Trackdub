@@ -345,5 +345,4 @@ public sealed partial class DubbingPipelineEngine
             ExecutionSnapshot = scope.ExecutionSnapshot,
         };
     }
-
 }

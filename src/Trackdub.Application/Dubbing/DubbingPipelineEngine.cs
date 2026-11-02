@@ -141,9 +141,11 @@ public sealed partial class DubbingPipelineEngine(
             (TranscriptProjectState? initialProjectState, projectId) = await PrepareProjectContextAsync(
                 new ProjectContextRequest
                 {
-                    Session = session, Options = options,
+                    Session = session,
+                    Options = options,
                     RequiresSourceMedia = requiresSourceMedia,
-                    ExecutionSnapshot = executionSnapshot, ColdStart = coldStart,
+                    ExecutionSnapshot = executionSnapshot,
+                    ColdStart = coldStart,
                 },
                 cancellationToken).ConfigureAwait(false);
 
