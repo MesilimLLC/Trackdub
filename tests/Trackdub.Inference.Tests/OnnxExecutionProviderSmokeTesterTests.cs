@@ -19,9 +19,12 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
         // The generic all-ones mapping would yield [1,1,1] and fail the first
         // Conv, which expects feature_size (80) mel channels.
         int[] dimensions = OnnxExecutionProviderSmokeTester.ResolveWhisperEncoderSmokeDimensionsForTesting(
-            "input_features",
-            [-1, -1, -1],
-            80);
+            new OnnxExecutionProviderSmokeTester.WhisperSmokeInputSpec
+            {
+                InputName = "input_features",
+                ModelDimensions = [-1, -1, -1],
+                MelBins = 80,
+            });
 
         Assert.Equal([1, 80, 3000], dimensions);
     }
@@ -30,9 +33,12 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
     public void ResolveWhisperEncoderSmokeDimensions_honours_large_model_mel_bins()
     {
         int[] dimensions = OnnxExecutionProviderSmokeTester.ResolveWhisperEncoderSmokeDimensionsForTesting(
-            "input_features",
-            [-1, -1, -1],
-            128);
+            new OnnxExecutionProviderSmokeTester.WhisperSmokeInputSpec
+            {
+                InputName = "input_features",
+                ModelDimensions = [-1, -1, -1],
+                MelBins = 128,
+            });
 
         Assert.Equal([1, 128, 3000], dimensions);
     }
@@ -41,13 +47,19 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
     public void ResolveWhisperEncoderSmokeDimensions_falls_back_for_non_feature_inputs()
     {
         int[] other = OnnxExecutionProviderSmokeTester.ResolveWhisperEncoderSmokeDimensionsForTesting(
-            "attention_mask",
-            [-1, -1],
-            80);
+            new OnnxExecutionProviderSmokeTester.WhisperSmokeInputSpec
+            {
+                InputName = "attention_mask",
+                ModelDimensions = [-1, -1],
+                MelBins = 80,
+            });
         int[] unsetMelBins = OnnxExecutionProviderSmokeTester.ResolveWhisperEncoderSmokeDimensionsForTesting(
-            "input_features",
-            [-1, -1, -1],
-            0);
+            new OnnxExecutionProviderSmokeTester.WhisperSmokeInputSpec
+            {
+                InputName = "input_features",
+                ModelDimensions = [-1, -1, -1],
+                MelBins = 0,
+            });
 
         Assert.Equal([1, 1], other);
         Assert.Equal([1, 1, 1], unsetMelBins);
@@ -209,11 +221,15 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
             object? rawResult = method.Invoke(
                 null,
                 [
-                    "ResembleAI/chatterbox-turbo-ONNX",
-                    "chatterbox-turbo-onnx",
-                    root,
-                    languageModelPath,
-                    "q4f16"
+                    new ExecutionProviderSmokeTestRequest(
+                        RuntimeStage.Tts,
+                        "ResembleAI/chatterbox-turbo-ONNX",
+                        "chatterbox-turbo-onnx",
+                        EngineFamily: null,
+                        "q4f16",
+                        ExecutionProviderKind.Cpu,
+                        root,
+                        languageModelPath)
                 ]);
             string probePath = Assert.IsType<string>(rawResult);
 
@@ -246,11 +262,15 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
             object? rawResult = method.Invoke(
                 null,
                 [
-                    "onnx-community/chatterbox-ONNX",
-                    "chatterbox-onnx",
-                    root,
-                    languageModelPath,
-                    "fp16"
+                    new ExecutionProviderSmokeTestRequest(
+                        RuntimeStage.Tts,
+                        "onnx-community/chatterbox-ONNX",
+                        "chatterbox-onnx",
+                        EngineFamily: null,
+                        "fp16",
+                        ExecutionProviderKind.Cpu,
+                        root,
+                        languageModelPath)
                 ]);
             string probePath = Assert.IsType<string>(rawResult);
 
@@ -284,11 +304,15 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
             object? rawResult = method.Invoke(
                 null,
                 [
-                    "ResembleAI/chatterbox-turbo-ONNX",
-                    "chatterbox-turbo-onnx",
-                    string.Empty,
-                    languageModelPath,
-                    "q4f16"
+                    new ExecutionProviderSmokeTestRequest(
+                        RuntimeStage.Tts,
+                        "ResembleAI/chatterbox-turbo-ONNX",
+                        "chatterbox-turbo-onnx",
+                        EngineFamily: null,
+                        "q4f16",
+                        ExecutionProviderKind.Cpu,
+                        string.Empty,
+                        languageModelPath)
                 ]);
             string probePath = Assert.IsType<string>(rawResult);
 
@@ -314,11 +338,15 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
         object? rawResult = method.Invoke(
             null,
             [
-                "onnx-community/Kokoro-82M-v1.0-ONNX",
-                "kokoro",
-                Path.GetTempPath(),
-                entryPath,
-                "default"
+                new ExecutionProviderSmokeTestRequest(
+                    RuntimeStage.Tts,
+                    "onnx-community/Kokoro-82M-v1.0-ONNX",
+                    "kokoro",
+                    EngineFamily: null,
+                    "default",
+                    ExecutionProviderKind.Cpu,
+                    Path.GetTempPath(),
+                    entryPath)
             ]);
         string probePath = Assert.IsType<string>(rawResult);
 
@@ -463,14 +491,23 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
     public void ResolveChatterboxDecoderSmokeDimensions_uses_istft_safe_speech_token_length()
     {
         int[] speechTokens = OnnxExecutionProviderSmokeTester.ResolveChatterboxDecoderSmokeDimensionsForTesting(
-            "speech_tokens",
-            [-1, -1]);
+            new OnnxExecutionProviderSmokeTester.ChatterboxSmokeInputSpec
+            {
+                InputName = "speech_tokens",
+                ModelDimensions = [-1, -1],
+            });
         int[] speakerFeatures = OnnxExecutionProviderSmokeTester.ResolveChatterboxDecoderSmokeDimensionsForTesting(
-            "speaker_features",
-            [-1, -1, 80]);
+            new OnnxExecutionProviderSmokeTester.ChatterboxSmokeInputSpec
+            {
+                InputName = "speaker_features",
+                ModelDimensions = [-1, -1, 80],
+            });
         int[] speakerEmbeddings = OnnxExecutionProviderSmokeTester.ResolveChatterboxDecoderSmokeDimensionsForTesting(
-            "speaker_embeddings",
-            [-1, 192]);
+            new OnnxExecutionProviderSmokeTester.ChatterboxSmokeInputSpec
+            {
+                InputName = "speaker_embeddings",
+                ModelDimensions = [-1, 192],
+            });
 
         Assert.Equal([1, 8], speechTokens);
         Assert.Equal([1, 8, 80], speakerFeatures);
