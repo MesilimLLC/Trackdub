@@ -25,13 +25,16 @@ internal static class UnattendedVoiceSelection
     /// (non-fallback) voice assignment would fail TTS outright. Mirrors the shell's fallback
     /// behavior: picks the first catalog voice whose language matches the dub target language,
     /// ordered by display name like the shell's voice picker. Languages Kokoro does not cover use
-    /// the Qwen3 CustomVoice default preset when Qwen3 speaks the language. Speakers stay
-    /// unassigned otherwise, so TTS fails with the explicit assignment error instead of dubbing
-    /// with a wrong-language voice.
+    /// the Qwen3 CustomVoice default preset when Qwen3 speaks the language. When the selected TTS
+    /// model is already CustomVoice, use that language's Qwen default even for Kokoro languages
+    /// (Spanish/English catalogs omit Qwen presets, and quality seed volumes may lack Kokoro).
+    /// Speakers stay unassigned otherwise, so TTS fails with the explicit assignment error instead
+    /// of dubbing with a wrong-language voice.
     /// </summary>
     internal static Dictionary<Guid, string>? BuildUnattendedFallbackVoiceIds(
         TranscriptProjectState state,
-        string? targetLanguageCode)
+        string? targetLanguageCode,
+        string? preferredTtsModelAlias = null)
     {
         if (state.Speakers.Count == 0)
         {
@@ -43,20 +46,7 @@ internal static class UnattendedVoiceSelection
             .Select(static assignment => assignment.SpeakerId)
             .ToHashSet();
 
-        // Languages Kokoro does not cover use the Qwen3 CustomVoice preset whose native language
-        // matches. The picker list can contain every preset for these languages, so take the
-        // language default instead of the alphabetically first preset (Aiden is English).
-        // Otherwise pick the first matching stock voice.
-        string? defaultVoiceId = !string.IsNullOrWhiteSpace(targetLanguageCode) &&
-                                 !StockTtsVoiceMatcher.SupportsKokoro(targetLanguageCode)
-            ? (Qwen3TtsDefaults.SupportsLanguage(targetLanguageCode)
-                ? Qwen3TtsDefaults.ResolveDefaultPresetVoiceId(targetLanguageCode)
-                : null)
-            : state.AvailableVoices
-                .Where(voice => IsVoiceLanguageMatch(voice.LanguageCode, targetLanguageCode))
-                .OrderBy(static voice => voice.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .Select(static voice => voice.VoiceId)
-                .FirstOrDefault();
+        string? defaultVoiceId = ResolveUnattendedFallbackVoiceId(state, targetLanguageCode, preferredTtsModelAlias);
         if (defaultVoiceId is null)
         {
             return null;
@@ -66,6 +56,36 @@ internal static class UnattendedVoiceSelection
             .Where(speaker => !deliberatelyAssignedSpeakerIds.Contains(speaker.Id))
             .ToDictionary(static speaker => speaker.Id, _ => defaultVoiceId);
         return fallbackVoiceIds.Count > 0 ? fallbackVoiceIds : null;
+    }
+
+    private static string? ResolveUnattendedFallbackVoiceId(
+        TranscriptProjectState state,
+        string? targetLanguageCode,
+        string? preferredTtsModelAlias)
+    {
+        // CustomVoice runs (e.g. poc-server-quality-v1) must not depend on Kokoro catalog entries.
+        if (Qwen3TtsDefaults.IsCustomVoiceAlias(preferredTtsModelAlias) &&
+            Qwen3TtsDefaults.SupportsLanguage(targetLanguageCode))
+        {
+            return Qwen3TtsDefaults.ResolveDefaultPresetVoiceId(targetLanguageCode);
+        }
+
+        // Languages Kokoro does not cover use the Qwen3 CustomVoice preset whose native language
+        // matches. The picker list can contain every preset for these languages, so take the
+        // language default instead of the alphabetically first preset (Aiden is English).
+        if (!string.IsNullOrWhiteSpace(targetLanguageCode) &&
+            !StockTtsVoiceMatcher.SupportsKokoro(targetLanguageCode))
+        {
+            return Qwen3TtsDefaults.SupportsLanguage(targetLanguageCode)
+                ? Qwen3TtsDefaults.ResolveDefaultPresetVoiceId(targetLanguageCode)
+                : null;
+        }
+
+        return state.AvailableVoices
+            .Where(voice => IsVoiceLanguageMatch(voice.LanguageCode, targetLanguageCode))
+            .OrderBy(static voice => voice.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Select(static voice => voice.VoiceId)
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -131,16 +151,16 @@ internal static class UnattendedVoiceSelection
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
 
-        UnattendedVoicePlan voicePlan = ResolveUnattendedVoicePlan(state, options);
-        IReadOnlyDictionary<Guid, string> explicitVoiceIds = voicePlan.ExplicitVoiceIds;
-        Dictionary<Guid, bool>? cloneBySpeaker = voicePlan.CloneBySpeaker;
-        Dictionary<Guid, string>? fallbackVoiceIds = voicePlan.FallbackVoiceIds;
-
         string? preferredModelAlias = ttsModelAlias;
         if (RequestsVoiceCloning(options) && string.IsNullOrWhiteSpace(preferredModelAlias))
         {
             preferredModelAlias = VoiceCloningDefaults.ResolveDefaultCloneModelAlias(options.TargetLanguageCode);
         }
+
+        UnattendedVoicePlan voicePlan = ResolveUnattendedVoicePlan(state, options, preferredModelAlias);
+        IReadOnlyDictionary<Guid, string> explicitVoiceIds = voicePlan.ExplicitVoiceIds;
+        Dictionary<Guid, bool>? cloneBySpeaker = voicePlan.CloneBySpeaker;
+        Dictionary<Guid, string>? fallbackVoiceIds = voicePlan.FallbackVoiceIds;
 
         return new GenerateTtsForAllSpeakersRequest(
             FallbackVoiceIdsBySpeakerId: fallbackVoiceIds,
@@ -268,7 +288,7 @@ internal static class UnattendedVoiceSelection
 
         List<string> allVoiceIds = EnumerateUnattendedStockVoiceIds(
             state,
-            ResolveUnattendedVoicePlan(state, options),
+            ResolveUnattendedVoicePlan(state, options, selections.TtsModelAlias),
             options.TargetLanguageCode).ToList();
         return allVoiceIds.Count > 0 && allVoiceIds.All(Qwen3TtsDefaults.IsPresetVoiceId)
             ? selections with
@@ -302,7 +322,7 @@ internal static class UnattendedVoiceSelection
 
         List<string> voiceIds = EnumerateUnattendedStockVoiceIds(
             state,
-            ResolveUnattendedVoicePlan(state, options),
+            ResolveUnattendedVoicePlan(state, options, selections.TtsModelAlias),
             options.TargetLanguageCode).ToList();
         return voiceIds.Any(Qwen3TtsDefaults.IsPresetVoiceId);
     }
@@ -319,8 +339,27 @@ internal static class UnattendedVoiceSelection
     private static bool FreshProjectMayUsePreset(DubbingSessionOptions options) =>
         (options.VoiceAssignmentOverrides?.Values.Any(Qwen3TtsDefaults.IsPresetVoiceId) ?? false) ||
         (options.AutoAssignFallbackVoices && !options.UseVoiceCloning &&
-         !StockTtsVoiceMatcher.SupportsKokoro(options.TargetLanguageCode) &&
-         Qwen3TtsDefaults.SupportsLanguage(options.TargetLanguageCode));
+         Qwen3TtsDefaults.SupportsLanguage(options.TargetLanguageCode) &&
+         (Qwen3TtsDefaults.IsCustomVoiceAlias(TryGetPreferredTtsAlias(options)) ||
+          !StockTtsVoiceMatcher.SupportsKokoro(options.TargetLanguageCode)));
+
+    private static string? TryGetPreferredTtsAlias(DubbingSessionOptions options)
+    {
+        if (options.ModelPreferences is null)
+        {
+            return null;
+        }
+
+        foreach (KeyValuePair<string, string> pair in options.ModelPreferences)
+        {
+            if (pair.Key.Equals(StageNames.Tts, StringComparison.OrdinalIgnoreCase))
+            {
+                return pair.Value;
+            }
+        }
+
+        return null;
+    }
 
     private readonly record struct UnattendedVoicePlan(
         IReadOnlyDictionary<Guid, string> ExplicitVoiceIds,
@@ -333,7 +372,8 @@ internal static class UnattendedVoiceSelection
     /// </summary>
     private static UnattendedVoicePlan ResolveUnattendedVoicePlan(
         TranscriptProjectState state,
-        DubbingSessionOptions options)
+        DubbingSessionOptions options,
+        string? preferredTtsModelAlias = null)
     {
         IReadOnlyDictionary<Guid, string> explicitVoiceIds = ResolveVoiceAssignmentOverrides(
             state,
@@ -351,10 +391,11 @@ internal static class UnattendedVoiceSelection
                 speaker => !explicitVoiceIds.ContainsKey(speaker.Id));
         }
 
+        string? ttsAlias = preferredTtsModelAlias ?? TryGetPreferredTtsAlias(options);
         Dictionary<Guid, string>? fallbackVoiceIds = null;
         if (options.AutoAssignFallbackVoices)
         {
-            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(state, options.TargetLanguageCode);
+            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(state, options.TargetLanguageCode, ttsAlias);
             if (fallbackVoiceIds is not null)
             {
                 fallbackVoiceIds = fallbackVoiceIds

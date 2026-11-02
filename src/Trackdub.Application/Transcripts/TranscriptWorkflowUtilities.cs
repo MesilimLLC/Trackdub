@@ -69,9 +69,9 @@ public static class TranscriptWorkflowUtilities
         state.TtsSegmentStates.Any(static segment => segment.TakeId is not null);
 
     /// <summary>
-    /// Full-timeline dubbed speech for video lip synthesis. Requires a current export render
-    /// (newer than the latest completed dub take and with no stale takes); per-take TTS clips
-    /// alone are not timeline-aligned for whole-video repair.
+    /// Current exported audio fallback for video lip synthesis. A fresh speech-only driver is
+    /// normally rendered directly from the current mix plan before delivery; this artifact is
+    /// used only when that internal render path is unavailable.
     /// </summary>
     public static ProjectArtifact? ResolveLipSynthesisDriverAudioArtifact(TranscriptProjectState state)
     {

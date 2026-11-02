@@ -15,3 +15,7 @@ onnx-community/Kokoro-82M-v1.0-ONNX
 # Voice-cloning dubbing: int8 variant declares CUDA; its quantized graphs are
 # not TRT-RTX compilable, so it runs on the CUDA route with CPU vocoder fallback.
 tonythethompson/CosyVoice-300M-ONNX|int8
+# Quality TTS tentpole for the opt-in poc-server-quality-v1 preset: CUDA-only by
+# planner policy. Seeded here so the CUDA smoke matrix's tts-qwen row can run
+# against the default rtx model volume.
+tonythethompson/Qwen3-TTS-12Hz-1.7B-CustomVoice-ONNX

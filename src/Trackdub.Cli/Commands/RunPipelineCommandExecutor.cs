@@ -220,6 +220,11 @@ internal static class RunPipelineCommandExecutor
             return Task.FromResult<(PipelinePreset?, int)>((null, Program.ExitSuccess));
         }
 
+        if (PocPresets.TryResolve(presetName, out PipelinePreset? builtIn, out _, out _))
+        {
+            return Task.FromResult<(PipelinePreset?, int)>((builtIn, Program.ExitSuccess));
+        }
+
         return CliBatchCommandHelpers.TryLoadPresetAsync(presetName, factory, cancellationToken);
     }
 
@@ -291,6 +296,19 @@ internal static class RunPipelineCommandExecutor
             stageFilter, state.ForceRerun,
             state.TtsRubberbandStretch, state.NoTtsRubberbandStretch, state.TtsRubberbandThreshold,
             state.TtsAutoStretchMaxOverrun);
+        if (PocPresets.TryResolve(
+                state.PresetName,
+                out _,
+                out IReadOnlyDictionary<string, string>? presetProviders,
+                out IReadOnlyDictionary<string, string>? presetVariants))
+        {
+            templateOptions = templateOptions with
+            {
+                ExecutionProviderPreferences = presetProviders,
+                ModelVariantPreferences = presetVariants,
+                RequireExecutionProviderPreferences = true,
+            };
+        }
 
         var batchOptions = new BatchOptions
         {
@@ -357,8 +375,8 @@ internal static class RunPipelineCommandExecutor
             return (true, null);
         }
 
-        (PipelinePreset? preset, int exitCode) = state.PresetName == PocServerPreset.Name
-            ? (PocServerPreset.Create(), Program.ExitSuccess)
+        (PipelinePreset? preset, int exitCode) = PocPresets.TryResolve(state.PresetName, out PipelinePreset? builtIn, out _, out _)
+            ? (builtIn, Program.ExitSuccess)
             : await CliBatchCommandHelpers.TryLoadPresetAsync(state.PresetName, parseResult, cancellationToken).ConfigureAwait(false);
         if (exitCode != Program.ExitSuccess)
         {
@@ -640,6 +658,11 @@ internal static class RunPipelineCommandExecutor
         CancellationToken cancellationToken)
     {
         string progressFormat = CliParseHelpers.GetGlobalOptionValue<string>(parseResult, "progress") ?? "text";
+        PocPresets.TryResolve(
+            state.PresetName,
+            out _,
+            out IReadOnlyDictionary<string, string>? presetProviders,
+            out IReadOnlyDictionary<string, string>? presetVariants);
         return CliProgressRunner.ExecuteAsync(
             progressFormat,
             (progress, ct) => RunPipelineHandler.ExecuteAsync(
@@ -656,8 +679,8 @@ internal static class RunPipelineCommandExecutor
                 {
                     ResultFile = state.ResultFile,
                     ProgressFile = state.ProgressFile,
-                    ExecutionProviderPreferences = state.PresetName == PocServerPreset.Name ? PocServerPreset.Providers : null,
-                    ModelVariantPreferences = state.PresetName == PocServerPreset.Name ? PocServerPreset.Variants : null,
+                    ExecutionProviderPreferences = presetProviders,
+                    ModelVariantPreferences = presetVariants,
                 },
                 progress, Console.Out, ct),
             cancellationToken);
