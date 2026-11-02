@@ -286,7 +286,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         try
         {
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync(SileroVadPoolFamily, modelPath, provider, cancellationToken, allowTrtInitFallback: true)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SileroVadPoolFamily, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
                 .ConfigureAwait(false);
             try
             {
@@ -335,14 +335,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         try
         {
             using OnnxExecutionSessionFactory.WhisperSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledWhisperAsync(
-                    WhisperOnnxAudioTranscriptionEngine.EngineFamilyName,
-                    encoderModelPath,
-                    decoderModelPath,
-                    provider,
-                    cancellationToken,
-                    additionalTrtEncoderOptions: encoderOptions,
-                    additionalTrtDecoderOptions: decoderOptions)
+                .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = WhisperOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false);
             try
             {
@@ -585,12 +578,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
     {
         string poolFamily = ResolveGenericPoolFamily(request);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                poolFamily,
-                request.EntryPath,
-                request.ExecutionProvider,
-                cancellationToken,
-                allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, request.EntryPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -650,14 +638,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         string decoderInitPath = Path.Join(root, "decoder_init.onnx");
         string decoderStepPath = Path.Join(root, "decoder_step.onnx");
         using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledQwen3AsrAsync(
-                "qwen3-asr",
-                encoderModelPath,
-                decoderInitPath,
-                decoderStepPath,
-                provider,
-                cancellationToken,
-                additionalTrtEncoderOptions: Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions)
+            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
 
@@ -681,16 +662,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         // modelId/variant must match NemotronAsrOnnxAudioTranscriptionEngine or the stage
         // misses this pooled session and pays cold load again.
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                "nemotron-asr",
-                encoderModelPath,
-                decoderJointPath,
-                request.ExecutionProvider,
-                cancellationToken,
-                modelId: request.ModelId,
-                variant: request.Variant,
-                additionalTrtEncoderOptions: sessionOptions.Encoder,
-                additionalTrtDecoderOptions: sessionOptions.Decoder)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "nemotron-asr", Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = sessionOptions.Encoder, AdditionalTrtDecoderOptions = sessionOptions.Decoder }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderJointPath })
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -712,24 +684,12 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         // Preprocessor is a separate pooled CPU graph in production; warm the same key so the
         // stage does not rebuild nemo128.onnx after a successful smoke.
         using OnnxExecutionSessionFactory.SingleSessionLease preprocessor = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                "parakeet-tdt-preprocessor",
-                Path.Join(root, "nemo128.onnx"),
-                ExecutionProviderKind.Cpu,
-                cancellationToken)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "parakeet-tdt-preprocessor", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, Path.Join(root, "nemo128.onnx"))
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(ExecutionProviderKind.Cpu, preprocessor.SelectedProvider);
 
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName,
-                encoderModelPath,
-                Path.Join(root, "decoder_joint-model.onnx"),
-                request.ExecutionProvider,
-                cancellationToken,
-                modelId: request.ModelId,
-                variant: request.Variant,
-                additionalTrtEncoderOptions: ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = Path.Join(root, "decoder_joint-model.onnx") })
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -752,7 +712,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         string runnableModelPath = request.EntryPath;
         string poolFamily = ResolveSeparationPoolFamily(request.EngineFamily, request.ModelId, runnableModelPath);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(poolFamily, runnableModelPath, request.ExecutionProvider, cancellationToken, allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, runnableModelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 
@@ -801,13 +761,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         // Same family + TRT profiles as SortFormerDiarizationEngine so the smoke run warms
         // the session the diarization stage will lease.
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                SortFormerDiarizationEngine.EngineFamilyName,
-                modelPath,
-                provider,
-                cancellationToken,
-                additionalTrtOptions: SortFormerDiarizationEngine.TrtOptions,
-                allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SortFormerDiarizationEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtOptions = SortFormerDiarizationEngine.TrtOptions, AllowTrtInitFallback = true }, modelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
 
@@ -827,7 +781,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         string modelPath = ResolveTtsProbeModelPath(modelId, modelAlias, modelRootPath, entryPath, variant);
         string poolFamily = ResolveTtsPoolFamily(modelId, modelAlias);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(poolFamily, modelPath, provider, cancellationToken, allowTrtInitFallback: true)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
 
@@ -902,7 +856,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
             }
 
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync("cosyvoice", graphPath, provider, cancellationToken, allowTrtInitFallback: false)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = false }, graphPath)
                 .ConfigureAwait(false);
             EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
         }
@@ -935,11 +889,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
                 continue;
             }
 
-            await OnnxExecutionSessionFactory.WarmPooledSingleAsync(
-                "chatterbox",
-                graphPath,
-                ExecutionProviderKind.Cpu,
-                cancellationToken).ConfigureAwait(false);
+            await OnnxExecutionSessionFactory.WarmPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, graphPath).ConfigureAwait(false);
         }
     }
 
@@ -1600,9 +1550,7 @@ public sealed class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTe
         try
         {
             using OnnxExecutionSessionFactory.OpusSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledOpusAsync(
-                    engineFamily,
-                    encoderModelPath, decoderModelPath, request.ExecutionProvider, cancellationToken)
+                .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = engineFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false);
             EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
 

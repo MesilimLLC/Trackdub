@@ -87,12 +87,7 @@ internal sealed class CosyVoiceSessionPins : IDisposable
         bool allowTrtInitFallback = true)
     {
         async Task<OnnxExecutionSessionFactory.PooledSingleSessionPin> Pin(string path) =>
-            await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-                "cosyvoice",
-                path,
-                provider,
-                cancellationToken,
-                allowTrtInitFallback: allowTrtInitFallback).ConfigureAwait(false);
+            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, path).ConfigureAwait(false);
 
         var pins = new OnnxExecutionSessionFactory.PooledSingleSessionPin[9];
         try

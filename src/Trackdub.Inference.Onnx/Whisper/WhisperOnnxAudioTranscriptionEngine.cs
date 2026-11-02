@@ -239,14 +239,7 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
         }
 
         OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory
-            .CreatePooledWhisperAsync(
-                "whisper-onnx",
-                encoderModelPath,
-                decoderModelPath,
-                provider,
-                cancellationToken,
-                additionalTrtEncoderOptions: encoderOptions,
-                additionalTrtDecoderOptions: decoderOptions)
+            .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
         return new WhisperSessionBundle(lease, encoderModelPath, decoderModelPath, modelRootPath);
     }
@@ -1127,7 +1120,7 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
 
             if (!string.Equals(
                     lease.SelectedProvider,
-                    OnnxExecutionSessionFactory.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
+                    ProviderNames.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
                     StringComparison.Ordinal))
             {
                 return null;

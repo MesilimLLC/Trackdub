@@ -123,13 +123,7 @@ public sealed class SortFormerDiarizationEngine(IRuntimePlanner runtimePlanner,
 
         string modelPath = ResolvePlannedModelPath(plan);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                "sortformer",
-                modelPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                additionalTrtOptions: TrtOptions,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "sortformer", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AdditionalTrtOptions = TrtOptions, AllowTrtInitFallback = !plan.RequirePreferredExecutionProvider }, modelPath)
             .ConfigureAwait(false);
 
         EnsureModelSpeakerCapacity(sessionLease.Session, plan.ModelAlias);
@@ -213,7 +207,7 @@ public sealed class SortFormerDiarizationEngine(IRuntimePlanner runtimePlanner,
         using SortFormerStreamingRun? streamingRun =
             string.Equals(
                 selectedProviderLabel,
-                OnnxExecutionSessionFactory.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
+                ProviderNames.FormatProviderLabel(ExecutionProviderKind.TensorRTRtx),
                 StringComparison.Ordinal)
                 ? SortFormerStreamingRun.TryCreate(session)
                 : null;

@@ -103,7 +103,7 @@ internal sealed class DeepFilterNetModelSessions(
         }
 
         OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(engineFamily, cachePath, provider, cancellationToken)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = engineFamily, Provider = provider, CancellationToken = cancellationToken }, cachePath)
             .ConfigureAwait(false);
         return (lease, stateInputs, stateOutputs);
     }

@@ -43,7 +43,7 @@ internal static class EpContextCompatibility
             // Session creation appends exactly this device (AppendTensorRtRtxOrFallbackProvider).
             OrtEpDevice? sessionDevice = OrtEnv.Instance()
                 .GetEpDevices()
-                .FirstOrDefault(device => OnnxExecutionSessionFactory.IsTensorRtRtxDeviceCandidate(
+                .FirstOrDefault(device => ProviderNames.IsTensorRtRtxDeviceCandidate(
                     device.EpName,
                     device.HardwareDevice.Type));
             OrtEpDevice[] selected = sessionDevice is null ? [] : [sessionDevice];

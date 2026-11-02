@@ -115,22 +115,10 @@ public sealed class ParakeetTdtOnnxAudioTranscriptionEngine(
         // Pooled so repeated transcription calls do not rebuild the session every time.
         // Smoke warms this same key ("parakeet-tdt-preprocessor").
         using OnnxExecutionSessionFactory.SingleSessionLease preprocessor = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(
-                "parakeet-tdt-preprocessor",
-                paths.PreprocessorPath,
-                ExecutionProviderKind.Cpu,
-                cancellationToken)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "parakeet-tdt-preprocessor", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, paths.PreprocessorPath)
             .ConfigureAwait(false);
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessions = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(
-                EngineFamilyName,
-                paths.EncoderPath,
-                paths.DecoderJointPath,
-                plan.ExecutionProvider.Value,
-                cancellationToken,
-                modelId: plan.ModelId,
-                variant: plan.Variant,
-                additionalTrtEncoderOptions: TrtEncoderOptions)
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = EngineFamilyName, Provider = plan.ExecutionProvider.Value, CancellationToken = cancellationToken, ModelId = plan.ModelId, Variant = plan.Variant, AdditionalTrtEncoderOptions = TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = paths.EncoderPath, Decoder = paths.DecoderJointPath })
             .ConfigureAwait(false);
         var decoder = new ParakeetTdtGreedyDecoder(sessions.DecoderJointSession, vocab, plan.ExecutionProvider);
 

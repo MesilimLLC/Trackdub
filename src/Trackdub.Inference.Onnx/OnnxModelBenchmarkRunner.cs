@@ -957,7 +957,7 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
     private static bool ShouldUseCatalogDevicePolicyForPreference(BenchmarkProviderPreference preference)
     {
 #if WINDOWS
-        return OnnxExecutionSessionFactory.ShouldUseCatalogDevicePolicy(
+        return ProviderNames.ShouldUseCatalogDevicePolicy(
             ActiveWindowsMlDevicePolicy,
             MapPreferenceToExecutionProvider(preference));
 #else
@@ -1259,7 +1259,7 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL
         };
 #if WINDOWS
-        if (OnnxExecutionSessionFactory.ShouldUseCatalogDevicePolicy(
+        if (ProviderNames.ShouldUseCatalogDevicePolicy(
                 ActiveWindowsMlDevicePolicy,
                 MapPreferenceToExecutionProvider(preference)))
         {

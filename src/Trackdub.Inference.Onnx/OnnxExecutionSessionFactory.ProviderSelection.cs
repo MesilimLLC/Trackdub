@@ -38,7 +38,7 @@ internal static partial class OnnxExecutionSessionFactory
     private static SessionOptionsSelection CreateSessionOptions(SessionOptionsRequest request)
     {
         ExecutionProviderKind provider = request.Provider;
-        bool useCatalogDevicePolicy = ShouldUseCatalogDevicePolicy(request.DevicePolicy, provider);
+        bool useCatalogDevicePolicy = ProviderNames.ShouldUseCatalogDevicePolicy(request.DevicePolicy, provider);
         SessionOptions options = CreateBaseSessionOptions(
             useCatalogDevicePolicy ? request.DevicePolicy : WindowsMlExecutionDevicePolicy.Explicit,
             out bool devicePolicyApplied,
@@ -49,7 +49,7 @@ internal static partial class OnnxExecutionSessionFactory
             return new SessionOptionsSelection(options, ExecutionProviderKind.Cpu);
         }
 
-        if (useCatalogDevicePolicy && IsCatalogGpuProvider(provider))
+        if (useCatalogDevicePolicy && ProviderNames.IsCatalogGpuProvider(provider))
         {
             return new SessionOptionsSelection(
                 options,
@@ -163,7 +163,7 @@ internal static partial class OnnxExecutionSessionFactory
         return new SessionOptionsSelection(
             options,
             selectedProvider,
-            $"Requested {requestedLabel} but {deviceLabel} was unavailable; fell back to {FormatProviderLabel(selectedProvider)}.");
+            $"Requested {requestedLabel} but {deviceLabel} was unavailable; fell back to {ProviderNames.FormatProviderLabel(selectedProvider)}.");
     }
 
     private static SessionOptionsSelection CreateMigraphxSelection(SessionOptions options)
