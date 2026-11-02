@@ -4,7 +4,7 @@
     <!-- Single source of truth for OnnxRuntime version. Referenced by Trackdub.OnnxRuntime.Dnnl.Native.csproj and the DNNL build script.
          IMPORTANT: Keep this a literal version string. The build script (tools/onnxruntime-dnnl/Build-OnnxRuntimeDnnlNativePackage.ps1)
          reads it with a regex and will capture the raw text literally if this is set to another MSBuild property reference. -->
-    <OnnxRuntimeVersion>1.31.0</OnnxRuntimeVersion>
+    <OnnxRuntimeVersion>1.31.1</OnnxRuntimeVersion>
     <!-- Native ORT version inside the Microsoft.Windows.AI.MachineLearning pin below. Bump the two together:
          EP-context artifact stamps record it, so a stale value would reuse artifacts across ORT runtimes. -->
     <WindowsMlOnnxRuntimeVersion>1.27.1</WindowsMlOnnxRuntimeVersion>
