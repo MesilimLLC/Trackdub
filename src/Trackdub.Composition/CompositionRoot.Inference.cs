@@ -144,6 +144,17 @@ public static partial class CompositionRoot
         services.TryAddSingleton<IMediaHardwareCapabilitiesService, MediaHardwareCapabilitiesService>();
     }
 
+    private static BundledModelManifestRegistry LoadManifestRegistry()
+    {
+        if (BundledModelManifestRegistry.TryLoadDefault(out BundledModelManifestRegistry? registry, out string? error) &&
+            registry is not null)
+        {
+            return registry;
+        }
+
+        throw new InvalidOperationException(error ?? "Bundled model manifest was not found.");
+    }
+
     private static void AddHardwareAndDiscovery(IServiceCollection services)
     {
         services.TryAddSingleton<IInferenceWorkerClient>(_ => new InferenceWorkerClient());

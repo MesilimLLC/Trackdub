@@ -285,17 +285,6 @@ public static partial class CompositionRoot
         services.TryAddSingleton<IHardwarePolicyCoordinator, HardwarePolicyCoordinator>();
     }
 
-    private static BundledModelManifestRegistry LoadManifestRegistry()
-    {
-        if (BundledModelManifestRegistry.TryLoadDefault(out BundledModelManifestRegistry? registry, out string? error) &&
-            registry is not null)
-        {
-            return registry;
-        }
-
-        throw new InvalidOperationException(error ?? "Bundled model manifest was not found.");
-    }
-
     private static long? TryGetEnvironmentLong(string variableName)
     {
         string? raw = Environment.GetEnvironmentVariable(variableName);

@@ -220,7 +220,6 @@ public static partial class CompositionRoot
         services.TryAddSingleton<IStarterPackOptimizationNudgeService, StarterPackOptimizationNudgeService>();
         services.TryAddSingleton<IStarterPackPatchApplier, StarterPackPatchApplier>();
         services.TryAddSingleton<IStarterPackCoordinator, StarterPackCoordinator>();
-        services.TryAddSingleton<StarterPackValidator>();
         services.TryAddSingleton<IMigraphxRuntimeReadinessService, MigraphxRuntimeReadinessService>();
         services.TryAddSingleton<IOpenVinoCatalogRuntimeReadinessService, OpenVinoCatalogRuntimeReadinessService>();
         services.TryAddSingleton<IQnnCatalogRuntimeReadinessService, QnnCatalogRuntimeReadinessService>();
