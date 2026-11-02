@@ -106,18 +106,20 @@ public sealed class InProcessPipelineAgUiTransport(
             foreach (AGUIResume resumeEntry in input.Resume)
             {
                 if (resumeEntry.Payload is { } payload &&
-                    payload.TryGetProperty("approved", out JsonElement approvedProp) &&
-                    !approvedProp.GetBoolean())
+                    payload.TryGetProperty("approved", out JsonElement approvedProp))
                 {
-                    yield return new RunErrorEvent
+                    if (!approvedProp.GetBoolean())
                     {
-                        Code = "CLOUD_EGRESS_DENIED",
-                        Message = "Cloud fallback was declined by user policy."
-                    };
-                    yield break;
-                }
+                        yield return new RunErrorEvent
+                        {
+                            Code = "CLOUD_EGRESS_DENIED",
+                            Message = "Cloud fallback was declined by user policy."
+                        };
+                        yield break;
+                    }
 
-                consentStore.RecordGrant(threadId, resumeEntry.InterruptId);
+                    consentStore.RecordGrant(threadId, resumeEntry.InterruptId);
+                }
             }
         }
 
@@ -500,6 +502,7 @@ public sealed partial class SegmentItemViewModel : ObservableObject
     // Committed baseline state from SQLite revision
     public required string CommittedText { get; set; }
     public required double CommittedTtsDurationMs { get; set; }
+    public required bool CommittedIsGlossaryCompliant { get; set; }
 
     // Staged predictive state updated live via AG-UI StateDeltaEvent
     [ObservableProperty]
@@ -520,6 +523,7 @@ public sealed partial class SegmentItemViewModel : ObservableObject
     {
         StagedTranslatedText = CommittedText;
         PredictedTtsDurationMs = CommittedTtsDurationMs;
+        IsGlossaryCompliant = CommittedIsGlossaryCompliant;
     }
 }
 
@@ -547,6 +551,7 @@ public sealed partial class DialogueWorkspaceViewModel(
                 TargetDurationMs = dto.TargetDurationMs,
                 CommittedText = dto.TranslatedText,
                 CommittedTtsDurationMs = dto.PredictedTtsDurationMs,
+                CommittedIsGlossaryCompliant = dto.IsGlossaryCompliant,
                 StagedTranslatedText = dto.TranslatedText,
                 PredictedTtsDurationMs = dto.PredictedTtsDurationMs,
                 IsGlossaryCompliant = dto.IsGlossaryCompliant
@@ -619,6 +624,7 @@ public sealed partial class DialogueWorkspaceViewModel(
         {
             seg.CommittedText = seg.StagedTranslatedText;
             seg.CommittedTtsDurationMs = seg.PredictedTtsDurationMs;
+            seg.CommittedIsGlossaryCompliant = seg.IsGlossaryCompliant;
         }
     }
 
@@ -636,7 +642,7 @@ public sealed partial class DialogueWorkspaceViewModel(
 
 ### Why This Works Cleanly with Your Architecture
 
-* **Atomic Revision Safety:** Streaming `StateDeltaEvent` updates only touch `StagedTranslatedText` and `PredictedTtsDurationMs` in memory. If a run is canceled mid-stream or a user rejects a hallmarked translation take, calling `DiscardStagedEdits()` immediately restores the last committed revision without touching SQLite.
+* **Atomic Revision Safety:** Streaming `StateDeltaEvent` updates only touch the staged in-memory fields (`StagedTranslatedText`, `PredictedTtsDurationMs`, and the predictive `IsGlossaryCompliant` indicator). If a run is canceled mid-stream or a user rejects a hallmarked translation take, calling `DiscardStagedEdits()` restores every staged field from its committed baseline — including `CommittedIsGlossaryCompliant` — without touching SQLite.
 
 
 * **Property-Based Testing with FsCheck:** Because `Trackdub-gated` already includes FsCheck in its test suite, you can write property tests generating arbitrary sequences of `JsonPatchOp` arrays to verify that `ApplyDelta` never throws on out-of-range indices and that `DiscardStagedEdits()` is strictly idempotent relative to the initial `StateSnapshotEvent`.
@@ -702,7 +708,14 @@ public sealed class AGUIPipelineConsentMiddleware(
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // 1. Streaming pass-through via inner transport/client
+        // 1. Enforce the same G5 Pre-Flight Readiness Gate on the streaming path
+        ReadinessGateResult readiness = await readinessGate.EvaluatePreFlightAsync(cancellationToken);
+        if (!readiness.IsReady)
+        {
+            throw new InvalidOperationException($"G5 Readiness Gate Failed: {readiness.FailureReason}");
+        }
+
+        // 2. Streaming pass-through via inner transport/client
         await foreach (ChatResponseUpdate update in innerClient.GetStreamingResponseAsync(messages, options, cancellationToken))
         {
             yield return update;

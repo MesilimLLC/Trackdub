@@ -66,6 +66,10 @@ function Test-AlreadyLinked {
     )
     $links = fsutil hardlink list $Source 2>$null
     if ($LASTEXITCODE -ne 0) { return $false }
+    # Hardlinks only exist on the source volume; a target on another drive cannot be linked.
+    $srcRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Source))
+    $tgtRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Target))
+    if (-not [string]::Equals($srcRoot, $tgtRoot, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
     # fsutil may emit volume-relative paths (\Users\...); compare drive-less tails.
     $targetKey = [System.IO.Path]::GetFullPath($Target).Substring(2)
     foreach ($link in $links) {
@@ -101,12 +105,24 @@ function Invoke-Link {
         return [pscustomobject]@{ Name = $Name; Status = 'LINK'; Detail = 'already linked' }
     }
 
-    Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
-    fsutil hardlink create $dst $src >$null 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    # Build the replacement link beside the destination first, then swap it in.
+    # This leaves the existing shim untouched when link creation fails (cross-volume, locked, access denied).
+    $tmp = Join-Path $Dest ("{0}.{1}.tmp" -f $Name, [guid]::NewGuid().ToString('N'))
+    fsutil hardlink create $tmp $src >$null 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        return [pscustomobject]@{ Name = $Name; Status = 'FAIL'; Detail = 'hardlink creation failed (locked, cross-volume, or access denied)' }
+    }
+
+    try {
+        Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $tmp -Destination $dst -Force
         return [pscustomobject]@{ Name = $Name; Status = 'OK'; Detail = 'refreshed' }
     }
-    return [pscustomobject]@{ Name = $Name; Status = 'FAIL'; Detail = 'locked or source moved' }
+    catch {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        return [pscustomobject]@{ Name = $Name; Status = 'FAIL'; Detail = $_.Exception.Message }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $Dest)) {
@@ -131,7 +147,7 @@ $fail = @($results | Where-Object Status -eq 'FAIL').Count
 
 Write-Host "`nDone: $ok linked, $link already linked, $skip skipped, $fail failed."
 if ($fail -gt 0) {
-    Write-Host "FAIL lines mean the source binary is gone or moved."
+    Write-Host "FAIL lines mean the hardlink could not be created. Check the Detail column for the cause."
 }
 if ($Pause) {
     Read-Host "Press Enter to exit"
