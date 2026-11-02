@@ -2,6 +2,7 @@ using Trackdub.Application.Artifacts;
 using Trackdub.Application.Mixing;
 using Trackdub.Application.Transcripts;
 using Trackdub.Domain.Artifacts;
+using Trackdub.Domain.Mixing;
 
 namespace Trackdub.Application.LipSynthesis;
 
@@ -21,7 +22,8 @@ public sealed class LipSynthesisWorkflow(
     LipSynthesisStageHandler lipSynthesisStageHandler,
     IArtifactStore artifactStore,
     MixPlanStore? mixPlanStore = null,
-    IPreviewRangeRenderer? speechRenderer = null)
+    IPreviewRangeRenderer? speechRenderer = null,
+    MixPlanBuilder? mixPlanBuilder = null)
     : IDisposable
 {
     private const string ConcurrentOperationMessage = "A lip-synthesis operation is already running for this project.";
@@ -29,6 +31,7 @@ public sealed class LipSynthesisWorkflow(
     private readonly TranscriptProjectStateService stateService = stateService ?? throw new ArgumentNullException(nameof(stateService));
     private readonly LipSynthesisStageHandler lipSynthesisStageHandler = lipSynthesisStageHandler ?? throw new ArgumentNullException(nameof(lipSynthesisStageHandler));
     private readonly IArtifactStore artifactStore = artifactStore ?? throw new ArgumentNullException(nameof(artifactStore));
+    private readonly MixPlanBuilder? mixPlanBuilder = mixPlanBuilder;
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly DubbedSpeechDriverRenderer? speechDriverRenderer =
         mixPlanStore is not null && speechRenderer is not null
@@ -85,15 +88,14 @@ public sealed class LipSynthesisWorkflow(
             string dubbedAudioPath = dubbedDriver is not null
                 ? artifactStore.GetPath(dubbedDriver.RelativePath)
                 : string.Empty;
-            if (dubbedDriver is not null)
-            {
-                // Mouth-driving models track the speaker's voice, so drive them with the dubbed
-                // speech alone; the exported mix also carries ambiance and music.
-                string? speechOnly = speechDriverRenderer is null
-                    ? null
-                    : await speechDriverRenderer.TryRenderAsync(mediaAsset.DurationSeconds, cancellationToken).ConfigureAwait(false);
-                dubbedAudioPath = speechOnly ?? dubbedAudioPath;
-            }
+            // Build from the current project so lip repair does not require a video export or
+            // overwrite the user's saved preview/export mix settings. Mouth-driving models
+            // follow dubbed speech alone; the final mix also carries ambiance and music.
+            string? speechOnly = await TryRenderCurrentSpeechDriverAsync(
+                currentState,
+                mediaAsset.DurationSeconds,
+                cancellationToken).ConfigureAwait(false);
+            dubbedAudioPath = speechOnly ?? dubbedAudioPath;
 
             // Process by diarization speaker turn (not the whole file at once).
             var turns = currentState.SpeakerTurns
@@ -126,5 +128,56 @@ public sealed class LipSynthesisWorkflow(
         {
             operationGate.Release();
         }
+    }
+
+    private async Task<string?> TryRenderCurrentSpeechDriverAsync(
+        TranscriptProjectState currentState,
+        double? mediaDurationSeconds,
+        CancellationToken cancellationToken)
+    {
+        if (speechDriverRenderer is null)
+        {
+            return null;
+        }
+
+        if (mixPlanBuilder is null)
+        {
+            // Compatibility path for callers that only provide the previously saved mix plan.
+            return await speechDriverRenderer
+                .TryRenderAsync(mediaDurationSeconds, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        MixPlan? savedPlan = currentState.CurrentMixPlan;
+        MixPlan mixPlan;
+        try
+        {
+            mixPlan = mixPlanBuilder.Build(new MixPlanBuildRequest(
+                currentState.ProjectState.Project.Id,
+                currentState.ProjectState.MediaAsset?.Id,
+                currentState.ProjectState.Artifacts,
+                currentState.TranscriptSegments,
+                currentState.TranslatedSegments,
+                currentState.TtsTakes,
+                currentState.StageRuns,
+                SourceGainDb: savedPlan?.SourceGainDb ?? 0d,
+                DubbedSpeechGainDb: savedPlan?.DubbedSpeechGainDb ?? 0d,
+                DuckingGainDb: savedPlan?.DuckingGainDb,
+                DuckingLeadSeconds: savedPlan?.DuckingLeadSeconds ?? 0.05d,
+                DuckingTailSeconds: savedPlan?.DuckingTailSeconds ?? 0.18d,
+                RestoreOriginalPan: savedPlan?.RestoreOriginalPan ?? false,
+                ApplyTimbrePolish: savedPlan?.ApplyTimbrePolish ?? true,
+                CandidateGroups: currentState.TtsCandidateGroups,
+                MediaDurationSeconds: mediaDurationSeconds));
+        }
+        catch (InvalidOperationException)
+        {
+            // Keep the export-audio fallback when current source audio is unavailable.
+            return null;
+        }
+
+        return await speechDriverRenderer
+            .TryRenderAsync(mixPlan, mediaDurationSeconds, cancellationToken)
+            .ConfigureAwait(false);
     }
 }
