@@ -163,8 +163,6 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     {
         string? engineFamily = request.EngineFamily;
         ExecutionProviderKind provider = request.ExecutionProvider;
-        string variant = request.Variant;
-        string entryPath = request.EntryPath;
         // Classic TensorRT import of the bundled Qwen3-ASR export terminated the host process
         // (2026-10-18 isolated retest). Refuse before any native call so a sweep keeps going.
         if (string.Equals(engineFamily, "qwen3-asr", StringComparison.OrdinalIgnoreCase) &&
