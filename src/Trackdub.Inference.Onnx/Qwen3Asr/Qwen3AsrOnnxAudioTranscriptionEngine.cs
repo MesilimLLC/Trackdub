@@ -137,18 +137,8 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
             effectiveRegions = [new SpeechRegion(0, 0.0, durationSeconds)];
         }
 
-        using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledQwen3AsrAsync(
-                new OnnxExecutionSessionFactory.PooledSessionRequest
-                {
-                    EngineFamily = EngineFamilyName,
-                    Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken,
-                    // Keep modelId/variant off the pool key: smoke tests omit them too, so a
-                    // verified smoke session is the same entry the ASR stage reuses.
-                    AdditionalTrtEncoderOptions = TrtEncoderOptions,
-                },
-                new OnnxExecutionSessionFactory.QwenAsrModelPaths(modelPaths.EncoderPath, modelPaths.DecoderInitPath, modelPaths.DecoderStepPath))
-            .ConfigureAwait(false);
+        using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await AcquireSessionLeaseAsync(
+            plan, modelPaths, cancellationToken).ConfigureAwait(false);
 
         // Keep caller-provided regions (VAD or diarization plan). Whisper's nearby-region
         // merge would collapse multi-speaker turns into one clip-length segment and reindex
@@ -364,6 +354,23 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
             plan.ModelAlias,
             plan.Variant,
             AppendChunkSkipReasons(sessionLease.BootstrapDetail, chunkSkipReasons ?? []));
+
+    private static Task<OnnxExecutionSessionFactory.Qwen3AsrSessionLease> AcquireSessionLeaseAsync(
+        StageRuntimePlan plan,
+        Qwen3AsrModelPaths modelPaths,
+        CancellationToken cancellationToken) =>
+        OnnxExecutionSessionFactory.CreatePooledQwen3AsrAsync(
+            new OnnxExecutionSessionFactory.PooledSessionRequest
+            {
+                EngineFamily = EngineFamilyName,
+                Provider = plan.ExecutionProvider!.Value,
+                CancellationToken = cancellationToken,
+                AdditionalTrtEncoderOptions = TrtEncoderOptions,
+            },
+            new OnnxExecutionSessionFactory.QwenAsrModelPaths(
+                modelPaths.EncoderPath,
+                modelPaths.DecoderInitPath,
+                modelPaths.DecoderStepPath));
 
     private static StageRuntimeExecutionSummary CreatePlannedOnlySummary(StageRuntimePlan plan, string bootstrapDetail) =>
         new(

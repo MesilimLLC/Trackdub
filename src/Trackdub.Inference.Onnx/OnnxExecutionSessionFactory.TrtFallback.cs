@@ -247,5 +247,4 @@ internal static partial class OnnxExecutionSessionFactory
         const int maxLength = 240;
         return message.Length <= maxLength ? message : message[..maxLength] + "...";
     }
-
 }

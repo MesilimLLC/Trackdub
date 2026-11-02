@@ -249,5 +249,4 @@ internal static partial class OnnxExecutionSessionFactory
             MergeFallbackReasons(
                 BuildSessionOptionsFallbackReason(requestedProvider, effectives.DecoderInit, selections.Decoder),
                 BuildSessionOptionsFallbackReason(requestedProvider, effectives.DecoderStep, selections.Decoder)));
-
 }

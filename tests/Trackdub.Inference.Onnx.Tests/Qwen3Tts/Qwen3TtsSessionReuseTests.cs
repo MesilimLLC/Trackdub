@@ -16,11 +16,18 @@ public sealed class Qwen3TtsSessionReuseTests
         int createCount = 0;
         byte[] model = BuildIdentityOnnxModel();
 
-        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-tts-test", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+        using var pin = await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "qwen3-tts-test",
+            Provider = ExecutionProviderKind.Cpu,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 createCount++;
                 return new InferenceSession(model);
-            } }, "talker_prefill.onnx");
+            }
+        }, "talker_prefill.onnx");
         using var prefill = new QwenPooledSession(pin);
 
         InferenceSession? first = null;

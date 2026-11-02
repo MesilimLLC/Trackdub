@@ -304,7 +304,13 @@ public sealed class PooledSingleTrtFallbackAdmissionTests : IDisposable
         int failingAttempts = OperatingSystem.IsWindows() ? 2 : 1;
         int attempts = 0;
 
-        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "fallback-engine", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "fallback-engine",
+            Provider = ExecutionProviderKind.TensorRTRtx,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 int attempt = Interlocked.Increment(ref attempts);
                 if (attempt == 1)
@@ -319,7 +325,8 @@ public sealed class PooledSingleTrtFallbackAdmissionTests : IDisposable
                 }
 
                 return CreateMinimalSession();
-            } }, model);
+            }
+        }, model);
 
         Assert.Equal(ExecutionProviderKind.TensorRTRtx, lease.ResolvedPoolKey!.Provider);
         Assert.Equal("cpu", lease.SelectedProvider);

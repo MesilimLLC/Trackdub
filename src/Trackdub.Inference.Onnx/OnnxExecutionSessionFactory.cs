@@ -1322,5 +1322,4 @@ internal static partial class OnnxExecutionSessionFactory
         public bool IsAvailable => false;
         public bool UseOpenVinoCpuProxy => false;
     }
-
 }

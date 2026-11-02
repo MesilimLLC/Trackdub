@@ -22,11 +22,18 @@ public sealed class ScfrdPooledSessionTests
             new FakeFrameExtractor(),
             modelPathProvider: () => modelPath,
             sessionLeaseFactory: (path, cancellationToken) =>
-                OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "scrfd", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken, Pool = pool, SessionFactory = (_, _) =>
+                OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+                {
+                    EngineFamily = "scrfd",
+                    Provider = ExecutionProviderKind.Cpu,
+                    CancellationToken = cancellationToken,
+                    Pool = pool,
+                    SessionFactory = (_, _) =>
                     {
                         createCount++;
                         return new InferenceSession(BuildIdentityOnnxModel());
-                    } }, path));
+                    }
+                }, path));
         var request = new FaceAnalysisRequest("video.mp4", TimeSpan.Zero, TimeSpan.FromSeconds(2), null);
 
         try

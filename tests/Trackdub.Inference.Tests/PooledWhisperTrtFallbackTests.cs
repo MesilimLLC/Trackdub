@@ -32,7 +32,13 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
         using var pool = new InferenceSessionPool(maxSessions: 4, enableMemoryAdmission: false);
         int creations = 0;
 
-        using OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+        using OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "whisper-onnx",
+            Provider = ExecutionProviderKind.TensorRTRtx,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 // The first creation (the TensorRT RTX attempt's first session) dies in the engine
                 // build, which aborts that attempt; the next provider's attempt then succeeds.
@@ -43,7 +49,8 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
                 }
 
                 return CreateMinimalSession();
-            } }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder });
+            }
+        }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder });
 
         Assert.DoesNotContain("TensorRT", lease.SelectedProvider, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("TensorRT", lease.RequestedProvider, StringComparison.OrdinalIgnoreCase);
@@ -65,7 +72,13 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
             using (var pool = new InferenceSessionPool(maxSessions: 4, enableMemoryAdmission: false))
             {
                 int creations = 0;
-                using OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+                using OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+                {
+                    EngineFamily = "whisper-onnx",
+                    Provider = ExecutionProviderKind.TensorRTRtx,
+                    CancellationToken = CancellationToken.None,
+                    Pool = pool,
+                    SessionFactory = (_, _) =>
                     {
                         int step = Interlocked.Increment(ref creations);
                         if (step == 1)
@@ -89,7 +102,8 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
                         }
 
                         return fallback;
-                    } }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder });
+                    }
+                }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder });
 
                 Assert.True(TensorRtRtxTeardownGuard.IsPoisoned);
                 Assert.NotNull(trtEncoderSession);
@@ -125,11 +139,19 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
         using var pool = new InferenceSessionPool(maxSessions: 4, enableMemoryAdmission: false);
         int creations = 0;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() => OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "whisper-onnx",
+            Provider = ExecutionProviderKind.TensorRTRtx,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 Interlocked.Increment(ref creations);
                 throw new InvalidOperationException("CUDA_ERROR_OUT_OF_MEMORY");
-            }, AllowTrtInitFallback = false }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder }));
+            },
+            AllowTrtInitFallback = false
+        }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder }));
 
         // Bundle graphs are created in parallel, so both may get their one TRT attempt
         // before the first failure is observed; a fallback retry would exceed 2.
@@ -146,11 +168,18 @@ public sealed class PooledWhisperTrtFallbackTests : IDisposable
         using var pool = new InferenceSessionPool(maxSessions: 4, enableMemoryAdmission: false);
         int creations = 0;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = ExecutionProviderKind.Cpu, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() => OnnxExecutionSessionFactory.CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "whisper-onnx",
+            Provider = ExecutionProviderKind.Cpu,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 Interlocked.Increment(ref creations);
                 throw new InvalidOperationException("cpu session failed");
-            } }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder }));
+            }
+        }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoder, Decoder = decoder }));
 
         Assert.True(creations <= 2, $"CPU requests must not walk a fallback chain (saw {creations} creations).");
     }
