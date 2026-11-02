@@ -78,25 +78,36 @@ internal static partial class OnnxExecutionSessionFactory
 
         string optionsFingerprint =
             $"{BuildSessionOptionsFingerprint(optionsSelection.SelectedProvider, devicePolicy, request.AdditionalTrtOptions)}|trt-init-fallback:{request.AllowTrtInitFallback}";
-        SessionPoolKey key = WithOpenVinoResidency(await SessionPoolKey.CreateAsync(
-            request.EngineFamily,
-            request.ModelId,
-            request.Variant,
-            optionsSelection.SelectedProvider,
-            modelPath,
-            deviceId: null,
-            graphRole: "default",
-            optionsFingerprint,
-            cancellationToken).ConfigureAwait(false));
-        if (request.AllowTrtInitFallback && optionsSelection.SelectedProvider is ExecutionProviderKind.TensorRTRtx)
+        SessionPoolKey key;
+        try
         {
-            // TRT RTX init can still fall back to DirectML/CPU inside the pool factory, after this
-            // key is admitted; reserve for the fallback provider, not TRT RTX's measured factor.
-            key = key with
+            key = WithOpenVinoResidency(await SessionPoolKey.CreateAsync(
+                request.EngineFamily,
+                request.ModelId,
+                request.Variant,
+                optionsSelection.SelectedProvider,
+                modelPath,
+                deviceId: null,
+                graphRole: "default",
+                optionsFingerprint,
+                cancellationToken).ConfigureAwait(false));
+            if (request.AllowTrtInitFallback && optionsSelection.SelectedProvider is ExecutionProviderKind.TensorRTRtx)
             {
-                EstimatedVramMb = SessionPoolKey.EstimateVramMb(
-                    modelPath, optionsSelection.SelectedProvider, providerMayFallBack: true),
-            };
+                // TRT RTX init can still fall back to DirectML/CPU inside the pool factory, after this
+                // key is admitted; reserve for the fallback provider, not TRT RTX's measured factor.
+                key = key with
+                {
+                    EstimatedVramMb = SessionPoolKey.EstimateVramMb(
+                        modelPath, optionsSelection.SelectedProvider, providerMayFallBack: true),
+                };
+            }
+        }
+        catch
+        {
+            // Ownership only transfers to AcquirePooledSingleLeaseAsync's dispose holder after
+            // this method returns; release the native options if key creation fails or cancels.
+            optionsSelection.Options.Dispose();
+            throw;
         }
 
         return new PooledSingleCreate
@@ -295,7 +306,7 @@ internal static partial class OnnxExecutionSessionFactory
         }
 
         string? abandonedReason = null;
-        for (int attempt = 0; ; attempt++)
+        for (int attempt = 0; attempt < attempts.Count; attempt++)
         {
             ExecutionProviderKind attemptProvider = attempts[attempt];
             try
@@ -332,6 +343,9 @@ internal static partial class OnnxExecutionSessionFactory
                     + $"fell back to {ProviderNames.FormatProviderLabel(attempts[attempt + 1])}.");
             }
         }
+
+        throw new InvalidOperationException(
+            $"Whisper session fallback chain for '{request.EngineFamily}' exhausted without a result.");
     }
 
     /// <summary>True while a recoverable init failure still has a next provider to try.</summary>

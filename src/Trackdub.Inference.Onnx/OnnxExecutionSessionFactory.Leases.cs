@@ -135,8 +135,10 @@ internal static partial class OnnxExecutionSessionFactory
 
         public void Dispose()
         {
-            DisposeLeaseOrSession(EncoderPoolLease, EncoderSession);
-            DisposeLeaseOrSession(DecoderJointPoolLease, DecoderJointSession);
+            DisposeBundleOrLeases(
+                null,
+                (EncoderPoolLease, EncoderSession),
+                (DecoderJointPoolLease, DecoderJointSession));
         }
     }
 
@@ -152,8 +154,10 @@ internal static partial class OnnxExecutionSessionFactory
 
         public void Dispose()
         {
-            DisposeLeaseOrSession(EncoderPoolLease, EncoderSession);
-            DisposeLeaseOrSession(DecoderPoolLease, DecoderSession);
+            DisposeBundleOrLeases(
+                null,
+                (EncoderPoolLease, EncoderSession),
+                (DecoderPoolLease, DecoderSession));
         }
     }
 
@@ -172,8 +176,10 @@ internal static partial class OnnxExecutionSessionFactory
 
         public void Dispose()
         {
-            DisposeLeaseOrSession(EncoderPoolLease, EncoderSession);
-            DisposeLeaseOrSession(DecoderPoolLease, DecoderSession);
+            DisposeBundleOrLeases(
+                null,
+                (EncoderPoolLease, EncoderSession),
+                (DecoderPoolLease, DecoderSession));
         }
     }
 }
