@@ -410,25 +410,8 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             $"Smoke test requested provider '{requestedProviderLabel}' but session creation selected effective provider '{selectedProvider}'.");
     }
 
-    private static readonly IReadOnlyDictionary<ExecutionProviderKind, string> ProviderLabels =
-        new Dictionary<ExecutionProviderKind, string>
-        {
-            [ExecutionProviderKind.Cpu] = "cpu",
-            [ExecutionProviderKind.DirectMl] = "dml",
-            [ExecutionProviderKind.TensorRTRtx] = "tensorrt-rtx",
-            [ExecutionProviderKind.Cuda] = "cuda",
-            [ExecutionProviderKind.TensorRt] = "tensorrt",
-            [ExecutionProviderKind.Migraphx] = "migraphx",
-            [ExecutionProviderKind.Dnnl] = "dnnl",
-            [ExecutionProviderKind.Qnn] = "qnn",
-            [ExecutionProviderKind.OpenVinoCatalog] = "openvino-catalog",
-            [ExecutionProviderKind.VitisAi] = "vitisai",
-        };
-
     private static string FormatProviderLabel(ExecutionProviderKind provider) =>
-        ProviderLabels.TryGetValue(provider, out string? label)
-            ? label
-            : throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported execution provider kind.");
+        ProviderNames.FormatProviderLabel(provider);
 
     private sealed class InputSet(IReadOnlyList<NamedOnnxValue> values) : IDisposable
     {
