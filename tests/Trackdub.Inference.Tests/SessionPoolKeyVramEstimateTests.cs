@@ -237,14 +237,7 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
         WriteBytes("single.onnx.data", 10 * MiB);
         using var pool = new InferenceSessionPool(maxSessions: 2);
 
-        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "test-engine",
-            model,
-            ExecutionProviderKind.TensorRTRtx,
-            CancellationToken.None,
-            pool,
-            sessionFactory: (_, _) => new InferenceSession(IdentityModel),
-            allowTrtInitFallback: true);
+        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "test-engine", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = (_, _) => new InferenceSession(IdentityModel), AllowTrtInitFallback = true }, model);
 
         Assert.NotNull(lease.ResolvedPoolKey);
         // Without a registered TRT RTX EP device (the Windows build in a test process), session

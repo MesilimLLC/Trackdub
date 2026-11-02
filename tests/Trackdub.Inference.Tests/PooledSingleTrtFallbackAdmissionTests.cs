@@ -284,9 +284,7 @@ public sealed class PooledSingleTrtFallbackAdmissionTests : IDisposable
         // Learn the key this host builds for a TensorRT RTX request on this model.
         SessionPoolKey probeKey;
         using (var probePool = new InferenceSessionPool(maxSessions: 2, enableMemoryAdmission: false))
-        using (OnnxExecutionSessionFactory.SingleSessionLease probe = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-                   "fallback-engine", model, ExecutionProviderKind.TensorRTRtx, CancellationToken.None,
-                   probePool, sessionFactory: (_, _) => CreateMinimalSession()))
+        using (OnnxExecutionSessionFactory.SingleSessionLease probe = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "fallback-engine", Provider = ExecutionProviderKind.TensorRTRtx, CancellationToken = CancellationToken.None, Pool = probePool, SessionFactory = (_, _) => CreateMinimalSession() }, model))
         {
             probeKey = probe.ResolvedPoolKey!;
         }
@@ -306,10 +304,13 @@ public sealed class PooledSingleTrtFallbackAdmissionTests : IDisposable
         int failingAttempts = OperatingSystem.IsWindows() ? 2 : 1;
         int attempts = 0;
 
-        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            "fallback-engine", model, ExecutionProviderKind.TensorRTRtx, CancellationToken.None,
-            pool,
-            sessionFactory: (_, _) =>
+        using OnnxExecutionSessionFactory.SingleSessionLease lease = await OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest
+        {
+            EngineFamily = "fallback-engine",
+            Provider = ExecutionProviderKind.TensorRTRtx,
+            CancellationToken = CancellationToken.None,
+            Pool = pool,
+            SessionFactory = (_, _) =>
             {
                 int attempt = Interlocked.Increment(ref attempts);
                 if (attempt == 1)
@@ -324,7 +325,8 @@ public sealed class PooledSingleTrtFallbackAdmissionTests : IDisposable
                 }
 
                 return CreateMinimalSession();
-            });
+            }
+        }, model);
 
         Assert.Equal(ExecutionProviderKind.TensorRTRtx, lease.ResolvedPoolKey!.Provider);
         Assert.Equal("cpu", lease.SelectedProvider);

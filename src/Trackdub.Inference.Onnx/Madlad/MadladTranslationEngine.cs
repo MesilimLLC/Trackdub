@@ -87,7 +87,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
                 effectiveDecoderModelPath = ResolveDecoderModelPath(effectivePlan, effectiveEncoderModelPath);
                 tokenizer = await MadladTokenizerDecoder.LoadAsync(ResolveModelRootPath(effectiveEncoderModelPath)).ConfigureAwait(false);
                 sessionLease = await OnnxExecutionSessionFactory
-                    .CreatePooledOpusAsync("madlad", effectiveEncoderModelPath, effectiveDecoderModelPath, ExecutionProviderKind.Cpu, cancellationToken)
+                    .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = effectiveEncoderModelPath, Decoder = effectiveDecoderModelPath })
                     .ConfigureAwait(false);
             }
 
@@ -195,7 +195,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
                 effectiveDecoderModelPath = ResolveDecoderModelPath(effectivePlan, effectiveEncoderModelPath);
                 tokenizer = await MadladTokenizerDecoder.LoadAsync(ResolveModelRootPath(effectiveEncoderModelPath)).ConfigureAwait(false);
                 using (OnnxExecutionSessionFactory.OpusSessionLease sessionLease = await OnnxExecutionSessionFactory
-                    .CreatePooledOpusAsync("madlad", effectiveEncoderModelPath, effectiveDecoderModelPath, ExecutionProviderKind.Cpu, cancellationToken)
+                    .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = effectiveEncoderModelPath, Decoder = effectiveDecoderModelPath })
                     .ConfigureAwait(false))
                 {
                     string translatedText = await TranslateSegmentAsync(
@@ -225,14 +225,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         // engines that the classic warm path built (EpContextTrtProfiles.Resolve).
         bool boundedTensorRtProfiles = plan.ExecutionProvider is ExecutionProviderKind.TensorRTRtx or ExecutionProviderKind.TensorRt;
         return await OnnxExecutionSessionFactory
-            .CreatePooledOpusAsync(
-                "madlad",
-                encoderModelPath,
-                decoderModelPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                additionalTrtEncoderOptions: boundedTensorRtProfiles ? MadladTrtProfiles.Encoder : null,
-                additionalTrtDecoderOptions: boundedTensorRtProfiles ? MadladTrtProfiles.Decoder : null)
+            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = boundedTensorRtProfiles ? MadladTrtProfiles.Encoder : null, AdditionalTrtDecoderOptions = boundedTensorRtProfiles ? MadladTrtProfiles.Decoder : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
     }
 

@@ -95,11 +95,7 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
         }
 
         OnnxExecutionSessionFactory.PooledSingleSessionPin pin =
-            await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-                Qwen3TtsEngine.EngineFamilyName,
-                modelPath,
-                provider,
-                cancellationToken).ConfigureAwait(false);
+            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = Qwen3TtsEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken }, modelPath).ConfigureAwait(false);
         return new QwenPooledSession(pin);
     }
 

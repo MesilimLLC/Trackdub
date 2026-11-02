@@ -123,19 +123,19 @@ internal static partial class OnnxExecutionSessionFactory
         string epName,
         out ExecutionProviderKind executionProviderKind)
     {
-        if (IsTensorRtRtxDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
+        if (ProviderNames.IsTensorRtRtxDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
         {
             executionProviderKind = ExecutionProviderKind.TensorRTRtx;
             return true;
         }
 
-        if (IsDnnlExecutionProviderName(epName))
+        if (ProviderNames.IsDnnlExecutionProviderName(epName))
         {
             executionProviderKind = ExecutionProviderKind.Dnnl;
             return true;
         }
 
-        if (IsDirectMlDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
+        if (ProviderNames.IsDirectMlDeviceCandidate(epName, OrtHardwareDeviceType.GPU))
         {
             executionProviderKind = ExecutionProviderKind.DirectMl;
             return true;

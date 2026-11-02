@@ -312,12 +312,7 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
         pinnedSession?.Pin.Dispose();
         pinnedSession = null;
         OnnxExecutionSessionFactory.PooledSingleSessionPin pin = await OnnxExecutionSessionFactory
-            .PinPooledSingleAsync(
-                "kokoro",
-                modelPath,
-                provider,
-                cancellationToken,
-                allowTrtInitFallback: allowTrtInitFallback)
+            .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "kokoro", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelPath)
             .ConfigureAwait(false);
         try
         {

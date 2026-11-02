@@ -25,7 +25,7 @@ internal static class WindowsMlEfficiencyPolicy
 
     /// <summary>
     /// Windows ML catalog EPs whose devices are NPUs. Mirrors the NPU subset of
-    /// OnnxExecutionSessionFactory.IsWindowsMlCatalogProvider (Migraphx is a catalog EP but a
+    /// ProviderNames.IsWindowsMlCatalogProvider (Migraphx is a catalog EP but a
     /// GPU EP; only NPU EPs act on the workload_type signal per the MS doc). Keep in sync with
     /// <c>Trackdub.Domain/Common/RuntimePlanning.cs</c> enum docs.
     /// </summary>

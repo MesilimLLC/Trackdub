@@ -82,19 +82,26 @@ public sealed class WindowsMlEfficiencyPolicyTests
     public void CreateSession_device_policy_parameter_is_required_not_defaulted()
     {
         // The efficiency hook at the session-creation chokepoint must not be silently
-        // droppable: CreateSession's devicePolicy parameter has NO default, so every call
-        // site must thread a policy explicitly and a new site cannot silently fall back to
-        // Explicit. (Review finding: this test's predecessor asserted nothing about the
-        // factory — 13 pooled/dual call sites had silently defaulted — hence this pin.)
+        // droppable: CreateSession takes SessionCreateRequest, whose DevicePolicy property
+        // is `required`, so every call site must thread a policy explicitly and a new site
+        // cannot silently fall back to Explicit. (Review finding: this test's predecessor
+        // asserted nothing about the factory — 13 pooled/dual call sites had silently
+        // defaulted — hence this pin.)
         System.Reflection.MethodInfo? createSession = typeof(OnnxExecutionSessionFactory).GetMethod(
             "CreateSession",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(createSession);
 
-        System.Reflection.ParameterInfo? policyParameter = createSession.GetParameters()
-            .SingleOrDefault(p => p.ParameterType == typeof(WindowsMlExecutionDevicePolicy));
-        Assert.NotNull(policyParameter);
-        Assert.False(policyParameter.HasDefaultValue);
+        System.Reflection.ParameterInfo? requestParameter = createSession.GetParameters()
+            .SingleOrDefault(p => p.ParameterType == typeof(OnnxExecutionSessionFactory.SessionCreateRequest));
+        Assert.NotNull(requestParameter);
+
+        System.Reflection.PropertyInfo? policyProperty =
+            typeof(OnnxExecutionSessionFactory.SessionCreateRequest).GetProperty("DevicePolicy");
+        Assert.NotNull(policyProperty);
+        Assert.Equal(typeof(WindowsMlExecutionDevicePolicy), policyProperty.PropertyType);
+        Assert.NotNull(System.Attribute.GetCustomAttribute(
+            policyProperty, typeof(System.Runtime.CompilerServices.RequiredMemberAttribute)));
     }
 }
 #endif

@@ -43,11 +43,7 @@ public sealed class ScfrdOnnxFaceDetector : IFaceDetector
     private static Task<OnnxExecutionSessionFactory.SingleSessionLease> CreatePooledSessionLeaseAsync(
         string modelPath,
         CancellationToken cancellationToken) =>
-        OnnxExecutionSessionFactory.CreatePooledSingleAsync(
-            LatentSyncModelPaths.ScfrdEngineFamily,
-            modelPath,
-            ExecutionProviderKind.Cpu,
-            cancellationToken);
+        OnnxExecutionSessionFactory.CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = LatentSyncModelPaths.ScfrdEngineFamily, Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, modelPath);
     private const string ModelAlias = "InsightFace/scrfd-500m";
     private const int InferSize = 640;
     private const float ScoreThreshold = 0.3f;
