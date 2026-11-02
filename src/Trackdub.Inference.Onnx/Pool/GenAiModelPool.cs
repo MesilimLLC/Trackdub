@@ -640,7 +640,7 @@ internal sealed class GenAiModelPool : IDisposable
             // that lock — so it uses the entry gate and an exact dictionary remove.
             if (!await reservation.TrySetIdleEvictionCallbackAsync(
                     () => TryEvictIdleEntry(key, entry),
-                    cancellationToken).ConfigureAwait(false))
+                    CancellationToken.None).ConfigureAwait(false))
             {
                 if (entries.TryRemove(new KeyValuePair<GenAiModelKey, Entry>(key, entry)))
                 {
