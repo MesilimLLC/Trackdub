@@ -1554,7 +1554,7 @@ public sealed class InferenceSessionPoolTests
             AcceleratorKey("pg4a", 3000, deviceId: 1),
             _ => Task.FromResult(CreateMinimalSession()), CancellationToken.None);
         using ExternalMemoryReservation? external = externalSibling
-            ? await pool.ReserveExternalAsync(ExecutionProviderKind.DirectMl, 1, 3000, CancellationToken.None)
+            ? await pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, 1, 3000), CancellationToken.None)
             : null;
 
         IReadOnlyDictionary<int, long>? previousMap = SharedPoolOptions.AdapterLuidMap;
@@ -1931,8 +1931,7 @@ public sealed class InferenceSessionPoolTests
             hostMemoryBudgetMb: 4096,
             processGpuMemoryReader: () => reader);
 
-        using ExternalMemoryReservation external = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.DirectMl, null, 500, CancellationToken.None);
+        using ExternalMemoryReservation external = await pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, null, 500), CancellationToken.None);
         reader.Set(4096L * 1024 * 1024);
 
         int previousBound = InferenceSessionPool.ObservedBlockFailFastPasses;
@@ -1942,8 +1941,7 @@ public sealed class InferenceSessionPoolTests
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            Task<ExternalMemoryReservation> waiter = pool.ReserveExternalAsync(
-                ExecutionProviderKind.DirectMl, null, 256, cts.Token);
+            Task<ExternalMemoryReservation> waiter = pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, null, 256), cts.Token);
 
             // Busy passes accumulate past the short bound while the external stays live (no
             // eviction callback yet): the reservations fit, the observation alone blocks.
@@ -2798,10 +2796,8 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, memoryBudgetMb: 100, hostMemoryBudgetMb: 100);
 
-        using ExternalMemoryReservation host = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
-        using ExternalMemoryReservation accel = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.DirectMl, 0, 80, CancellationToken.None);
+        using ExternalMemoryReservation host = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
+        using ExternalMemoryReservation accel = await pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, 0, 80), CancellationToken.None);
 
         Assert.NotNull(host);
         Assert.NotNull(accel);
@@ -2813,13 +2809,11 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, memoryBudgetMb: 100, hostMemoryBudgetMb: 100);
 
-        using ExternalMemoryReservation cpu = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        using ExternalMemoryReservation cpu = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(
-                ExecutionProviderKind.OpenVino, null, 80, cts.Token, useOpenVinoCpuProxy: true));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.OpenVino, null, 80, UseOpenVinoCpuProxy: true), cts.Token));
     }
 
     [Fact]
@@ -2828,18 +2822,15 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, memoryBudgetMb: 100, hostMemoryBudgetMb: 100);
 
-        using ExternalMemoryReservation dml0 = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.DirectMl, 0, 80, CancellationToken.None);
+        using ExternalMemoryReservation dml0 = await pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, 0, 80), CancellationToken.None);
 
         // TRT-RTX on device 0 shares the same accelerator budget: 80 + 80 > 100 waits.
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(
-                ExecutionProviderKind.TensorRTRtx, 0, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.TensorRTRtx, 0, 80), cts.Token));
 
         // A different device ordinal has its own budget.
-        using ExternalMemoryReservation dml1 = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.DirectMl, 1, 80, CancellationToken.None);
+        using ExternalMemoryReservation dml1 = await pool.ReserveExternalAsync(new(ExecutionProviderKind.DirectMl, 1, 80), CancellationToken.None);
         Assert.NotNull(dml1);
     }
 
@@ -2849,16 +2840,14 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, hostMemoryBudgetMb: 100);
 
-        ExternalMemoryReservation first = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation first = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Dnnl, null, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Dnnl, null, 80), cts.Token));
 
         first.Dispose();
-        using ExternalMemoryReservation second = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Dnnl, null, 80, CancellationToken.None)
+        using ExternalMemoryReservation second = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Dnnl, null, 80), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(second);
     }
@@ -2870,7 +2859,7 @@ public sealed class InferenceSessionPoolTests
             maxSessions: 8, hostMemoryBudgetMb: 100);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Cpu, null, 101, CancellationToken.None));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 101), CancellationToken.None));
         Assert.Contains("host RAM", ex.Message, StringComparison.Ordinal);
     }
 
@@ -2883,8 +2872,7 @@ public sealed class InferenceSessionPoolTests
         int callbackCalls = 0;
         int factoryCalls = 0;
 
-        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
         reservation.TrySetIdleEvictionCallback(() =>
         {
             callbackCalls++;
@@ -2912,18 +2900,16 @@ public sealed class InferenceSessionPoolTests
             maxSessions: 8, hostMemoryBudgetMb: 100);
         int callbackCalls = 0;
 
-        ExternalMemoryReservation busy = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation busy = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
         busy.TrySetIdleEvictionCallback(() => { callbackCalls++; return false; });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Cpu, null, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), cts.Token));
 
         // Refusal leaves accounting intact: the reservation still occupies the budget.
         busy.Dispose();
-        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None)
+        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(next);
         Assert.True(callbackCalls >= 1);
@@ -2935,19 +2921,17 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, hostMemoryBudgetMb: 100);
 
-        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
         reservation.TrySetIdleEvictionCallback(
             () => throw new InvalidOperationException("synthetic eviction failure"));
 
         // The throwing callback must not corrupt the admission loop or escape the wait.
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Cpu, null, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), cts.Token));
 
         reservation.Dispose();
-        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None)
+        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(next);
     }
@@ -2956,10 +2940,8 @@ public sealed class InferenceSessionPoolTests
     public async Task Dispose_ThrowingExternalEvictionCallback_DoesNotAbortRemainingTeardown()
     {
         var pool = new InferenceSessionPool(maxSessions: 8, hostMemoryBudgetMb: 100);
-        ExternalMemoryReservation first = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 10, CancellationToken.None);
-        ExternalMemoryReservation second = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 10, CancellationToken.None);
+        ExternalMemoryReservation first = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 10), CancellationToken.None);
+        ExternalMemoryReservation second = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 10), CancellationToken.None);
         int callbackCount = 0;
         first.TrySetIdleEvictionCallback(() =>
         {
@@ -2983,8 +2965,7 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, hostMemoryBudgetMb: 100);
 
-        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation reservation = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
 
         reservation.Dispose();
         reservation.Dispose(); // second dispose is a no-op
@@ -2993,8 +2974,7 @@ public sealed class InferenceSessionPoolTests
         Assert.False(reservation.TrySetIdleEvictionCallback(() => true));
         reservation.MarkReleased();
 
-        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None)
+        using ExternalMemoryReservation next = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(next);
     }
@@ -3006,8 +2986,7 @@ public sealed class InferenceSessionPoolTests
         ExternalMemoryReservation reservation;
         var pool = new InferenceSessionPool(maxSessions: 8, hostMemoryBudgetMb: 100);
 
-        reservation = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        reservation = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
         reservation.TrySetIdleEvictionCallback(() =>
         {
             callbackCalls++;
@@ -3032,12 +3011,10 @@ public sealed class InferenceSessionPoolTests
 
         // Oldest reservation refuses eviction; the newer one releases itself. After the
         // newer 60MB is freed, the refusing 20MB plus the 80MB session just fit 100MB.
-        ExternalMemoryReservation oldest = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 20, CancellationToken.None);
+        ExternalMemoryReservation oldest = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 20), CancellationToken.None);
         oldest.TrySetIdleEvictionCallback(() => { refusedCalls++; return false; });
 
-        ExternalMemoryReservation newer = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 60, CancellationToken.None);
+        ExternalMemoryReservation newer = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 60), CancellationToken.None);
         newer.TrySetIdleEvictionCallback(() =>
         {
             evictedCalls++;
@@ -3055,11 +3032,10 @@ public sealed class InferenceSessionPoolTests
         // The refusing reservation still counts against the budget until disposed.
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Cpu, null, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), cts.Token));
 
         oldest.Dispose();
-        using ExternalMemoryReservation fits = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 20, CancellationToken.None)
+        using ExternalMemoryReservation fits = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 20), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(fits);
     }
@@ -3071,13 +3047,11 @@ public sealed class InferenceSessionPoolTests
             maxSessions: 8, hostMemoryBudgetMb: 100);
         var cpuKey = HostKey("ext1", 80);
 
-        ExternalMemoryReservation throwing = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 20, CancellationToken.None);
+        ExternalMemoryReservation throwing = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 20), CancellationToken.None);
         throwing.TrySetIdleEvictionCallback(
             () => throw new InvalidOperationException("synthetic eviction failure"));
 
-        ExternalMemoryReservation newer = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 60, CancellationToken.None);
+        ExternalMemoryReservation newer = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 60), CancellationToken.None);
         int evictedCalls = 0;
         newer.TrySetIdleEvictionCallback(() =>
         {
@@ -3102,17 +3076,15 @@ public sealed class InferenceSessionPoolTests
         using var pool = new InferenceSessionPool(
             maxSessions: 8, hostMemoryBudgetMb: 100);
 
-        ExternalMemoryReservation blocker = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 80, CancellationToken.None);
+        ExternalMemoryReservation blocker = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), CancellationToken.None);
 
         // The cancelled waiter must not leave a pending reservation behind.
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => pool.ReserveExternalAsync(ExecutionProviderKind.Cpu, null, 80, cts.Token));
+            () => pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 80), cts.Token));
 
         blocker.Dispose();
-        using ExternalMemoryReservation full = await pool.ReserveExternalAsync(
-            ExecutionProviderKind.Cpu, null, 100, CancellationToken.None)
+        using ExternalMemoryReservation full = await pool.ReserveExternalAsync(new(ExecutionProviderKind.Cpu, null, 100), CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(full);
     }

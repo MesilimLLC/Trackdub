@@ -569,20 +569,10 @@ internal sealed class GenAiModelPool : IDisposable
 
             ExternalMemoryReservation? reservation = nonEvictingWarmup
                 ? await admissionPool
-                    .TryReserveExternalWithoutEvictionAsync(
-                        key.Provider,
-                        key.DeviceId,
-                        key.EstimatedMemoryMb,
-                        cancellationToken,
-                        key.UseOpenVinoCpuProxy)
+                    .TryReserveExternalWithoutEvictionAsync(new(key.Provider, key.DeviceId, key.EstimatedMemoryMb, key.UseOpenVinoCpuProxy), cancellationToken)
                     .ConfigureAwait(false)
                 : await admissionPool
-                    .ReserveExternalAsync(
-                        key.Provider,
-                        key.DeviceId,
-                        key.EstimatedMemoryMb,
-                        cancellationToken,
-                        key.UseOpenVinoCpuProxy)
+                    .ReserveExternalAsync(new(key.Provider, key.DeviceId, key.EstimatedMemoryMb, key.UseOpenVinoCpuProxy), cancellationToken)
                     .ConfigureAwait(false);
             if (reservation is null)
             {
