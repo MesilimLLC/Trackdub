@@ -23,7 +23,6 @@ namespace Trackdub.Inference.Onnx.Runtime.Planning;
 
 public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTester
 {
-
     private readonly GenAiModelPool genAiModelPool;
 
     public OnnxExecutionProviderSmokeTester()
