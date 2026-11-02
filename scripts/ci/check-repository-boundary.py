@@ -113,6 +113,11 @@ def scan(files: list[Path], patterns: list[re.Pattern[str]]) -> list[str]:
     return violations
 
 
+def is_machine_generated_lock_file(path: Path) -> bool:
+    name = path.name
+    return name == "packages.lock.json" or name.endswith(".lock") or name.endswith(".lock.json")
+
+
 def main() -> int:
     all_files = tracked_files()
     violations: list[str] = []
@@ -122,6 +127,7 @@ def main() -> int:
         for f in all_files
         if not matches_any(f.relative_to(REPO_ROOT).as_posix(), LICENSE_CLAIM_EXCLUDE_DIRS)
         and f.relative_to(REPO_ROOT).as_posix() not in LICENSE_CLAIM_EXCLUDE_FILES
+        and not is_machine_generated_lock_file(f)
     ]
     violations += scan(license_files, LICENSE_CLAIM_PATTERNS)
 
