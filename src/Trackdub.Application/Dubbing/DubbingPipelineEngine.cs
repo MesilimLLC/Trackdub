@@ -93,7 +93,8 @@ public sealed partial class DubbingPipelineEngine(
         var stageOutcomes = new List<StageOutcome>();
         string[] stagesToRun = ResolveStageOrder(options.StageFilter);
 
-        DubbingRunResult? selectionError = ValidateStageSelection(options, stagesToRun, runId, runStart, stageOutcomes);
+        var scope = new RunScope(runId, runStart, stageOutcomes);
+        DubbingRunResult? selectionError = ValidateStageSelection(options, stagesToRun, scope);
         if (selectionError is not null)
         {
             return selectionError;
@@ -103,7 +104,7 @@ public sealed partial class DubbingPipelineEngine(
             .Any(stage => DubbingPipelineStages.RequiresSourceMedia(stage));
         (DubbingSessionOptions effectiveOptions, DubbingRunResult? mediaError) =
             await ResolveEffectiveSourceMediaAsync(
-                options, requiresSourceMedia, runId, runStart, stageOutcomes, cancellationToken)
+                options, requiresSourceMedia, scope, cancellationToken)
                 .ConfigureAwait(false);
         if (mediaError is not null)
         {
@@ -122,10 +123,8 @@ public sealed partial class DubbingPipelineEngine(
         IDubbingSession? session;
         DubbingRunResult? sessionError;
         using (BenchmarkPhaseCapture.Start("session-create"))
-        {
             (session, sessionError) = CreateSessionOrError(
-                projectOutputDirectory, options, runId, runStart, stageOutcomes, executionSnapshot);
-        }
+                projectOutputDirectory, options, scope with { ExecutionSnapshot = executionSnapshot });
 
         if (sessionError is not null || session is null)
         {
@@ -134,95 +133,141 @@ public sealed partial class DubbingPipelineEngine(
 
         await using (session.ConfigureAwait(false))
         {
-            // Best-effort evidence channel for the end-of-run cold-start summary line.
-            coldStart.SetLogger(TryResolveService<IApplicationLogger>(session));
-
-            if (UnattendedVoiceSelection.RequestsVoiceCloning(options))
-            {
-                TryResolveService<IConsentService>(session)?.GrantVoiceCloningConsent();
-            }
-
             // Explicit cloud egress consents are applied as a run-scoped overlay via the
             // session settings seeded in CreateSessionOrError. They are never written to the
             // shared consent store, so a later run that omits the option is still gated by
             // what was actually persisted.
 
-            TranscriptProjectState? initialProjectState = null;
+            (TranscriptProjectState? initialProjectState, projectId) = await PrepareProjectContextAsync(
+                new ProjectContextRequest
+                {
+                    Session = session, Options = options,
+                    RequiresSourceMedia = requiresSourceMedia,
+                    ExecutionSnapshot = executionSnapshot, ColdStart = coldStart,
+                },
+                cancellationToken).ConfigureAwait(false);
 
-            // --- Ensure project/media spine exists for fresh SDK runs ---
-            if (requiresSourceMedia)
-            {
-                using (BenchmarkPhaseCapture.Start("import"))
-                    initialProjectState = await EnsureMediaSpineCreatedAsync(session, options, cancellationToken).ConfigureAwait(false);
-            }
-
-            (initialProjectState, projectId) = await ResolveTelemetryProjectStateAsync(
-                session, initialProjectState, cancellationToken).ConfigureAwait(false);
-
-            if (initialProjectState is not null)
-            {
-                DubbingExecutionSnapshot.UpdateExecutionSnapshotWithSourceAudioKind(
-                    executionSnapshot,
-                    options,
-                    ResolveSourceAudioKind(initialProjectState));
-            }
-
-            // --- Pre-flight checks ---
-            DubbingRunResult? preFlightResult;
-            IReadOnlySet<string> declinedOptionalStages;
-            using (BenchmarkPhaseCapture.Start("preflight"))
-            {
-                (preFlightResult, declinedOptionalStages) = await RunPreFlightChecksAsync(
-                    session,
-                    options,
-                    stagesToRun,
-                    runId,
-                    runStart,
-                    stageOutcomes,
-                    executionSnapshot,
+            // --- Pre-flight checks and runtime selections ---
+            (DubbingRunResult? preFlightResult, IReadOnlySet<string> declinedOptionalStages,
+                RuntimeModelSelections? runtimeSelections) = await PrepareStageInputsAsync(
+                    new PreFlightTarget(session, options, stagesToRun, initialProjectState),
+                    new PreFlightRun(runId, runStart, stageOutcomes, executionSnapshot),
                     scopedProgress,
-                    cancellationToken,
-                    initialProjectState).ConfigureAwait(false);
-            }
+                    cancellationToken).ConfigureAwait(false);
             if (preFlightResult is not null)
             {
                 return preFlightResult;
             }
 
-            // Reload selections after pre-flight so starter-pack or settings changes are visible to execution.
-            RuntimeModelSelections runtimeSelections = await CreateRuntimeSelectionsAsync(
-                session,
-                options,
-                cancellationToken,
-                initialProjectState).ConfigureAwait(false);
-
-            DubbingExecutionSnapshot.MergeRuntimeModelSelectionsIntoSnapshot(
-                executionSnapshot,
-                runtimeSelections,
-                TryResolveService<IModelAliasResolver>(session));
-
             // --- Execute stages ---
-            await RunStageLoopAsync(
-                new StageRunContext(session, options, runtimeSelections, executionSnapshot),
-                new StageRunTelemetry(scopedProgress, projectId, runId),
-                new StageLoopPlan(stagesToRun, declinedOptionalStages, stageOutcomes),
-                cancellationToken).ConfigureAwait(false);
-
-            await RunPostLipSynthesisExportIfNeededAsync(
-                session,
-                options,
-                stagesToRun,
-                executionSnapshot,
-                runtimeSelections,
-                scopedProgress,
-                projectId,
-                runId,
-                stageOutcomes,
-                cancellationToken).ConfigureAwait(false);
+            var runContext = new StageRunContext(session, options, runtimeSelections!, executionSnapshot);
+            var telemetry = new StageRunTelemetry(scopedProgress, projectId, runId);
+            var loopPlan = new StageLoopPlan(stagesToRun, declinedOptionalStages, stageOutcomes);
+            await RunStageLoopAndPostExportAsync(runContext, telemetry, loopPlan, cancellationToken)
+                .ConfigureAwait(false);
 
             // --- Build final result ---
             return BuildCompletedResult(runId, runStart, stageOutcomes, executionSnapshot);
         }
+    }
+
+    /// <summary>Stage execution followed by the post-lip-synthesis export check.</summary>
+    private async Task RunStageLoopAndPostExportAsync(
+        StageRunContext runContext,
+        StageRunTelemetry telemetry,
+        StageLoopPlan loopPlan,
+        CancellationToken cancellationToken)
+    {
+        await RunStageLoopAsync(runContext, telemetry, loopPlan, cancellationToken).ConfigureAwait(false);
+
+        await RunPostLipSynthesisExportIfNeededAsync(
+            runContext,
+            telemetry,
+            loopPlan,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// In-session setup that runs before pre-flight: cold-start evidence channel,
+    /// voice-cloning consent, media spine creation for fresh SDK runs, and the
+    /// telemetry project id hoist.
+    /// </summary>
+    private static async Task<(TranscriptProjectState? State, Guid ProjectId)> PrepareProjectContextAsync(
+        ProjectContextRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Best-effort evidence channel for the end-of-run cold-start summary line.
+        request.ColdStart.SetLogger(TryResolveService<IApplicationLogger>(request.Session));
+
+        if (UnattendedVoiceSelection.RequestsVoiceCloning(request.Options))
+        {
+            TryResolveService<IConsentService>(request.Session)?.GrantVoiceCloningConsent();
+        }
+
+        TranscriptProjectState? initialProjectState = null;
+
+        // --- Ensure project/media spine exists for fresh SDK runs ---
+        if (request.RequiresSourceMedia)
+        {
+            using (BenchmarkPhaseCapture.Start("import"))
+                initialProjectState = await EnsureMediaSpineCreatedAsync(request.Session, request.Options, cancellationToken).ConfigureAwait(false);
+        }
+
+        (initialProjectState, Guid projectId) = await ResolveTelemetryProjectStateAsync(
+            request.Session, initialProjectState, cancellationToken).ConfigureAwait(false);
+
+        if (initialProjectState is not null)
+        {
+            DubbingExecutionSnapshot.UpdateExecutionSnapshotWithSourceAudioKind(
+                request.ExecutionSnapshot,
+                request.Options,
+                ResolveSourceAudioKind(initialProjectState));
+        }
+
+        return (initialProjectState, projectId);
+    }
+
+    /// <summary>
+    /// Pre-flight checks followed by a selections reload (starter-pack or settings
+    /// changes made during pre-flight become visible to execution) and the
+    /// execution-snapshot merge.
+    /// </summary>
+    private static async Task<(DubbingRunResult? Error, IReadOnlySet<string> DeclinedStages, RuntimeModelSelections? Selections)>
+        PrepareStageInputsAsync(
+            PreFlightTarget target,
+            PreFlightRun run,
+            IProgress<PipelineProgressEvent>? progress,
+            CancellationToken cancellationToken)
+    {
+        DubbingRunResult? preFlightResult;
+        IReadOnlySet<string> declinedOptionalStages;
+        using (BenchmarkPhaseCapture.Start("preflight"))
+        {
+            (preFlightResult, declinedOptionalStages) = await RunPreFlightChecksAsync(
+                target,
+                run,
+                progress,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (preFlightResult is not null)
+        {
+            return (preFlightResult, declinedOptionalStages, null);
+        }
+
+        // Reload selections after pre-flight so starter-pack or settings changes are visible to execution.
+        RuntimeModelSelections runtimeSelections = await CreateRuntimeSelectionsAsync(
+            target.Session,
+            target.Options,
+            cancellationToken,
+            target.State).ConfigureAwait(false);
+
+        DubbingExecutionSnapshot.MergeRuntimeModelSelectionsIntoSnapshot(
+            run.ExecutionSnapshot,
+            runtimeSelections,
+            TryResolveService<IModelAliasResolver>(target.Session));
+
+        return (null, declinedOptionalStages, runtimeSelections);
     }
 
     /// <summary>
@@ -232,13 +277,11 @@ public sealed partial class DubbingPipelineEngine(
     private static DubbingRunResult? ValidateStageSelection(
         DubbingSessionOptions options,
         string[] stagesToRun,
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes)
+        RunScope scope)
     {
         if (stagesToRun.Length == 0 && options.StageFilter is { Count: > 0 })
         {
-            return BuildErrorResult(runId, runStart, stageOutcomes,
+            return BuildErrorResult(scope,
                 DubbingRunStatus.Failed,
                 preFlightFailures: [$"StageFilter did not match any known pipeline stage: {string.Join(", ", options.StageFilter)}"]);
         }
@@ -249,7 +292,7 @@ public sealed partial class DubbingPipelineEngine(
         if (string.IsNullOrWhiteSpace(options.TargetLanguageCode)
             && stagesMissingTargetLanguage.Length > 0)
         {
-            return BuildErrorResult(runId, runStart, stageOutcomes,
+            return BuildErrorResult(scope,
                 DubbingRunStatus.Failed,
                 preFlightFailures:
                 [$"Target language is required for stage(s): {string.Join(", ", stagesMissingTargetLanguage)}."]);
@@ -266,9 +309,7 @@ public sealed partial class DubbingPipelineEngine(
     private async Task<(DubbingSessionOptions Options, DubbingRunResult? Error)> ResolveEffectiveSourceMediaAsync(
         DubbingSessionOptions options,
         bool requiresSourceMedia,
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes,
+        RunScope scope,
         CancellationToken cancellationToken)
     {
         // Stages such as Translation, Tts, and Export operate against cached artifacts in
@@ -276,12 +317,10 @@ public sealed partial class DubbingPipelineEngine(
         // For existing projects, resolve the stored source path from SQLite before failing.
         DubbingSessionOptions effectiveOptions = options;
 
-        if (requiresSourceMedia
-            && !File.Exists(options.SourceMediaPath)
-            && options.ProjectOutputDirectory is not null)
+        if (NeedsStoredSourceMediaLookup(options, requiresSourceMedia))
         {
             DubbingProjectContext? projectContext = await DubbingProjectContextResolver
-                .TryOpenAsync(_sessionFactory, options.ProjectOutputDirectory, cancellationToken)
+                .TryOpenAsync(_sessionFactory, options.ProjectOutputDirectory!, cancellationToken)
                 .ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(projectContext?.SourceMediaPath))
@@ -292,13 +331,18 @@ public sealed partial class DubbingPipelineEngine(
 
         if (requiresSourceMedia && !File.Exists(effectiveOptions.SourceMediaPath))
         {
-            return (effectiveOptions, BuildErrorResult(runId, runStart, stageOutcomes,
+            return (effectiveOptions, BuildErrorResult(scope,
                 DubbingRunStatus.Failed,
                 preFlightFailures: [$"Media file not found: {effectiveOptions.SourceMediaPath}"]));
         }
 
         return (effectiveOptions, null);
     }
+
+    private static bool NeedsStoredSourceMediaLookup(DubbingSessionOptions options, bool requiresSourceMedia) =>
+        requiresSourceMedia
+        && !File.Exists(options.SourceMediaPath)
+        && options.ProjectOutputDirectory is not null;
 
     private static IReadOnlyDictionary<string, bool> BuildExplicitCloudEgressConsents(
         IReadOnlyList<string>? explicitConsents)
@@ -332,10 +376,7 @@ public sealed partial class DubbingPipelineEngine(
     private (IDubbingSession? Session, DubbingRunResult? Error) CreateSessionOrError(
         string projectOutputDirectory,
         DubbingSessionOptions options,
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes,
-        Dictionary<string, string> executionSnapshot)
+        RunScope scope)
     {
         try
         {
@@ -356,10 +397,9 @@ public sealed partial class DubbingPipelineEngine(
         }
         catch (Exception ex)
         {
-            return (null, BuildErrorResult(runId, runStart, stageOutcomes,
+            return (null, BuildErrorResult(scope,
                 DubbingRunStatus.Failed,
-                preFlightFailures: [$"Failed to create session: {ex.Message}"],
-                executionSnapshot: executionSnapshot));
+                preFlightFailures: [$"Failed to create session: {ex.Message}"]));
         }
     }
 
@@ -400,40 +440,28 @@ public sealed partial class DubbingPipelineEngine(
     /// earlier mix-producing Export outcome.
     /// </summary>
     private async Task RunPostLipSynthesisExportIfNeededAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string[] stagesToRun,
-        Dictionary<string, string> executionSnapshot,
-        RuntimeModelSelections runtimeSelections,
-        IProgress<PipelineProgressEvent>? progress,
-        Guid projectId,
-        Guid runId,
-        List<StageOutcome> stageOutcomes,
+        StageRunContext run,
+        StageRunTelemetry telemetry,
+        StageLoopPlan plan,
         CancellationToken cancellationToken)
     {
-        if (!ShouldRunPostLipSynthesisExport(stagesToRun, stageOutcomes))
+        if (!ShouldRunPostLipSynthesisExport(plan.StagesToRun, plan.StageOutcomes))
         {
             return;
         }
 
-        int priorExportIndex = stageOutcomes.FindLastIndex(static outcome =>
+        int priorExportIndex = plan.StageOutcomes.FindLastIndex(static outcome =>
             string.Equals(outcome.StageName, StageNames.Export, StringComparison.OrdinalIgnoreCase));
         if (priorExportIndex >= 0)
         {
-            stageOutcomes.RemoveAt(priorExportIndex);
+            plan.StageOutcomes.RemoveAt(priorExportIndex);
         }
 
         StageOutcome postLipExportOutcome = await ExecuteStageAsync(
-            session,
-            options,
-            StageNames.Export,
-            executionSnapshot,
-            runtimeSelections,
-            progress,
-            projectId,
-            runId,
-            cancellationToken).ConfigureAwait(false);
-        stageOutcomes.Add(postLipExportOutcome);
+            run,
+            telemetry,
+            new StageStep(StageNames.Export, cancellationToken)).ConfigureAwait(false);
+        plan.StageOutcomes.Add(postLipExportOutcome);
     }
 
     private static DubbingRunResult BuildCompletedResult(
@@ -464,61 +492,50 @@ public sealed partial class DubbingPipelineEngine(
     /// is not registered (backward-compatible).
     /// </summary>
     private static async Task<(DubbingRunResult? Error, IReadOnlySet<string> DeclinedStages)> RunPreFlightChecksAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string[] stagesToRun,
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes,
-        Dictionary<string, string> executionSnapshot,
+        PreFlightTarget target,
+        PreFlightRun run,
         IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken,
-        TranscriptProjectState? state = null)
+        CancellationToken cancellationToken)
     {
-        if (session.Workspace.Project is null)
+        if (target.Session.Workspace.Project is null)
         {
             return (null, EmptyDeclinedStages); // No project yet; pre-flight not applicable.
         }
 
         RuntimeModelSelections preFlightSelections = await CreateRuntimeSelectionsAsync(
-            session,
-            options,
+            target.Session,
+            target.Options,
             cancellationToken,
-            state).ConfigureAwait(false);
+            target.State).ConfigureAwait(false);
         DubbingExecutionSnapshot.MergeRuntimeModelSelectionsIntoSnapshot(
-            executionSnapshot,
+            run.ExecutionSnapshot,
             preFlightSelections,
-            TryResolveService<IModelAliasResolver>(session));
+            TryResolveService<IModelAliasResolver>(target.Session));
 
         // ── New path: IPipelineReadinessService ───────────────────────────────
-        IPipelineReadinessService? readinessService = TryResolveService<IPipelineReadinessService>(session);
-        RuntimeModelSetupCoordinator? coordinator = TryResolveService<RuntimeModelSetupCoordinator>(session);
+        IPipelineReadinessService? readinessService = TryResolveService<IPipelineReadinessService>(target.Session);
+        RuntimeModelSetupCoordinator? coordinator = TryResolveService<RuntimeModelSetupCoordinator>(target.Session);
 
         if (readinessService is not null && coordinator is not null)
         {
             var readinessContext = new ReadinessPreFlightContext(
-                new PreFlightTarget(session, options, stagesToRun, state),
-                new PreFlightRun(runId, runStart, stageOutcomes, executionSnapshot),
+                target,
+                run,
                 new PreFlightProvisioning(readinessService, coordinator, progress, cancellationToken));
             return await RunPreFlightWithReadinessServiceAsync(readinessContext, preFlightSelections)
                 .ConfigureAwait(false);
         }
 
         // ── Legacy fallback: IPipelinePreFlightChecker ────────────────────────
-        IPipelinePreFlightChecker? checker = TryResolveService<IPipelinePreFlightChecker>(session);
+        IPipelinePreFlightChecker? checker = TryResolveService<IPipelinePreFlightChecker>(target.Session);
         if (checker is null)
         {
             return (null, EmptyDeclinedStages);
         }
 
         return (await RunLegacyModelPreFlightAsync(
-            session,
-            options,
-            stagesToRun,
-            runId,
-            runStart,
-            stageOutcomes,
-            executionSnapshot,
+            target,
+            run,
             checker,
             cancellationToken).ConfigureAwait(false), EmptyDeclinedStages);
     }
@@ -529,66 +546,89 @@ public sealed partial class DubbingPipelineEngine(
     /// VAD/ASR/Diarization models to stage execution.
     /// </summary>
     private static async Task<DubbingRunResult?> RunLegacyModelPreFlightAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string[] stagesToRun,
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes,
-        Dictionary<string, string> executionSnapshot,
+        PreFlightTarget target,
+        PreFlightRun run,
         IPipelinePreFlightChecker checker,
         CancellationToken cancellationToken)
     {
         var failures = new List<string>();
 
-        foreach (string stageName in stagesToRun)
+        foreach (string stageName in target.StageNames)
         {
-            if (ShouldSkipModelPreFlight(stageName, options.ModelPreferences))
+            if (ShouldSkipModelPreFlight(stageName, target.Options.ModelPreferences))
                 continue;
 
-            if (!options.ForceRerun &&
-                await HasValidExistingArtifactsAsync(
-                    session, options, stageName, executionSnapshot, cancellationToken).ConfigureAwait(false))
+            if (!await NeedsModelCheckAsync(target, run, stageName, cancellationToken).ConfigureAwait(false))
                 continue;
 
-            try
+            string? failure = await CheckStageModelsAsync(target, stageName, checker, cancellationToken)
+                .ConfigureAwait(false);
+            if (failure is not null)
             {
-                await checker.EnsureModelsAvailableAsync(
-                    stageName,
-                    cancellationToken,
-                    string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase)
-                        ? options.SourceLanguageCode
-                        : null).ConfigureAwait(false);
-            }
-            catch (RequiredModelNotAvailableException ex)
-            {
-                // Legacy: auto-downloadable VAD/ASR/Diar still deferred to stage execution.
-                bool deferredStage =
-                    string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase);
-                if (!ex.CanAutoDownload || !deferredStage)
-                    failures.Add($"{stageName}: {ex.ModelId}");
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                // Catch any other unexpected exception during pre-flight model check
-                // and record it as a failure for this stage
-                failures.Add($"{stageName}: {ex.Message}");
+                failures.Add(failure);
             }
         }
 
         return failures.Count > 0
             ? BuildErrorResult(
-                runId,
-                runStart,
-                stageOutcomes,
+                new RunScope(run.RunId, run.RunStart, run.StageOutcomes, run.ExecutionSnapshot),
                 DubbingRunStatus.PreFlightFailed,
-                failures,
-                executionSnapshot)
+                failures)
             : null;
     }
+
+    private static async Task<bool> NeedsModelCheckAsync(
+        PreFlightTarget target,
+        PreFlightRun run,
+        string stageName,
+        CancellationToken cancellationToken) =>
+        target.Options.ForceRerun
+        || !await HasValidExistingArtifactsAsync(
+            new ArtifactResumeContext(target.Session, target.Options, run.ExecutionSnapshot),
+            stageName,
+            cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Ensures one stage's models through the legacy checker. Returns the failure detail
+    /// when the stage cannot proceed, or null when its models are satisfied (including
+    /// auto-downloadable VAD/ASR/diarization models deferred to stage execution).
+    /// </summary>
+    private static async Task<string?> CheckStageModelsAsync(
+        PreFlightTarget target,
+        string stageName,
+        IPipelinePreFlightChecker checker,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await checker.EnsureModelsAvailableAsync(
+                stageName,
+                cancellationToken,
+                string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase)
+                    ? target.Options.SourceLanguageCode
+                    : null).ConfigureAwait(false);
+            return null;
+        }
+        catch (RequiredModelNotAvailableException ex)
+        {
+            // Legacy: auto-downloadable VAD/ASR/Diar still deferred to stage execution.
+            return !ex.CanAutoDownload || !IsDeferredModelStage(stageName)
+                ? $"{stageName}: {ex.ModelId}"
+                : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Catch any other unexpected exception during pre-flight model check
+            // and record it as a failure for this stage
+            return $"{stageName}: {ex.Message}";
+        }
+    }
+
+    private static bool IsDeferredModelStage(string stageName) =>
+        string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase);
 
     private static readonly IReadOnlySet<string> EmptyDeclinedStages =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -597,35 +637,75 @@ public sealed partial class DubbingPipelineEngine(
         string stageName,
         IReadOnlyDictionary<string, string>? modelPreferences)
     {
-        if (modelPreferences is null || !modelPreferences.TryGetValue(stageName, out string? modelAlias) || string.IsNullOrWhiteSpace(modelAlias))
+        if (!TryGetModelOverrideAlias(modelPreferences, stageName, out string modelAlias))
         {
             return false;
         }
 
+        return ResolveCloudAliasPredicate(stageName)?.Invoke(modelAlias) ?? false;
+    }
+
+    private static bool TryGetModelOverrideAlias(
+        IReadOnlyDictionary<string, string>? modelPreferences,
+        string stageName,
+        out string modelAlias)
+    {
+        modelAlias = string.Empty;
+        if (!HasModelOverrideAlias(modelPreferences, stageName, out string? alias))
+        {
+            return false;
+        }
+
+        modelAlias = alias!;
+        return true;
+    }
+
+    private static bool HasModelOverrideAlias(
+        IReadOnlyDictionary<string, string>? modelPreferences,
+        string stageName,
+        out string? alias)
+    {
+        alias = null;
+        if (modelPreferences is null)
+        {
+            return false;
+        }
+
+        if (!modelPreferences.TryGetValue(stageName, out alias))
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(alias);
+    }
+
+    private static Func<string, bool>? ResolveCloudAliasPredicate(string stageName)
+    {
         if (string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase))
         {
-            return AsrModelOverrideSettings.IsCloudAlias(modelAlias);
+            return AsrModelOverrideSettings.IsCloudAlias;
         }
 
         if (string.Equals(stageName, StageNames.Translation, StringComparison.OrdinalIgnoreCase))
         {
-            return TranslationModelOverrideSettings.IsCloudAlias(modelAlias);
+            return TranslationModelOverrideSettings.IsCloudAlias;
         }
 
         if (string.Equals(stageName, StageNames.Tts, StringComparison.OrdinalIgnoreCase))
         {
-            return TtsModelOverrideSettings.IsCloudAlias(modelAlias);
+            return TtsModelOverrideSettings.IsCloudAlias;
         }
 
-        if (string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(stageName, StageNames.TextRefinementTranslation, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(stageName, StageNames.TextRefinement, StringComparison.OrdinalIgnoreCase))
-        {
-            return modelAlias.StartsWith("gemini", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
+        return IsTextRefinementStage(stageName) ? IsGeminiModelAlias : null;
     }
+
+    private static bool IsTextRefinementStage(string stageName) =>
+        string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(stageName, StageNames.TextRefinementTranslation, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(stageName, StageNames.TextRefinement, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsGeminiModelAlias(string modelAlias) =>
+        modelAlias.StartsWith("gemini", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Ensures the project's media spine (project record + normalized audio) exists.
@@ -737,6 +817,40 @@ public sealed partial class DubbingPipelineEngine(
         StageStatus Status = StageStatus.Succeeded,
         string? ReasonCode = null);
 
+    /// <summary>A stage progress update bundled for <see cref="ReportProgress"/>.</summary>
+    private readonly record struct StageProgressEvent(
+        string StageName,
+        PipelineProgressEventKind Kind,
+        string? Message,
+        TimeSpan Elapsed = default);
+
+    /// <summary>Run-scoped bookkeeping shared by validation, session create, and error results.</summary>
+    private sealed record RunScope(
+        Guid RunId,
+        DateTimeOffset RunStart,
+        List<StageOutcome> StageOutcomes,
+        Dictionary<string, string>? ExecutionSnapshot = null);
+
+    /// <summary>A transient fault observed during stage execution, bundled for the telemetry bus.</summary>
+    private sealed record EngineTransientFault(
+        Guid ProjectId,
+        string StageName,
+        TransientFailureKind Kind,
+        Exception Exception,
+        DateTimeOffset StageStart,
+        int AttemptNumber,
+        Guid RunId);
+
+    /// <summary>Inputs for the in-session project-context setup that precedes pre-flight.</summary>
+    private sealed record ProjectContextRequest
+    {
+        public required IDubbingSession Session { get; init; }
+        public required DubbingSessionOptions Options { get; init; }
+        public required bool RequiresSourceMedia { get; init; }
+        public required Dictionary<string, string> ExecutionSnapshot { get; init; }
+        public required ColdStartCapture ColdStart { get; init; }
+    }
+
     /// <summary>
     /// Executes a single pipeline stage, wrapping it in timing, transient retry, and error handling.
     /// Transient failures (filesystem locks, SQLite busy, HF mirror 5xx) are retried up to
@@ -744,19 +858,23 @@ public sealed partial class DubbingPipelineEngine(
     /// reported as terminal failures.
     /// </summary>
     private async Task<StageOutcome> ExecuteStageAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string stageName,
-        Dictionary<string, string> executionSnapshot,
-        RuntimeModelSelections runtimeSelections,
-        IProgress<PipelineProgressEvent>? progress,
-        Guid projectId,
-        Guid runId,
-        CancellationToken cancellationToken,
+        StageRunContext run,
+        StageRunTelemetry telemetry,
+        StageStep step,
         TtsStreamingPrefetch? ttsPrefetch = null)
     {
+        var context = new StageExecutionContext
+        {
+            Session = run.Session,
+            Options = run.Options,
+            RuntimeSelections = run.RuntimeSelections,
+            Progress = telemetry.Progress,
+            TtsPrefetch = ttsPrefetch,
+        };
         DateTimeOffset stageStart = DateTimeOffset.UtcNow;
-        ReportProgress(progress, stageName, PipelineProgressEventKind.Started, null);
+        ReportProgress(
+            telemetry.Progress,
+            new StageProgressEvent(step.StageName, PipelineProgressEventKind.Started, null));
 
         StageRetryBudget retryBudget = StageRetryBudget.Default;
         int attempt = 1;
@@ -765,99 +883,43 @@ public sealed partial class DubbingPipelineEngine(
             try
             {
                 StageWorkflowResult workflowResult = await RunStageWorkflowAsync(
-                    session,
-                    options,
-                    stageName,
-                    runtimeSelections,
-                    progress,
-                    cancellationToken,
-                    ttsPrefetch).ConfigureAwait(false);
+                    context,
+                    step.StageName,
+                    step.CancellationToken).ConfigureAwait(false);
 
-                DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
-                PipelineProgressEventKind eventKind = workflowResult.Status switch
-                {
-                    StageStatus.Skipped => PipelineProgressEventKind.Skipped,
-                    StageStatus.Failed => PipelineProgressEventKind.Failed,
-                    // PartiallySucceeded reports Completed: the stage finished, and the
-                    // degradation detail is carried in the message and outcome records.
-                    _ => PipelineProgressEventKind.Completed,
-                };
-                string? progressMessage = workflowResult.ReasonCode
-                    ?? (workflowResult.DegradationRecords is { Count: > 0 } records ? records[0] : null);
-                ReportProgress(
-                    progress,
-                    stageName,
-                    eventKind,
-                    progressMessage,
-                    stageEnd - stageStart);
-
-                return new StageOutcome
-                {
-                    StageName = stageName,
-                    Status = workflowResult.Status,
-                    StartTime = stageStart,
-                    EndTime = stageEnd,
-                    ArtifactPaths = workflowResult.ArtifactPaths,
-                    DegradationRecords = workflowResult.DegradationRecords,
-                    ReasonCode = workflowResult.ReasonCode,
-                };
+                return BuildStageOutcome(step, telemetry, stageStart, workflowResult);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (step.CancellationToken.IsCancellationRequested)
             {
-                DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
-                ReportProgress(progress, stageName, PipelineProgressEventKind.Failed, "Cancelled", stageEnd - stageStart);
-
-                return new StageOutcome
-                {
-                    StageName = stageName,
-                    Status = StageStatus.Failed,
-                    StartTime = stageStart,
-                    EndTime = stageEnd,
-                    ArtifactPaths = [],
-                    ReasonCode = "CANCELLED",
-                };
+                return BuildCancelledStageOutcome(step, telemetry, stageStart, "Cancelled");
             }
             catch (Exception ex) when (TransientFailureClassifier.IsTransient(ex))
             {
                 TransientFailureKind kind = TransientFailureClassifier.Classify(ex);
-                PublishEngineTransient(projectId, stageName, kind, ex, stageStart, attempt, runId);
+                PublishEngineTransient(
+                    new EngineTransientFault(
+                        telemetry.ProjectId,
+                        step.StageName,
+                        kind,
+                        ex,
+                        stageStart,
+                        attempt,
+                        telemetry.RunId));
 
                 if (attempt >= retryBudget.MaxAttempts)
                 {
-                    DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
                     string retryExhaustedMessage = $"{ex.GetType().Name}: {ex.Message} (transient retry exhausted after {attempt} attempts)";
-                    ReportProgress(progress, stageName, PipelineProgressEventKind.Failed, retryExhaustedMessage, stageEnd - stageStart);
-
-                    return new StageOutcome
-                    {
-                        StageName = stageName,
-                        Status = StageStatus.Failed,
-                        StartTime = stageStart,
-                        EndTime = stageEnd,
-                        ArtifactPaths = [],
-                        ReasonCode = "STAGE_FAILED_TRANSIENT",
-                        DegradationRecords = [retryExhaustedMessage],
-                    };
+                    return BuildFailedStageOutcome(step, telemetry, stageStart,
+                        new StageFailureDetail(retryExhaustedMessage, "STAGE_FAILED_TRANSIENT", [retryExhaustedMessage]));
                 }
 
                 try
                 {
-                    await Task.Delay(retryBudget.BackoffFor(attempt), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(retryBudget.BackoffFor(attempt), step.CancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (step.CancellationToken.IsCancellationRequested)
                 {
-                    DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
-                    ReportProgress(progress, stageName, PipelineProgressEventKind.Failed, "Cancelled during retry backoff", stageEnd - stageStart);
-
-                    return new StageOutcome
-                    {
-                        StageName = stageName,
-                        Status = StageStatus.Failed,
-                        StartTime = stageStart,
-                        EndTime = stageEnd,
-                        ArtifactPaths = [],
-                        ReasonCode = "CANCELLED",
-                    };
+                    return BuildCancelledStageOutcome(step, telemetry, stageStart, "Cancelled during retry backoff");
                 }
                 attempt++;
             }
@@ -866,709 +928,80 @@ public sealed partial class DubbingPipelineEngine(
                 // Catch all exceptions from stage execution to ensure we always
                 // return a StageOutcome rather than letting exceptions propagate.
                 // This allows the pipeline to report failures gracefully.
-                DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
-                ReportProgress(progress, stageName, PipelineProgressEventKind.Failed, ex.Message, stageEnd - stageStart);
-
-                return new StageOutcome
-                {
-                    StageName = stageName,
-                    Status = StageStatus.Failed,
-                    StartTime = stageStart,
-                    EndTime = stageEnd,
-                    ArtifactPaths = [],
-                    ReasonCode = "STAGE_FAILED",
-                    DegradationRecords = [ex.Message],
-                };
+                return BuildFailedStageOutcome(step, telemetry, stageStart,
+                    new StageFailureDetail(ex.Message, "STAGE_FAILED", [ex.Message]));
             }
         }
     }
 
-    /// <summary>
-    /// Dispatches execution to the appropriate workspace workflow method for the given stage.
-    /// Returns artifact paths and any degradation records produced by the stage.
-    /// </summary>
-    internal static async Task<StageWorkflowResult> RunStageWorkflowAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string stageName,
-        RuntimeModelSelections runtimeSelections,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken,
-        TtsStreamingPrefetch? ttsPrefetch = null)
+    private static StageOutcome BuildStageOutcome(
+        StageStep step,
+        StageRunTelemetry telemetry,
+        DateTimeOffset stageStart,
+        StageWorkflowResult workflowResult)
     {
-        // Stage attribution for cold-start evidence: everything this workflow runs —
-        // including plan-time smoke inference (which scopes itself to the smoke phase) —
-        // is attributed to this stage until the workflow returns.
-        ColdStartCapture.MarkFirstStageStart(stageName);
-        using IDisposable stagePhase = ColdStartCapture.EnterPhase(ColdStartPhase.Stage, stageName);
-
-        TranscriptWorkspace workspace = session.Workspace;
-        InferenceModelPreferences modelPreferences =
-            RuntimeModelRequestFactory.CreateModelPreferences(runtimeSelections);
-
-        switch (stageName)
+        DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
+        PipelineProgressEventKind eventKind = workflowResult.Status switch
         {
-            case StageNames.Separation:
-                return await RunSeparationStageAsync(
-                    workspace,
-                    options,
-                    runtimeSelections,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
+            StageStatus.Skipped => PipelineProgressEventKind.Skipped,
+            StageStatus.Failed => PipelineProgressEventKind.Failed,
+            // PartiallySucceeded reports Completed: the stage finished, and the
+            // degradation detail is carried in the message and outcome records.
+            _ => PipelineProgressEventKind.Completed,
+        };
+        string? progressMessage = workflowResult.ReasonCode
+            ?? (workflowResult.DegradationRecords is { Count: > 0 } records ? records[0] : null);
+        ReportProgress(
+            telemetry.Progress,
+            new StageProgressEvent(step.StageName, eventKind, progressMessage, stageEnd - stageStart));
 
-            case StageNames.Vad:
-                return await RunVadStageAsync(
-                    workspace,
-                    options,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.Asr:
-                return await RunAsrStageAsync(
-                    workspace,
-                    options,
-                    runtimeSelections,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.Diarization:
-                return await RunDiarizationStageAsync(
-                    workspace,
-                    options,
-                    runtimeSelections,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.AudioPreparation:
-                return await RunAudioPreparationStageAsync(
-                    workspace,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.TextRefinementAsr:
-                return await RunTextRefinementStageAsync(
-                    workspace,
-                    options,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.OverlapRescue:
-                return await RunOverlapRescueStageAsync(
-                    workspace,
-                    options,
-                    runtimeSelections,
-                    modelPreferences,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.Translation:
-                return await RunTranslationStageAsync(
-                    workspace,
-                    options,
-                    runtimeSelections,
-                    progress,
-                    cancellationToken,
-                    ttsPrefetch).ConfigureAwait(false);
-
-            case StageNames.Tts:
-                return await RunTtsStageAsync(
-                    session,
-                    options,
-                    runtimeSelections,
-                    progress,
-                    cancellationToken,
-                    ttsPrefetch).ConfigureAwait(false);
-
-            case StageNames.Export:
-                return await RunExportStageAsync(
-                    session,
-                    options,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.LipSync:
-                return await RunLipSyncStageAsync(
-                    workspace,
-                    runtimeSelections,
-                    cancellationToken).ConfigureAwait(false);
-
-            case StageNames.LipSynthesis:
-                return await RunLipSynthesisStageAsync(
-                    session,
-                    runtimeSelections,
-                    cancellationToken).ConfigureAwait(false);
-
-            default:
-                // A catalog stage with no registered workflow is a defect, not a no-op;
-                // report failure rather than silently succeeding.
-                return new StageWorkflowResult(
-                    [],
-                    [$"Stage '{stageName}' has no registered workflow."],
-                    StageStatus.Failed,
-                    "STAGE_UNSUPPORTED");
-        }
-    }
-
-    /// <summary>
-    /// Runs stem separation for voice-clone references and the mix bed.
-    /// </summary>
-    private static async Task<StageWorkflowResult> RunSeparationStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        if (!options.EnableStemSeparation)
+        return new StageOutcome
         {
-            return new StageWorkflowResult(
-                [],
-                ["Stem separation is disabled for this run."],
-                StageStatus.Skipped,
-                StageSkipReasonCodes.DisabledByOption);
-        }
-
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState separationState = await workspace.RunStemSeparationAsync(
-            cancellationToken,
-            preferredModelAlias: runtimeSelections.SeparationModelAlias,
-            modelPreferences: modelPreferences).ConfigureAwait(false);
-
-        return BuildStageWorkflowResultFromStageRun(
-            separationState,
-            StageNames.Separation,
-            stageWorkStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunVadStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState vadState = await workspace.RunTranscriptStageAsync(
-            StageNames.Vad,
-            TranscriptRunOptions.ForDubbingStage(options, StageNames.Vad, modelPreferences, progress),
-            cancellationToken).ConfigureAwait(false);
-
-        // When enabled, speech enhancement runs while routing audio for the first transcript stage;
-        // surface its failure before the VAD Completed event so it shows in progress and outcome.
-        IReadOnlyList<string>? enhancementDegradations =
-            ExtractSpeechEnhancementDegradations(vadState, stageWorkStartedUtc);
-        if (enhancementDegradations is { Count: > 0 })
-        {
-            ReportProgress(progress, StageNames.SpeechEnhancement, PipelineProgressEventKind.Failed,
-                enhancementDegradations[0]);
-        }
-
-        return BuildStageWorkflowResultFromStageRun(vadState, StageNames.Vad, stageWorkStartedUtc, enhancementDegradations);
-    }
-
-    private static async Task<StageWorkflowResult> RunAsrStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        TranscriptProjectState asrOpen = await workspace.Project
-            .OpenAsync(cancellationToken).ConfigureAwait(false);
-        if (asrOpen.CurrentTranscriptRevision is not null &&
-            asrOpen.TranscriptSegments.Count > 0)
-        {
-            // Interactive re-run: re-transcribe the existing segments in place
-            // instead of regenerating a fresh revision from VAD regions.
-            IReadOnlyList<Guid> segmentIds = asrOpen.TranscriptSegments
-                .Select(static segment => segment.Id)
-                .ToArray();
-            DateTimeOffset retranscribeStartedUtc = DateTimeOffset.UtcNow;
-            TranscriptProjectState retranscribed = await workspace.RetranscribeSegmentsAsync(
-                RuntimeModelSetupCoordinator.CreateRetranscribeRequest(
-                    runtimeSelections,
-                    asrOpen.CurrentTranscriptRevision.Id,
-                    segmentIds),
-                cancellationToken).ConfigureAwait(false);
-            return BuildStageWorkflowResultFromStageRun(retranscribed, StageNames.Asr, retranscribeStartedUtc);
-        }
-
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState asrState = await workspace.RunTranscriptStageAsync(
-            StageNames.Asr,
-            TranscriptRunOptions.ForDubbingStage(options, StageNames.Asr, modelPreferences, progress),
-            cancellationToken).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(asrState, StageNames.Asr, stageWorkStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunDiarizationStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        TranscriptProjectState diarizationOpen = await workspace.Project
-            .OpenAsync(cancellationToken).ConfigureAwait(false);
-        if (diarizationOpen.CurrentTranscriptRevision is not null &&
-            diarizationOpen.TranscriptSegments.Count > 0)
-        {
-            // Interactive re-run: re-diarize and re-assign speaker ids on the
-            // existing transcript segments, matching the desktop host's
-            // "Identify speakers" semantics.
-            DateTimeOffset rediarizeStartedUtc = DateTimeOffset.UtcNow;
-            TranscriptProjectState rediarized = await workspace.RerunDiarizationAsync(
-                RuntimeModelSetupCoordinator.CreateRerunDiarizationRequest(runtimeSelections),
-                cancellationToken).ConfigureAwait(false);
-            return BuildStageWorkflowResultFromStageRun(rediarized, StageNames.Diarization, rediarizeStartedUtc);
-        }
-
-        if (!options.EnableSpeakerDiarization)
-        {
-            // The single-stage diarization path records no run when the option is off
-            // (the generation stage only builds a default region plan, which is then
-            // discarded). Report the skip explicitly instead of running work whose
-            // outcome cannot be observed.
-            return new StageWorkflowResult(
-                [],
-                ["Speaker diarization is disabled for this run."],
-                StageStatus.Skipped,
-                StageSkipReasonCodes.DisabledByOption);
-        }
-
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState diarizationState = await workspace.RunTranscriptStageAsync(
-            StageNames.Diarization,
-            TranscriptRunOptions.ForDubbingStage(options, StageNames.Diarization, modelPreferences, progress),
-            cancellationToken).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(diarizationState, StageNames.Diarization, stageWorkStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunAudioPreparationStageAsync(
-        TranscriptWorkspace workspace,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState audioPrepState = await workspace
-            .RunSpeechAudioPreparationAsync(cancellationToken, progress)
-            .ConfigureAwait(false);
-        // A failed speech-enhancement pass inside preparation degrades the cleanup
-        // stage even when preparation itself completes on the unenhanced audio.
-        return BuildStageWorkflowResultFromStageRun(
-            audioPrepState,
-            StageNames.AudioPreparation,
-            stageWorkStartedUtc,
-            ExtractSpeechEnhancementDegradations(audioPrepState, stageWorkStartedUtc));
-    }
-
-    private static async Task<StageWorkflowResult> RunTextRefinementStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState refinementState = await workspace.RunTranscriptStageAsync(
-            StageNames.TextRefinementAsr,
-            TranscriptRunOptions.ForDubbingStage(options, StageNames.TextRefinementAsr, modelPreferences, progress),
-            cancellationToken).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(refinementState, StageNames.TextRefinementAsr, stageWorkStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunOverlapRescueStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        InferenceModelPreferences modelPreferences,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
-    {
-        TranscriptProjectState preRescueState = await workspace.Project
-            .OpenAsync(cancellationToken).ConfigureAwait(false);
-        StageRunRecord? diarizationRun = GetLatestStageRun(preRescueState, StageNames.Diarization);
-        if (diarizationRun is null ||
-            diarizationRun.Status is not (StageRunStatus.Completed
-                or StageRunStatus.PartiallyCompleted
-                or StageRunStatus.Skipped))
-        {
-            return new StageWorkflowResult(
-                [],
-                ["Overlap rescue requires a completed diarization run first."],
-                StageStatus.Skipped,
-                StageSkipReasonCodes.PrerequisiteFailed);
-        }
-
-        var rescueProgress = new Progress<OverlapRescueProgress>(update =>
-            ReportProgress(
-                progress,
-                StageNames.OverlapRescue,
-                PipelineProgressEventKind.Progress,
-                update.IsPersistingArtifacts
-                    ? "Overlap rescue: saving source candidates."
-                    : string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Overlap rescue region {0}/{1}",
-                        update.CompletedRegions,
-                        update.TotalRegions)));
-
-        DateTimeOffset rescueStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState rescueState = await workspace.RunOverlapRescueAsync(
-            cancellationToken,
-            rescueProgress,
-            preferredModelAlias: runtimeSelections.OverlapRescueModelAlias,
-            modelPreferences: modelPreferences,
-            retranscribeCandidates: options.RetranscribeOverlapCandidates).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(rescueState, StageNames.OverlapRescue, rescueStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunTranslationStageAsync(
-        TranscriptWorkspace workspace,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken,
-        ITranslatedSegmentObserver? segmentObserver = null)
-    {
-        TranscriptProjectState translationState = await workspace.Project.OpenAsync(cancellationToken).ConfigureAwait(false);
-        if (translationState.TranscriptSegments.Count == 0)
-        {
-            return BuildNoTranscriptSegmentsSkip(StageNames.Translation);
-        }
-
-        string sourceLanguage = options.SourceLanguageCode ?? "auto";
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        RuntimeExecutionProviderSelection translationExecutionProvider =
-            RuntimeModelSetupCoordinator.CreateExecutionProviderSelection(
-                runtimeSelections,
-                RuntimeStage.Translation);
-        TranscriptProjectState translatedState = await workspace.GenerateTranslationAsync(
-            new GenerateTranslationRequest(
-                SourceLanguage: sourceLanguage,
-                TargetLanguage: options.TargetLanguageCode,
-                PreferredModelAlias: runtimeSelections.GetSelectionIntent(RuntimeStage.Translation) == RuntimeModelSelectionIntent.Automatic
-                    ? null
-                    : runtimeSelections.TranslationModelAlias,
-                PreferredExecutionProvider: translationExecutionProvider.PreferredExecutionProvider,
-                RequirePreferredExecutionProvider: translationExecutionProvider.RequirePreferredExecutionProvider,
-                PreferredModelVariantAlias: RuntimeModelSetupCoordinator.ResolvePreferredModelVariantAlias(
-                    runtimeSelections,
-                    RuntimeStage.Translation),
-                EnableSegmentStreaming: options.EnableTranslationSegmentStreaming, Scope: options.TranslationScope),
-            cancellationToken,
-            progress,
-            segmentObserver).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(translatedState, StageNames.Translation, stageWorkStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunTtsStageAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken,
-        TtsStreamingPrefetch? ttsPrefetch = null)
-    {
-        TranscriptWorkspace workspace = session.Workspace;
-        TranscriptProjectState ttsState = await workspace.Project.OpenAsync(cancellationToken).ConfigureAwait(false);
-        if (ttsState.TranscriptSegments.Count == 0)
-        {
-            return BuildNoTranscriptSegmentsSkip(StageNames.Tts);
-        }
-
-        if (UnattendedVoiceSelection.RequestsVoiceCloning(options))
-        {
-            TryResolveService<IConsentService>(session)?.GrantVoiceCloningConsent();
-            ReportProgress(
-                progress,
-                StageNames.Tts,
-                PipelineProgressEventKind.Progress,
-                options.VoiceAssignmentOverrides is { Count: > 0 }
-                    ? "Cloning speakers without a voice override from source audio."
-                    : "Cloning each speaker from source audio.");
-        }
-
-        GenerateTtsForAllSpeakersRequest ttsRequest = BuildPipelineTtsRequest(ttsState, options, runtimeSelections);
-        if (ttsRequest.VoiceIdsBySpeakerId is { Count: > 0 })
-        {
-            ReportProgress(
-                progress,
-                StageNames.Tts,
-                PipelineProgressEventKind.Progress,
-                $"Applying voice override to {ttsRequest.VoiceIdsBySpeakerId.Count} speaker(s).");
-        }
-
-        if (ttsRequest.FallbackVoiceIdsBySpeakerId is { Count: > 0 })
-        {
-            ReportProgress(
-                progress,
-                StageNames.Tts,
-                PipelineProgressEventKind.Progress,
-                $"Auto-assigning a fallback voice to {ttsRequest.FallbackVoiceIdsBySpeakerId.Count} speaker(s) without a voice assignment (unattended run).");
-        }
-
-        DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState ttsResult = await workspace.GenerateTtsForAllSpeakersAsync(
-            ttsRequest,
-            cancellationToken,
-            progress,
-            ttsPrefetch).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(ttsResult, StageNames.Tts, stageWorkStartedUtc);
-    }
-
-    private static GenerateTtsForAllSpeakersRequest BuildPipelineTtsRequest(
-        TranscriptProjectState state,
-        DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections)
-    {
-        RuntimeExecutionProviderSelection ttsExecutionProvider =
-            RuntimeModelSetupCoordinator.CreateExecutionProviderSelection(
-                runtimeSelections,
-                RuntimeStage.Tts);
-        return UnattendedVoiceSelection.BuildUnattendedTtsRequest(
-            state,
-            options,
-            runtimeSelections.TtsModelAlias) with
-        {
-            PreferredExecutionProvider = ttsExecutionProvider.PreferredExecutionProvider,
-            RequirePreferredExecutionProvider = ttsExecutionProvider.RequirePreferredExecutionProvider,
-            PreferredModelVariantAlias = RuntimeModelSetupCoordinator.ResolvePreferredModelVariantAlias(
-                runtimeSelections,
-                RuntimeStage.Tts),
+            StageName = step.StageName,
+            Status = workflowResult.Status,
+            StartTime = stageStart,
+            EndTime = stageEnd,
+            ArtifactPaths = workflowResult.ArtifactPaths,
+            DegradationRecords = workflowResult.DegradationRecords,
+            ReasonCode = workflowResult.ReasonCode,
         };
     }
 
-    private static async Task<StageWorkflowResult> RunExportStageAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        IProgress<PipelineProgressEvent>? progress,
-        CancellationToken cancellationToken)
+    private static StageOutcome BuildCancelledStageOutcome(
+        StageStep step,
+        StageRunTelemetry telemetry,
+        DateTimeOffset stageStart,
+        string message) =>
+        BuildFailedStageOutcome(step, telemetry, stageStart, new StageFailureDetail(message, "CANCELLED", null));
+
+    private static StageOutcome BuildFailedStageOutcome(
+        StageStep step,
+        StageRunTelemetry telemetry,
+        DateTimeOffset stageStart,
+        StageFailureDetail failure)
     {
-        TranscriptWorkspace workspace = session.Workspace;
-        TranscriptProjectState state = await workspace.Project.OpenAsync(cancellationToken).ConfigureAwait(false);
-        bool hasTranscriptSegments = state.TranscriptSegments.Count > 0;
-        ExportOutputContainer container = ResolveExportContainer(options.ExportFormat);
-        string outputPath = !string.IsNullOrWhiteSpace(options.ExportOutputPath)
-            ? options.ExportOutputPath
-            : ResolveExportOutputPath(session.ProjectRootPath, container);
-        if (!hasTranscriptSegments)
+        DateTimeOffset stageEnd = DateTimeOffset.UtcNow;
+        ReportProgress(
+            telemetry.Progress,
+            new StageProgressEvent(step.StageName, PipelineProgressEventKind.Failed, failure.Message, stageEnd - stageStart));
+
+        return new StageOutcome
         {
-            ReportProgress(
-                progress,
-                StageNames.Export,
-                PipelineProgressEventKind.Progress,
-                "No transcript segments were detected; exporting source media without subtitles or dubbed speech.");
-        }
-
-        ExportStageResult exportResult = await workspace.ExportAsync(
-            state,
-            new ExportStageRequest(
-                ProjectId: state.ProjectState.Project.Id,
-                OutputPath: outputPath,
-                SubtitleFormats: ResolveSubtitleFormats(options.SubtitleFormats, hasTranscriptSegments),
-                SubtitleSource: ResolveSubtitleSource(options.SubtitleSource),
-                BurnInSubtitles: options.BurnInSubtitles,
-                TargetLufs: options.ExportTargetLufs ?? ExportLoudnessTargets.OnlineLufs,
-                Container: container,
-                SourceGainDb: options.ExportSourceGainDb ?? 0d,
-                DubbedSpeechGainDb: options.ExportDubbedSpeechGainDb ?? 0d,
-                DuckingGainDb: options.ExportDuckingGainDb,
-                ApplyTimbrePolish: options.ApplyTimbrePolish,
-                RestoreOriginalPan: options.RestoreOriginalPan,
-                MatchOriginalLoudness: options.MatchOriginalLoudness,
-                VideoEncoder: options.VideoEncoder,
-                // Carry the raw requested formats (including the null/empty distinction)
-                // so the export-resume gate persists and compares the same token the
-                // snapshot records, instead of the transcript-state-resolved formats.
-
-                RawSubtitleFormats: options.SubtitleFormats),
-            cancellationToken).ConfigureAwait(false);
-        if (exportResult.IsBlocked)
-        {
-            throw new InvalidOperationException(exportResult.BlockedReason ?? "Export blocked by tier gate.");
-        }
-
-        (StageStatus exportStatus, string? exportReasonCode, IReadOnlyList<string>? exportDegradations) =
-            MapStageRunToSdkOutcome(exportResult.StageRun);
-        IReadOnlyList<string>? degradations = exportResult.Warnings is { Count: > 0 } warnings
-            ? (exportDegradations is { Count: > 0 } existing ? warnings.Concat(existing).ToArray() : warnings)
-            : exportDegradations;
-
-        return new StageWorkflowResult(
-            [exportResult.OutputPath, exportResult.ExportVideoRelativePath],
-            degradations,
-            exportStatus,
-            exportReasonCode);
-    }
-
-    private static async Task<StageWorkflowResult> RunLipSyncStageAsync(
-        TranscriptWorkspace workspace,
-        RuntimeModelSelections runtimeSelections,
-        CancellationToken cancellationToken)
-    {
-        if (workspace.LipSync is null)
-        {
-            throw new InvalidOperationException(
-                "Lip-sync workflow is not available in this session. Ensure CompositionRoot registered LipSyncWorkflow.");
-        }
-
-        DateTimeOffset lipSyncStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState lipSyncState = await workspace.RunLipSyncAsync(
-            new LipSyncAlignAllRequest(
-                PreferredModelAlias: runtimeSelections.LipSyncModelAlias),
-            cancellationToken).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(lipSyncState, StageNames.LipSync, lipSyncStartedUtc);
-    }
-
-    private static async Task<StageWorkflowResult> RunLipSynthesisStageAsync(
-        IDubbingSession session,
-        RuntimeModelSelections runtimeSelections,
-        CancellationToken cancellationToken)
-    {
-        TranscriptWorkspace workspace = session.Workspace;
-        if (workspace.LipSynthesis is null)
-        {
-            throw new InvalidOperationException(
-                "Lip-synthesis workflow is not available in this session. Ensure CompositionRoot registered LipSynthesisWorkflow.");
-        }
-
-        (bool isLicenseApproved, bool allowExperimentalExecution) =
-            await ResolveLipSynthesisExecutionGatesAsync(
-                session,
-                runtimeSelections.LipSynthesisModelAlias,
-                cancellationToken).ConfigureAwait(false);
-
-        DateTimeOffset lipSynthesisStartedUtc = DateTimeOffset.UtcNow;
-        TranscriptProjectState lipSynthesisState = await workspace.RunLipSynthesisAsync(
-            new LipSynthesisRunRequest(
-                IsLicenseApproved: isLicenseApproved,
-                AllowExperimentalExecution: allowExperimentalExecution,
-                PreferredModelAlias: runtimeSelections.LipSynthesisModelAlias),
-            cancellationToken).ConfigureAwait(false);
-        return BuildStageWorkflowResultFromStageRun(lipSynthesisState, StageNames.LipSynthesis, lipSynthesisStartedUtc);
-    }
-
-    private static StageWorkflowResult BuildStageWorkflowResultFromStageRun(
-        TranscriptProjectState state,
-        string stageName,
-        DateTimeOffset notBeforeUtc,
-        IReadOnlyList<string>? additionalDegradations = null)
-    {
-        (StageStatus status, string? reasonCode, IReadOnlyList<string>? degradations) =
-            MapStageRunToSdkOutcome(GetLatestStageRun(state, stageName, notBeforeUtc));
-
-        if (additionalDegradations is { Count: > 0 })
-        {
-            degradations = degradations is { Count: > 0 }
-                ? additionalDegradations.Concat(degradations).ToArray()
-                : additionalDegradations;
-            // Degraded output from a nominally successful run is a partial success,
-            // not a clean one.
-            if (status == StageStatus.Succeeded)
-            {
-                status = StageStatus.PartiallySucceeded;
-            }
-        }
-
-        return new StageWorkflowResult([], degradations, status, reasonCode);
-    }
-
-    private static StageWorkflowResult BuildNoTranscriptSegmentsSkip(string stageName) =>
-        new(
-            [],
-            ["No transcript segments were detected; this stage has no work to perform."],
-            StageStatus.Skipped,
-            StageSkipReasonCodes.NoTranscriptSegments);
-
-    /// <summary>
-    /// Returns the most recent run for a stage. When <paramref name="notBeforeUtc"/> is
-    /// supplied, only runs started at or after that instant qualify — used to bind a
-    /// stage outcome to the run produced by the current invocation instead of
-    /// reporting a stale row left by an earlier run.
-    /// </summary>
-    internal static StageRunRecord? GetLatestStageRun(
-        TranscriptProjectState state,
-        string stageName,
-        DateTimeOffset? notBeforeUtc = null) =>
-        state.StageRuns
-            .Where(r => string.Equals(r.StageName, stageName, StringComparison.OrdinalIgnoreCase)
-                && (notBeforeUtc is null || r.StartedAtUtc >= notBeforeUtc))
-            .OrderByDescending(static r => r.StartedAtUtc)
-            .FirstOrDefault();
-
-    internal static (StageStatus Status, string? ReasonCode, IReadOnlyList<string>? Degradations)
-        MapStageRunToSdkOutcome(StageRunRecord? stageRun) =>
-        stageRun?.Status switch
-        {
-            StageRunStatus.Completed =>
-                (StageStatus.Succeeded, null, null),
-            StageRunStatus.Skipped =>
-                (StageStatus.Skipped,
-                    stageRun.FailureReason ?? "STAGE_SKIPPED",
-                    null),
-            StageRunStatus.Failed =>
-                (StageStatus.Failed,
-                    stageRun.FailureReason ?? "STAGE_FAILED",
-                    null),
-            StageRunStatus.PartiallyCompleted =>
-                (StageStatus.PartiallySucceeded,
-                    null,
-                    stageRun.FailureReason is not null ? [stageRun.FailureReason] : null),
-            StageRunStatus.Canceled =>
-                (StageStatus.Failed,
-                    stageRun.FailureReason ?? "CANCELLED",
-                    null),
-            StageRunStatus.Running =>
-                (StageStatus.Failed,
-                    "STAGE_INCOMPLETE",
-                    ["Stage run did not reach a terminal state."]),
-            null =>
-                (StageStatus.Failed,
-                    "STAGE_RUN_MISSING",
-                    ["Stage completed without recording a stage run."]),
-            _ =>
-                (StageStatus.Failed,
-                    stageRun.FailureReason ?? "STAGE_FAILED",
-                    null),
+            StageName = step.StageName,
+            Status = StageStatus.Failed,
+            StartTime = stageStart,
+            EndTime = stageEnd,
+            ArtifactPaths = [],
+            ReasonCode = failure.ReasonCode,
+            DegradationRecords = failure.DegradationRecords,
         };
-
-    // Speech-enhancement runs as an internal sub-step of RunStemSeparationAsync and is caught
-    // there (fallback to unenhanced audio). Surface the failure so callers can include it in
-    // StageOutcome.DegradationRecords and progress events rather than silently discarding it.
-    internal static IReadOnlyList<string>? ExtractSpeechEnhancementDegradations(
-        TranscriptProjectState state,
-        DateTimeOffset? notBeforeUtc = null)
-    {
-        // Order first so we evaluate the *most recent* speech-enhancement attempt.
-        // Filtering to Failed before ordering would surface stale failures even when
-        // a later run succeeded, producing a false degraded outcome after a successful rerun.
-        StageRunRecord? latestRun = state.StageRuns
-            .Where(r =>
-                string.Equals(r.StageName, StageNames.SpeechEnhancement, StringComparison.OrdinalIgnoreCase)
-                && (notBeforeUtc is null || r.StartedAtUtc >= notBeforeUtc))
-            .OrderByDescending(static r => r.StartedAtUtc)
-            .FirstOrDefault();
-
-        if (latestRun is null || latestRun.Status != StageRunStatus.Failed)
-        {
-            return null;
-        }
-
-        string message = string.IsNullOrWhiteSpace(latestRun.FailureReason)
-            ? "speech-enhancement failed; falling back to unenhanced audio"
-            : $"speech-enhancement failed (falling back to unenhanced audio): {latestRun.FailureReason}";
-
-        return [message];
     }
+
+    /// <summary>Failure detail carried into a failed or cancelled stage outcome.</summary>
+    private sealed record StageFailureDetail(
+        string Message,
+        string ReasonCode,
+        IReadOnlyList<string>? DegradationRecords);
 
     private static async Task<RuntimeModelSelections> CreateRuntimeSelectionsAsync(
         IDubbingSession session,
@@ -1622,303 +1055,6 @@ public sealed partial class DubbingPipelineEngine(
             ? ArtifactKind.Ambiance
             : ArtifactKind.NormalizedAudio;
 
-    internal static ExportOutputContainer ResolveExportContainer(string? exportFormat) =>
-        ExportStageRequestBuilder.ResolveContainer(exportFormat);
-
-    internal static string ResolveExportOutputPath(string projectRootPath, ExportOutputContainer container)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
-        string extension = container == ExportOutputContainer.Mkv ? ".mkv" : ".mp4";
-        return Path.Join(projectRootPath, "exports", "dubbed" + extension);
-    }
-
-    private static IReadOnlyList<ExportSubtitleFormat> ResolveSubtitleFormats(
-        IReadOnlyList<string>? formats, bool hasTranscriptSegments)
-    {
-        if (formats is null)
-            return hasTranscriptSegments ? [ExportSubtitleFormat.Srt] : [];
-        var result = new List<ExportSubtitleFormat>(formats.Count);
-        foreach (string? f in formats)
-        {
-            if (string.IsNullOrWhiteSpace(f))
-            {
-                continue;
-            }
-
-            if (f.Equals("srt", StringComparison.OrdinalIgnoreCase)) result.Add(ExportSubtitleFormat.Srt);
-            else if (f.Equals("vtt", StringComparison.OrdinalIgnoreCase)) result.Add(ExportSubtitleFormat.Vtt);
-            else if (f.Equals("ass", StringComparison.OrdinalIgnoreCase)) result.Add(ExportSubtitleFormat.Ass);
-        }
-        return result;
-    }
-
-    internal static ExportSubtitleSource ResolveSubtitleSource(string? source) =>
-        source?.Trim().ToLowerInvariant() switch
-        {
-            "transcript" => ExportSubtitleSource.Transcript,
-            "bilingual" => ExportSubtitleSource.Bilingual,
-            _ => ExportSubtitleSource.Translated,
-        };
-
-    /// <summary>
-    /// Determines the ordered list of stages to execute, respecting an optional filter.
-    /// Unfiltered runs use the speech/export default order. Filtered runs resolve against
-    /// the extended stage order so lip-sync / lip-synthesis can be opted in.
-    /// </summary>
-    internal static string[] ResolveStageOrder(IReadOnlyList<string>? stageFilter)
-    {
-        if (stageFilter is null || stageFilter.Count == 0)
-        {
-            return [.. DubbingPipelineStages.DefaultStageOrder];
-        }
-
-        HashSet<string> filterSet = new(stageFilter, StringComparer.OrdinalIgnoreCase);
-        return DubbingPipelineStages.ExtendedStageOrder.Where(s => filterSet.Contains(s)).ToArray();
-    }
-
-    /// <summary>
-    /// Checks whether a stage has valid existing artifacts from a prior run
-    /// that match the current execution snapshot.
-    /// </summary>
-    private static async Task<bool> HasValidExistingArtifactsAsync(
-        IDubbingSession session,
-        DubbingSessionOptions options,
-        string stageName,
-        Dictionary<string, string> currentSnapshot,
-        CancellationToken cancellationToken)
-    {
-        IArtifactStore? artifactStore = session.Services.GetService<IArtifactStore>();
-        if (artifactStore is null)
-        {
-            return false;
-        }
-
-        TranscriptProjectState state;
-        try
-        {
-            state = await session.Workspace.Project.OpenAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (System.Security.SecurityException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch (Exception ex) when (
-            string.Equals(ex.GetType().FullName, "Microsoft.Data.Sqlite.SqliteException", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        // The resume check must look at the path the next run would actually write to:
-        // an explicit ExportOutputPath takes precedence over the project-default exports/
-        // location, and only that effective path proves the prior export is still usable.
-        // Path.GetFullPath mirrors ExportStageHandler's normalization (relative explicit
-        // paths resolve against the current directory, same as at execution time).
-        string? exportPath = null;
-        if (string.Equals(stageName, StageNames.Export, StringComparison.OrdinalIgnoreCase))
-        {
-            string effectiveOutputPath = string.IsNullOrWhiteSpace(options.ExportOutputPath)
-                ? ResolveExportOutputPath(
-                    session.ProjectRootPath,
-                    ResolveExportContainer(options.ExportFormat))
-                : options.ExportOutputPath;
-            try
-            {
-                exportPath = Path.GetFullPath(effectiveOutputPath);
-            }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-            {
-                exportPath = effectiveOutputPath;
-            }
-        }
-
-        return await StageArtifactResumeEvaluator.CanResumeStageAsync(
-            state,
-            artifactStore,
-            stageName,
-            currentSnapshot,
-            session.ProjectRootPath,
-            options.TargetLanguageCode,
-            exportPath,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Skip reason codes that represent intentional resume/prerequisite gating rather than
-    /// a failed attempt to run a requested stage.
-    /// </summary>
-    internal static bool IsBenignSkipReasonCode(string? reasonCode) =>
-        StageSkipReasonCodes.IsBenignSkip(reasonCode);
-
-    internal static bool ShouldRunPostLipSynthesisExport(
-        IReadOnlyList<string> stagesToRun,
-        IReadOnlyList<StageOutcome> outcomes)
-    {
-        if (!stagesToRun.Any(static stage =>
-                string.Equals(stage, StageNames.LipSynthesis, StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        StageOutcome? lipSynthesisOutcome = outcomes.LastOrDefault(static outcome =>
-            string.Equals(outcome.StageName, StageNames.LipSynthesis, StringComparison.OrdinalIgnoreCase));
-
-        return lipSynthesisOutcome?.Status
-            is StageStatus.Succeeded or StageStatus.PartiallySucceeded;
-    }
-
-    private static async Task<(bool IsLicenseApproved, bool AllowExperimentalExecution)>
-        ResolveLipSynthesisExecutionGatesAsync(
-            IDubbingSession session,
-            string? preferredModelAlias,
-            CancellationToken cancellationToken)
-    {
-        IModelInventoryService? inventoryService = TryResolveService<IModelInventoryService>(session);
-        if (inventoryService is null)
-        {
-            return (false, false);
-        }
-
-        IReadOnlyList<ModelInventoryEntry> inventory =
-            await inventoryService.GetAllAsync(cancellationToken).ConfigureAwait(false);
-        ModelInventoryEntry? entry =
-            LipSynthesisInventoryGate.ResolveEntry(inventory, preferredModelAlias);
-
-        return (
-            LipSynthesisInventoryGate.IsLicenseApproved(entry),
-            LipSynthesisInventoryGate.AllowExperimentalExecution(entry));
-    }
-
-    /// <summary>
-    /// Determines the overall run status from individual stage outcomes.
-    /// </summary>
-    internal static DubbingRunStatus DetermineOverallStatus(List<StageOutcome> outcomes)
-    {
-        if (outcomes.Count == 0)
-        {
-            return DubbingRunStatus.Succeeded;
-        }
-
-        // A failed (or non-benignly skipped, e.g. warmup-failed) prerequisite stage
-        // blocks every subsequent stage in the runner, so no
-        // deliverable can exist. Report Failed even when earlier stages succeeded:
-        // PartialSuccess would let callers count a deliverable-free run as success (#327).
-        bool prerequisiteFailed = outcomes.Any(static o => IsBlockingPrerequisiteOutcome(o));
-        if (prerequisiteFailed)
-        {
-            return DubbingRunStatus.Failed;
-        }
-
-        bool anyFailed = outcomes.Any(o => o.Status == StageStatus.Failed);
-        bool anySucceededOrPartial = outcomes.Any(o =>
-            o.Status is StageStatus.Succeeded or StageStatus.PartiallySucceeded);
-        bool allFullySucceeded = outcomes.All(o => o.Status == StageStatus.Succeeded);
-
-        if (allFullySucceeded)
-        {
-            return DubbingRunStatus.Succeeded;
-        }
-
-        if (anyFailed && anySucceededOrPartial)
-        {
-            return DubbingRunStatus.PartialSuccess;
-        }
-
-        if (anyFailed)
-        {
-            return DubbingRunStatus.Failed;
-        }
-
-        bool anyNonBenignSkip = outcomes.Any(static o =>
-            o.Status == StageStatus.Skipped
-            && !IsBenignSkipReasonCode(o.ReasonCode));
-
-        if (anyNonBenignSkip)
-        {
-            return anySucceededOrPartial ? DubbingRunStatus.PartialSuccess : DubbingRunStatus.Failed;
-        }
-
-        // A stage that completed with degraded output makes the run a partial success:
-        // the artifacts exist, but the result is not what a clean run would produce.
-        bool anyPartial = outcomes.Any(o => o.Status == StageStatus.PartiallySucceeded);
-        if (anyPartial)
-        {
-            return DubbingRunStatus.PartialSuccess;
-        }
-
-        return DubbingRunStatus.Succeeded;
-    }
-
-    /// <summary>
-    /// Reports a progress event to the optional progress reporter.
-    /// </summary>
-    private static void ReportProgress(
-        IProgress<PipelineProgressEvent>? progress,
-        string stageName,
-        PipelineProgressEventKind eventKind,
-        string? message,
-        TimeSpan elapsed = default)
-    {
-        progress?.Report(new PipelineProgressEvent(
-            StageName: stageName,
-            EventKind: eventKind,
-            Percentage: eventKind == PipelineProgressEventKind.Completed ? 100 : 0,
-            Message: message,
-            ElapsedDuration: elapsed));
-    }
-
-    /// <summary>
-    /// Builds a <see cref="StageOutcome"/> for a skipped stage.
-    /// </summary>
-    private static StageOutcome BuildSkippedOutcome(string stageName, string reasonCode)
-    {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        return new StageOutcome
-        {
-            StageName = stageName,
-            Status = StageStatus.Skipped,
-            StartTime = now,
-            EndTime = now,
-            ArtifactPaths = [],
-            ReasonCode = reasonCode,
-        };
-    }
-
-    /// <summary>
-    /// Builds a terminal <see cref="DubbingRunResult"/> for validation or pre-flight failures.
-    /// </summary>
-    private static DubbingRunResult BuildErrorResult(
-        Guid runId,
-        DateTimeOffset runStart,
-        List<StageOutcome> stageOutcomes,
-        DubbingRunStatus status,
-        IReadOnlyList<string>? preFlightFailures = null,
-        IReadOnlyDictionary<string, string>? executionSnapshot = null)
-    {
-        return new DubbingRunResult
-        {
-            RunId = runId,
-            CorrelationId = runId,
-            StartTime = runStart,
-            EndTime = DateTimeOffset.UtcNow,
-            OverallStatus = status,
-            StageOutcomes = stageOutcomes.AsReadOnly(),
-            PreFlightFailures = preFlightFailures,
-            ExecutionSnapshot = executionSnapshot,
-        };
-    }
-
     /// <summary>
     /// Best-effort transient-fault publisher used by <see cref="ExecuteStageAsync"/>'s
     /// transient-exception arm. Wrapped in try/catch so telemetry can never break
@@ -1926,32 +1062,31 @@ public sealed partial class DubbingPipelineEngine(
     /// but skips stage-run persistence since the engine layer does not own that
     /// lifecycle. See <c>docs/internal/pipeline-readiness-spec.md</c> section 4.4.
     /// </summary>
-    private void PublishEngineTransient(
-        Guid projectId,
-        string stageName,
-        TransientFailureKind kind,
-        Exception ex,
-        DateTimeOffset stageStart,
-        int attemptNumber = 1,
-        Guid runId = default)
+    private void PublishEngineTransient(EngineTransientFault fault)
     {
         try
         {
             var context = new Dictionary<string, string>
             {
                 ["Engine"] = "DubbingPipelineEngine",
-                ["StageStart"] = stageStart.ToString("O"),
+                ["StageStart"] = fault.StageStart.ToString("O"),
             };
-            if (runId != Guid.Empty)
+            if (fault.RunId != Guid.Empty)
             {
-                context["RunId"] = runId.ToString("N");
+                context["RunId"] = fault.RunId.ToString("N");
             }
-            if (ex.GetType().FullName is { Length: > 0 } typeName)
+            if (fault.Exception.GetType().FullName is { Length: > 0 } typeName)
             {
                 context["ExceptionType"] = typeName;
             }
             _transientFaultBus.Publish(new PipelineTransientFault(
-                projectId, stageName, kind, ex.Message, DateTimeOffset.UtcNow, attemptNumber, context));
+                fault.ProjectId,
+                fault.StageName,
+                fault.Kind,
+                fault.Exception.Message,
+                DateTimeOffset.UtcNow,
+                fault.AttemptNumber,
+                context));
         }
         catch
         {

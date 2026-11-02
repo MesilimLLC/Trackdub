@@ -179,10 +179,8 @@ public sealed partial class DubbingPipelineEngine
 
             bool hasValidArtifacts = !run.Options.ForceRerun &&
                 await HasValidExistingArtifactsAsync(
-                    run.Session,
-                    run.Options,
+                    new ArtifactResumeContext(run.Session, run.Options, run.ExecutionSnapshot),
                     step.StageName,
-                    run.ExecutionSnapshot,
                     step.CancellationToken).ConfigureAwait(false);
             return hasValidArtifacts
                 ? Skip(step.StageName, StageSkipReasonCodes.ExistingArtifactsValid, "Skipped — valid artifacts from prior run")
@@ -194,15 +192,9 @@ public sealed partial class DubbingPipelineEngine
             await StartTtsPrefetchIfOverlappingAsync(step).ConfigureAwait(false);
 
             StageOutcome outcome = await engine.ExecuteStageAsync(
-                run.Session,
-                run.Options,
-                step.StageName,
-                run.ExecutionSnapshot,
-                run.RuntimeSelections,
-                telemetry.Progress,
-                telemetry.ProjectId,
-                telemetry.RunId,
-                step.CancellationToken,
+                run,
+                telemetry,
+                step,
                 _ttsPrefetch).ConfigureAwait(false);
 
             if (IsTtsPrefetchSpent(step, outcome))
@@ -233,7 +225,9 @@ public sealed partial class DubbingPipelineEngine
 
         private StageOutcome Skip(string stageName, string reasonCode, string message)
         {
-            ReportProgress(telemetry.Progress, stageName, PipelineProgressEventKind.Skipped, message);
+            ReportProgress(
+                telemetry.Progress,
+                new StageProgressEvent(stageName, PipelineProgressEventKind.Skipped, message));
             return BuildSkippedOutcome(stageName, reasonCode);
         }
 
@@ -294,10 +288,14 @@ public sealed partial class DubbingPipelineEngine
             StageOutcome? warmupSkip = BuildWarmupSkipOutcomeIfFailed(step.StageName, warmupResult);
             if (warmupSkip is not null)
             {
-                ReportProgress(progress, step.StageName, PipelineProgressEventKind.Skipped,
-                    warmupResult?.Detail is { } detail
-                        ? $"Skipped — stage warmup failed: {detail}"
-                        : "Skipped — stage warmup failed");
+                ReportProgress(
+                    progress,
+                    new StageProgressEvent(
+                        step.StageName,
+                        PipelineProgressEventKind.Skipped,
+                        warmupResult?.Detail is { } detail
+                            ? $"Skipped — stage warmup failed: {detail}"
+                            : "Skipped — stage warmup failed"));
             }
 
             return warmupSkip;

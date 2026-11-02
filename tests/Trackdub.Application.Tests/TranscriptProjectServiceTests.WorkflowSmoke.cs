@@ -166,14 +166,13 @@ public partial class TranscriptProjectServiceTests
         var selections = new RuntimeModelSelections(
             AsrModelOverride.Auto, IsDevBuild: false, new Dictionary<string, ExecutionProviderKind>());
 
-        DubbingPipelineEngine.StageWorkflowResult translation = await DubbingPipelineEngine.RunStageWorkflowAsync(
-            session, options, StageNames.Translation, selections, progress: null, token);
+        var context = new DubbingPipelineEngine.StageExecutionContext { Session = session, Options = options, RuntimeSelections = selections };
+        DubbingPipelineEngine.StageWorkflowResult translation = await DubbingPipelineEngine.RunStageWorkflowAsync(context, StageNames.Translation, token);
         Assert.Equal(StageStatus.Succeeded, translation.Status);
         Assert.NotNull(await scope.TranslationRepository.GetCurrentRevisionAsync(
             (await scope.Workspace.Project.OpenAsync(token)).ProjectState.Project.Id, "fr", token));
 
-        DubbingPipelineEngine.StageWorkflowResult tts = await DubbingPipelineEngine.RunStageWorkflowAsync(
-            session, options, StageNames.Tts, selections, progress: null, token);
+        DubbingPipelineEngine.StageWorkflowResult tts = await DubbingPipelineEngine.RunStageWorkflowAsync(context, StageNames.Tts, token);
         Assert.Equal(StageStatus.Succeeded, tts.Status);
         TranslationRevision? frenchRevision = await scope.TranslationRepository.GetCurrentRevisionAsync(
             (await scope.Workspace.Project.OpenAsync(token)).ProjectState.Project.Id, "fr", token);
@@ -195,8 +194,7 @@ public partial class TranscriptProjectServiceTests
 
         TranscriptProjectState synthesized = await AssertLipSynthesisUsesCurrentMixPlanDriverAsync(scope, token);
 
-        DubbingPipelineEngine.StageWorkflowResult export = await DubbingPipelineEngine.RunStageWorkflowAsync(
-            session, options, StageNames.Export, selections, progress: null, token);
+        DubbingPipelineEngine.StageWorkflowResult export = await DubbingPipelineEngine.RunStageWorkflowAsync(context, StageNames.Export, token);
         Assert.Equal(StageStatus.Succeeded, export.Status);
         Assert.True(File.Exists(options.ExportOutputPath));
         // Drop all in-memory JSON so reopen rehydrates the manifest from disk,
