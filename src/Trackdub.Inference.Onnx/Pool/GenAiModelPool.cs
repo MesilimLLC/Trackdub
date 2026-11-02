@@ -638,7 +638,9 @@ internal sealed class GenAiModelPool : IDisposable
             // Admission-side eviction for this resource. It must never wait on
             // creationLock — external admission may invoke it while a creation holds
             // that lock — so it uses the entry gate and an exact dictionary remove.
-            if (!reservation.TrySetIdleEvictionCallback(() => TryEvictIdleEntry(key, entry)))
+            if (!await reservation.TrySetIdleEvictionCallbackAsync(
+                    () => TryEvictIdleEntry(key, entry),
+                    cancellationToken).ConfigureAwait(false))
             {
                 if (entries.TryRemove(new KeyValuePair<GenAiModelKey, Entry>(key, entry)))
                 {

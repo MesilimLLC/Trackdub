@@ -222,7 +222,9 @@ internal sealed partial class InferenceSessionPool
         }
     }
     /// <summary>
-    /// Evicts the least-recently-released idle entry.
+    /// Evicts the least-recently-released idle entry, optionally restricted to one admission
+    /// bucket (so a host RAM shortfall is not “fixed” by dropping GPU sessions, and a
+    /// shortfall on accelerator device 0 is not “fixed” by dropping device 1 sessions).
     /// Must be called while <see cref="creationLock"/> is held.
     /// </summary>
     /// <returns>
@@ -232,12 +234,6 @@ internal sealed partial class InferenceSessionPool
     /// <see cref="creationLock"/> to avoid blocking unrelated pool operations during potentially expensive
     /// <see cref="InferenceSession"/> teardown.
     /// </returns>
-    /// <summary>
-    /// Evicts the least-recently-released idle entry, optionally restricted to one admission
-    /// bucket (so a host RAM shortfall is not “fixed” by dropping GPU sessions, and a
-    /// shortfall on accelerator device 0 is not “fixed” by dropping device 1 sessions).
-    /// Must be called while <see cref="creationLock"/> is held.
-    /// </summary>
     private PoolEntry? TryEvictLruIdle(AdmissionBucket? onlyBucket = null)
     {
         // Prefer evicting entries that have been idle for a while. Sessions released within

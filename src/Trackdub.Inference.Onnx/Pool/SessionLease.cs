@@ -145,7 +145,9 @@ internal sealed class ExternalMemoryReservation : IDisposable
     /// pool no longer tracks the reservation — callers must treat false as "registration
     /// failed; the reservation is gone".
     /// </summary>
-    internal bool TrySetIdleEvictionCallback(Func<bool> callback)
+    internal async Task<bool> TrySetIdleEvictionCallbackAsync(
+        Func<bool> callback,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(callback);
         if (Volatile.Read(ref disposed) != 0)
@@ -153,7 +155,8 @@ internal sealed class ExternalMemoryReservation : IDisposable
             return false;
         }
 
-        return owner.TrySetExternalEvictionCallback(id, callback);
+        return await owner.TrySetExternalEvictionCallbackAsync(id, callback, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

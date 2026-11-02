@@ -182,9 +182,12 @@ internal sealed partial class InferenceSessionPool
     /// must treat false as "the reservation no longer exists" and roll back rather than
     /// publish an unaccounted resource.
     /// </summary>
-    internal bool TrySetExternalEvictionCallback(Guid id, Func<bool> callback)
+    internal async Task<bool> TrySetExternalEvictionCallbackAsync(
+        Guid id,
+        Func<bool> callback,
+        CancellationToken cancellationToken = default)
     {
-        creationLock.Wait();
+        await creationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (disposed
