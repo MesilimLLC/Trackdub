@@ -9,7 +9,7 @@ $reports = "$env:LOCALAPPDATA\Trackdub\benchmark-reports"
 $fixture = "$env:LOCALAPPDATA\Trackdub\benchmark-fixtures\baseline-v1\short.mp4"
 $outRoot = "$env:LOCALAPPDATA\Trackdub\benchmark-smoke-verdict\controlled"
 $proj = "src/Trackdub.Benchmarks.DevHost"
-$tfm = "net10.0-windows10.0.19041.0"
+$tfm = "net11.0-windows10.0.19041.0"
 
 function Get-NewestReport([string]$label) {
     $files = Get-ChildItem $reports -Filter *.json | Sort-Object LastWriteTime -Descending

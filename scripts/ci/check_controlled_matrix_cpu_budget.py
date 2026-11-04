@@ -111,7 +111,7 @@ def main() -> int:
             "Release",
             "--no-build",
             "--framework",
-            "net10.0",
+            "net11.0",
             "--",
             "controlled-matrix",
             str(fixture),

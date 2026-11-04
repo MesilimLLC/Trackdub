@@ -6,7 +6,7 @@ Guidance for contributors and agents working on the Trackdub public core (`Mesil
 1. Strict dependency direction: **Domain depends on nothing**. No inference leaking upward.
 2. Conflict order: source code/tests > task instructions > documentation.
 3. **Never fake readiness:** Provider registered != model downloaded != stage ran != stage succeeded.
-4. Cross-platform is required. Portable .NET 10 APIs by default. Extended operations: `docs/operations/cloud-operations.md`.
+4. Cross-platform is required. Portable .NET 11 APIs by default. Extended operations: `docs/operations/cloud-operations.md`.
 5. Do not use Linear or require issue searches/status/TS IDs; track requested work locally in plans/Git unless the user explicitly asks for an external issue tracker. Never mark Done without proof.
 
 ## Dependency Architecture
@@ -55,7 +55,7 @@ dotnet test Trackdub.slnx --configuration Release --no-build -m:1
 
 # Headless CLI
 dotnet run --project src/Trackdub.Cli -- --help
-dotnet run --project src/Trackdub.Cli --framework net10.0 -- --help   # Windows (multi-targeted)
+dotnet run --project src/Trackdub.Cli --framework net11.0 -- --help   # Windows (multi-targeted)
 ```
 
 ## packages.lock.json conflicts
@@ -66,8 +66,8 @@ dotnet restore Trackdub.slnx --force-evaluate -m:1
 # Filter builds & benchmarks
 dotnet build Trackdub.Inference.slnx -m:1
 dotnet build Trackdub.Sdk.slnx -m:1
-dotnet run --project src/Trackdub.Benchmarks.DevHost -f net10.0 -- --help
-dotnet run --project src/Trackdub.Benchmarks.DevHost -f net10.0 -- controlled-matrix <fixture> --output <dir>
+dotnet run --project src/Trackdub.Benchmarks.DevHost -f net11.0 -- --help
+dotnet run --project src/Trackdub.Benchmarks.DevHost -f net11.0 -- controlled-matrix <fixture> --output <dir>
 dotnet run --project src/Trackdub.Benchmarks.Micro -c Release -- --list flat
 ```
 

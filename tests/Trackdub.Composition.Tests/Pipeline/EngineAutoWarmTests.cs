@@ -55,12 +55,13 @@ public class EngineAutoWarmTests
     [Fact]
     public async Task Duplicate_install_notifications_coalesce_into_one_warm()
     {
-        var warmup = new RecordingWarmupService();
+        var warmup = new RecordingWarmupService { Gate = new TaskCompletionSource<bool>() };
         using var coordinator = CreateCoordinator(warmup);
 
         coordinator.RequestWarmAfterInstall("onnx-community/whisper-small");
         coordinator.RequestWarmAfterInstall("onnx-community/whisper-small");
         coordinator.RequestWarmAfterInstall("onnx-community/whisper-small");
+        warmup.Gate.SetResult(true);
         await coordinator.DrainAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(warmup.Requests);

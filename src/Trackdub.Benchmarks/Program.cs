@@ -96,7 +96,7 @@ public static class Program
             IModelBenchmarkRunner? runner = BenchmarkOnnxExecutionBootstrap.CreateOnnxRunner();
             if (runner is null)
             {
-                error.WriteLine("ONNX model benchmarks require the Windows target framework (net10.0-windows). The audio-prep benchmark is available on all platforms.");
+                error.WriteLine("ONNX model benchmarks require the Windows target framework (net11.0-windows). The audio-prep benchmark is available on all platforms.");
                 return 1;
             }
 

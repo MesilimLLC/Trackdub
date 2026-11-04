@@ -35,7 +35,7 @@ public sealed class OverheadMeasurementTests
         var evidence = new
         {
             host = Environment.MachineName,
-            tfm = "net10.0",
+            tfm = "net11.0",
             timestamp = DateTimeOffset.UtcNow,
             n = samples.Length,
             samplesMs = samples,

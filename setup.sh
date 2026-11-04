@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # ==================================================
 # Trackdub - Claude Code Cloud Setup
-# .NET 10 + Git submodule + GitHub CLI + gh-stack
+# .NET 11 + Git submodule + GitHub CLI + gh-stack
 # ==================================================
 
 # The setup script may run outside the checkout (CLAUDE_PROJECT_DIR and the
@@ -87,19 +87,20 @@ echo " Trackdub Claude Code Environment Setup"
 echo "========================================"
 
 # --------------------------------------------------
-# 1. Install .NET 10 globally
+# 1. Install .NET 11 globally
 # --------------------------------------------------
 
 echo
-echo "=== Installing .NET 10 SDK ==="
+echo "=== Installing .NET 11 SDK ==="
 
-if [[ ! -x /usr/local/share/dotnet/dotnet ]]; then
+if [[ ! -x /usr/local/share/dotnet/dotnet ]] || \
+   ! /usr/local/share/dotnet/dotnet --list-sdks | grep -Fq '11.0.100-rc.3.26522.148 ['; then
   curl -fsSL --retry 3 \
     https://dot.net/v1/dotnet-install.sh \
     -o "$TMP_DIR/dotnet-install.sh"
 
   bash "$TMP_DIR/dotnet-install.sh" \
-    --channel 10.0 \
+    --version 11.0.100-rc.3.26522.148 \
     --install-dir /usr/local/share/dotnet
 fi
 
@@ -298,7 +299,7 @@ if [[ "$RUN_BUILD" == "1" ]]; then
 
     timeout 1200 dotnet build \
       src/Trackdub.App.Avalonia \
-      -f net10.0 \
+      -f net11.0 \
       -m:1
   ' _ "$SOURCE_ROOT"
 

@@ -72,7 +72,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.100-rc.3.26522.148'
 
       - name: Run host tests
         run: dotnet test tools/Trackdub.SidecarHost.Tests -m:1

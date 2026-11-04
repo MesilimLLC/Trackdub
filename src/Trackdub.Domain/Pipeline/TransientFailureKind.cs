@@ -123,8 +123,8 @@ public static class TransientFailureClassifier
             }
         }
 
-        // IOException — host-OS-aware at runtime so the same compiled binary works on net10.0,
-        // net10.0-windows*, and any future TFM. Compile-time #if WINDOWS guards collapse the
+        // IOException — host-OS-aware at runtime so the same compiled binary works on net11.0,
+        // net11.0-windows*, and any future TFM. Compile-time #if WINDOWS guards collapse the
         // branches on plain net10.0 builds, which silently excluded the Windows hresult path
         // from production callers.
         if (exception is IOException)
@@ -141,7 +141,7 @@ public static class TransientFailureClassifier
 
     private static TransientFailureKind ClassifyIOException(IOException exception, string message)
     {
-        // Host-OS-aware at runtime so the same compiled binary works on net10.0, net10.0-windows*, and
+        // Host-OS-aware at runtime so the same compiled binary works on net11.0, net11.0-windows*, and
         // any future TFM. Compile-time #if WINDOWS guards collapse the branches on plain net10.0
         // builds, which silently excluded the Windows hresult path from production callers.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)

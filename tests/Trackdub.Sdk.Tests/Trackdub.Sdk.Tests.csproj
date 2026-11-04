@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <!-- Directory.Build.props supplies TargetFramework; clear it when multi-targeting. -->
     <TargetFramework Condition="'$(TargetFrameworks)' != ''" />
     <ImplicitUsings>enable</ImplicitUsings>
@@ -13,7 +13,7 @@
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
 
@@ -51,11 +51,11 @@
     <ProjectReference Include="..\..\src\Trackdub.Inference.Onnx\Trackdub.Inference.Onnx.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <ProjectReference Update="..\..\src\Trackdub.Composition\Trackdub.Composition.csproj"
-                      SetTargetFramework="TargetFramework=net10.0-windows10.0.19041.0" />
+                      SetTargetFramework="TargetFramework=net11.0-windows10.0.19041.0" />
     <ProjectReference Update="..\..\src\Trackdub.Inference.Onnx\Trackdub.Inference.Onnx.csproj"
-                      SetTargetFramework="TargetFramework=net10.0-windows10.0.19041.0" />
+                      SetTargetFramework="TargetFramework=net11.0-windows10.0.19041.0" />
   </ItemGroup>
 
   <ItemGroup>

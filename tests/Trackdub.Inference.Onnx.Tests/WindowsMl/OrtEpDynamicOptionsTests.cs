@@ -3,7 +3,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Trackdub.Inference.Onnx.Tests.WindowsMl;
 
-// Windows TFM only: the WindowsMl folder is compiled out of the net10.0 leg, and the
+// Windows TFM only: the WindowsMl folder is compiled out of the net11.0 leg, and the
 // interop targets the Windows ML ORT binding.
 #if WINDOWS
 public sealed class OrtEpDynamicOptionsTests

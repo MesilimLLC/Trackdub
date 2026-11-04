@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-    <!-- Default TargetFramework from Directory.Build.props is net10.0; analyzer must be netstandard2.0
+    <!-- Default TargetFramework from Directory.Build.props is net11.0; analyzer must be netstandard2.0
          so it can load into any of the consuming projects regardless of their TFM. -->
     <EnableWindowsTargeting>false</EnableWindowsTargeting>
     <!-- RS2008: opt in to analyzer release tracking so the analyzer DLL is properly tagged with

@@ -172,12 +172,18 @@ jobs:
           print(json.dumps(result, indent=2))
           PY
 
+      - name: Install Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz" | sudo tar -C /usr/local/bin -xzf - trivy
+          trivy --version
+
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: trackdub-ci:${{ matrix.profile }}
-          # trivy-action v0.33.1 defaults to v0.65.0, whose release assets were removed (404).
-          version: v0.76.1
+          skip-setup-trivy: 'true'
           format: table
           vuln-type: os,library
           severity: CRITICAL,HIGH

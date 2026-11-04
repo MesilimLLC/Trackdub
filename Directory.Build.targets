@@ -4,9 +4,9 @@
        even the outer restore evaluation retains the full framework graph.
        Also skip strip during restore (MSBuildRestoreSessionId set) so locked-mode
        matches committed multi-TFM packages.lock.json graphs. Build/test still strip.
-       Trim(';') handles Avalonia-style "net10.0-windows...;net10.0" ordering. -->
+       Trim(';') handles Avalonia-style "net11.0-windows...;net11.0" ordering. -->
   <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows')) AND '$(TargetFrameworks)' != '' AND '$(MSBuildRestoreSessionId)' == '' AND '$(TrackdubRestoreAllTargetFrameworks)' != 'true'">
-    <TargetFrameworks>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', ';?net10\.0-windows[^;]*', '').Trim(';'))</TargetFrameworks>
+    <TargetFrameworks>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', ';?net11\.0-windows[^;]*', '').Trim(';'))</TargetFrameworks>
   </PropertyGroup>
   <!-- Keep duplicate CPU ONNX Runtime assets out of publish output when the
        runtime package graph also contains DirectML/Windows ML assets. -->
@@ -53,7 +53,7 @@
        or its Microsoft.ML.OnnxRuntime.Gpu 1.28 graph. -->
   <Target Name="AddGenAiCudaSidecarToOutputItems"
           BeforeTargets="GetCopyToOutputDirectoryItems"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
     <ItemGroup>
       <_GenAiCudaSidecar Include="$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll"
                          Condition="Exists('$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll')"
@@ -80,7 +80,7 @@
 
   <Target Name="CopyGenAiCudaSidecarToOutput"
           AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
     <ItemGroup>
       <_GenAiCudaSidecarCopy Include="$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll"
                              Condition="Exists('$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll')"

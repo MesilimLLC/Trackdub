@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100-rc.3@sha256:3a9175b6c54b2f076817af1360f691c9994447b192faa48a1a1f112a516844c7 AS build
 WORKDIR /src
 ENV NUGET_PACKAGES=/root/.nuget/packages
 
@@ -24,14 +24,14 @@ COPY src/Trackdub.Analyzers/Trackdub.Analyzers.csproj src/Trackdub.Analyzers/
 COPY src/Trackdub.OnnxRuntime.Dnnl.Native/Trackdub.OnnxRuntime.Dnnl.Native.csproj src/Trackdub.OnnxRuntime.Dnnl.Native/
 
 RUN \
-    dotnet restore src/Trackdub.Cli/Trackdub.Cli.csproj -p:TargetFramework=net10.0 -r linux-x64 \
+    dotnet restore src/Trackdub.Cli/Trackdub.Cli.csproj -p:TargetFramework=net11.0 -r linux-x64 \
     && dotnet restore src/Trackdub.Analyzers/Trackdub.Analyzers.csproj -p:TargetFramework=netstandard2.0
 
 COPY src ./src
 RUN \
     dotnet publish src/Trackdub.Cli/Trackdub.Cli.csproj \
     --configuration Release \
-    --framework net10.0 \
+    --framework net11.0 \
     --runtime linux-x64 \
     --self-contained false \
     --no-restore \
@@ -68,9 +68,15 @@ RUN \
     && cp "$GENAI_LIB" /app/publish/libonnxruntime-genai.so
 
 FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04@sha256:f2c12914cf4751e61073843724275aa35d4817e01dbdc87eac03905971628c6e AS cuda-runtime
+FROM mcr.microsoft.com/dotnet/runtime:11.0.0-rc.3@sha256:c3423b383c70062eeb078e04a6901affaebcfc5d4ed5ae1d76158feb5e04021a AS dotnet-runtime
 
 # Ubuntu 24.04 (noble) matches the ubuntu2404 CUDA/TensorRT package repo used below.
+# MCR's default 11.0.0-rc.3 runtime tag is Ubuntu 26.04 (resolute), so keep the noble
+# base OS image and layer the .NET 11 runtime over /usr/share/dotnet.
 FROM mcr.microsoft.com/dotnet/runtime:10.0-noble@sha256:a3f9f81954b9c810af2ed18849716c8dc74a4707bd0907fdbd69be81554c0f30 AS runtime-base
+# Docker COPY merges directories; remove the .NET 10 host/framework first.
+RUN rm -rf /usr/share/dotnet
+COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 WORKDIR /app
 
 # TensorRT 10 runtime for the native TensorRT EP: ORT 1.31's

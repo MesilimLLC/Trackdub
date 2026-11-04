@@ -60,12 +60,12 @@
       <_TrackdubPairOrtRoot>$(PkgMicrosoft_Windows_AI_MachineLearning)</_TrackdubPairOrtRoot>
       <_TrackdubPairGenAiRoot>$(PkgMicrosoft_ML_OnnxRuntimeGenAI_WinML)</_TrackdubPairGenAiRoot>
       <_TrackdubPairGenAiFlavor>WinML</_TrackdubPairGenAiFlavor>
-      <_TrackdubPairCpuGenAiRoot Condition="'$(TargetFramework)' == 'net10.0'">$(PkgMicrosoft_ML_OnnxRuntimeGenAI)</_TrackdubPairCpuGenAiRoot>
-      <_TrackdubPairOrtRoot Condition="'$(TargetFramework)' == 'net10.0'">$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.windows/$(OnnxRuntimeVersion)</_TrackdubPairOrtRoot>
-      <_TrackdubPairStockOrtRoot Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)</_TrackdubPairStockOrtRoot>
-      <_TrackdubPairStockOrtRoot Condition="'$(TargetFramework)' != 'net10.0-windows10.0.19041.0'">$(PkgMicrosoft_ML_OnnxRuntime)</_TrackdubPairStockOrtRoot>
-      <_TrackdubPairGenAiRoot Condition="'$(TargetFramework)' == 'net10.0'">$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)</_TrackdubPairGenAiRoot>
-      <_TrackdubPairGenAiFlavor Condition="'$(TargetFramework)' == 'net10.0'">Cuda</_TrackdubPairGenAiFlavor>
+      <_TrackdubPairCpuGenAiRoot Condition="'$(TargetFramework)' == 'net11.0'">$(PkgMicrosoft_ML_OnnxRuntimeGenAI)</_TrackdubPairCpuGenAiRoot>
+      <_TrackdubPairOrtRoot Condition="'$(TargetFramework)' == 'net11.0'">$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.windows/$(OnnxRuntimeVersion)</_TrackdubPairOrtRoot>
+      <_TrackdubPairStockOrtRoot Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)</_TrackdubPairStockOrtRoot>
+      <_TrackdubPairStockOrtRoot Condition="'$(TargetFramework)' != 'net11.0-windows10.0.19041.0'">$(PkgMicrosoft_ML_OnnxRuntime)</_TrackdubPairStockOrtRoot>
+      <_TrackdubPairGenAiRoot Condition="'$(TargetFramework)' == 'net11.0'">$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)</_TrackdubPairGenAiRoot>
+      <_TrackdubPairGenAiFlavor Condition="'$(TargetFramework)' == 'net11.0'">Cuda</_TrackdubPairGenAiFlavor>
       <_TrackdubPairDisabled>false</_TrackdubPairDisabled>
       <_TrackdubPairDisabled Condition="'$(TrackdubOrtRuntimeFlavor)' == 'Dnnl'">true</_TrackdubPairDisabled>
     </PropertyGroup>

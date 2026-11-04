@@ -116,7 +116,7 @@ public sealed class ModelLabCommandTests
                     "--olive", "olive.exe",
                     "--cache", cachePath,
                     "--benchmark-project", Path.Join(tempRoot, "Trackdub.Benchmarks.csproj"),
-                    "--benchmark-framework", "net10.0-windows10.0.19041.0",
+                    "--benchmark-framework", "net11.0-windows10.0.19041.0",
                     "--benchmark-runs", "1",
                     "--candidate", "directml-fp16:dml:fp16:DmlExecutionProvider:gpu:dml"
                 ],

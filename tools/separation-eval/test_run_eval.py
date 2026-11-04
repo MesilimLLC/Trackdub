@@ -266,9 +266,9 @@ class GateConfigTests(EvalTestBase):
 class RunnerDefaultsTests(unittest.TestCase):
     def test_default_framework_is_portable_off_windows_and_windows_specific_on_windows(self):
         with patch.object(run_eval.platform, "system", return_value="Linux"):
-            self.assertEqual(run_eval.default_runner()[5], "net10.0")
+            self.assertEqual(run_eval.default_runner()[5], "net11.0")
         with patch.object(run_eval.platform, "system", return_value="Windows"):
-            self.assertEqual(run_eval.default_runner()[5], "net10.0-windows10.0.19041.0")
+            self.assertEqual(run_eval.default_runner()[5], "net11.0-windows10.0.19041.0")
 
 
 class ModelProvenanceTests(unittest.TestCase):

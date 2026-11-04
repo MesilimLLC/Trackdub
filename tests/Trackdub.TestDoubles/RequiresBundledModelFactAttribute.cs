@@ -103,7 +103,7 @@ internal static class BundledModelSkipResolver
 /// <summary>
 /// Locates the repository root by walking parents of <see cref="AppContext.BaseDirectory"/>
 /// until <c>Trackdub.sln</c> is found. Works for any test output layout depth (for example
-/// <c>bin\x64\Debug\net10.0-windows10.0.19041.0\</c> vs <c>bin\Debug\net10.0\</c>).
+/// <c>bin\x64\Debug\net11.0-windows10.0.19041.0\</c> vs <c>bin\Debug\net11.0\</c>).
 /// </summary>
 public static class TestRepoRootResolver
 {

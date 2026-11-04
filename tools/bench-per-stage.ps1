@@ -9,7 +9,7 @@ $fixture = "$env:LOCALAPPDATA\Trackdub\benchmark-fixtures\baseline-v1\short.mp4"
 $outRoot = "$env:LOCALAPPDATA\Trackdub\benchmark-smoke-verdict\per-stage"
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
 $proj = "src/Trackdub.Benchmarks.DevHost"
-$tfm = "net10.0-windows10.0.19041.0"
+$tfm = "net11.0-windows10.0.19041.0"
 
 function Invoke-Run([string]$stage, [string]$provider, [string]$model, [string]$mode, [string]$label) {
     $out = Join-Path $outRoot $label
