@@ -57,7 +57,7 @@ providers only with explicit consent and disclosure.
 - **Hardware-aware inference.** The runtime probes and falls back across TensorRT-RTX,
   DirectML, Windows ML, MIGraphX, and CPU. Unsupported acceleration never blocks a
   workflow; the app explains the fallback.
-- **Cross-platform desktop shell.** Avalonia on .NET 10, with Windows, macOS, and
+- **Cross-platform desktop shell.** Avalonia on .NET 11, with Windows, macOS, and
   Linux as first-class targets. No browser shell, no one-click SaaS demo.
 - **Engineering discipline.** Clean layered architecture (Domain depends on nothing),
   architecture tests that enforce dependency direction, fake-backed application tests,
@@ -138,7 +138,7 @@ product carries tiered features, activation, and support.
 
 ## Requirements
 
-- .NET 10 SDK (10.0.300+)
+- .NET 11 SDK (11.0.100-rc.3.26522.148)
 - FFmpeg (for audio/video processing)
 - libmpv or LibVLC (for playback)
 
@@ -165,15 +165,15 @@ dotnet run --project src/Trackdub.Cli -- dub --media input.mp4 --target-language
 dotnet run --project src/Trackdub.Cli -- doctor
 ```
 
-On Windows, `Trackdub.Cli` is multi-targeted (`net10.0` and `net10.0-windows10.0.19041.0`),
+On Windows, `Trackdub.Cli` is multi-targeted (`net11.0` and `net11.0-windows10.0.19041.0`),
 so `dotnet run` cannot pick a target framework on its own and fails without an explicit
 `--framework` flag. Pass one, for example:
 
 ```bash
-dotnet run --project src/Trackdub.Cli --framework net10.0 -- --help
+dotnet run --project src/Trackdub.Cli --framework net11.0 -- --help
 ```
 
-On non-Windows platforms the project targets only `net10.0`, so a plain
+On non-Windows platforms the project targets only `net11.0`, so a plain
 `dotnet run --project src/Trackdub.Cli -- <args>` works without the flag.
 
 ## Solution Filters

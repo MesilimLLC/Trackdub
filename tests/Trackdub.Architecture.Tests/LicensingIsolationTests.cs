@@ -62,7 +62,7 @@ public sealed class LicensingIsolationTests
     }
 
     [Fact]
-    public void LicensingTargetsOnlyNet10()
+    public void LicensingTargetsOnlyNet11()
     {
         var repoRoot = FindRepoRoot();
         var csproj = LoadLicensingCsproj();

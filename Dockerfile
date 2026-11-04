@@ -74,6 +74,8 @@ FROM mcr.microsoft.com/dotnet/runtime:11.0.0-rc.3@sha256:c3423b383c70062eeb078e0
 # MCR's default 11.0.0-rc.3 runtime tag is Ubuntu 26.04 (resolute), so keep the noble
 # base OS image and layer the .NET 11 runtime over /usr/share/dotnet.
 FROM mcr.microsoft.com/dotnet/runtime:10.0-noble@sha256:a3f9f81954b9c810af2ed18849716c8dc74a4707bd0907fdbd69be81554c0f30 AS runtime-base
+# Docker COPY merges directories; remove the .NET 10 host/framework first.
+RUN rm -rf /usr/share/dotnet
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 WORKDIR /app
 

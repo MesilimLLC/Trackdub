@@ -93,7 +93,8 @@ echo "========================================"
 echo
 echo "=== Installing .NET 11 SDK ==="
 
-if [[ ! -x /usr/local/share/dotnet/dotnet ]]; then
+if [[ ! -x /usr/local/share/dotnet/dotnet ]] || \
+   ! /usr/local/share/dotnet/dotnet --list-sdks | grep -Fq '11.0.100-rc.3.26522.148 ['; then
   curl -fsSL --retry 3 \
     https://dot.net/v1/dotnet-install.sh \
     -o "$TMP_DIR/dotnet-install.sh"

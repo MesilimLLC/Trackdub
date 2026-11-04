@@ -1,5 +1,5 @@
 ARG SERVER_IMAGE
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100-rc.3@sha256:3a9175b6c54b2f076817af1360f691c9994447b192faa48a1a1f112a516844c7 AS build
 WORKDIR /src
 COPY . .
 RUN dotnet publish src/Trackdub.CloudJobAdapter/Trackdub.CloudJobAdapter.csproj -c Release -o /out -m:1
