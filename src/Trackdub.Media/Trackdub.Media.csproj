@@ -23,7 +23,6 @@
 
   <ItemGroup>
     <PackageReference Include="MathNet.Numerics" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
 </Project>
