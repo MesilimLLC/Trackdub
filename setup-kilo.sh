@@ -12,12 +12,22 @@ find_repo_root() {
   local candidate top
   for candidate in \
     "${KILO_PROJECT_DIR:-}" \
+    "${CLAUDE_PROJECT_DIR:-}" \
     "$PWD" \
-    "$(dirname "${BASH_SOURCE[0]}")"; do
+    "$(dirname "${BASH_SOURCE[0]}")" \
+    /workspace \
+    /home/user \
+    /home/user/Trackdub \
+    /mnt/workspace \
+    /tmp/workspace; do
     [[ -n "$candidate" && -e "$candidate/.git" ]] || continue
     top="$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null || true)"
     if [[ -n "$top" ]]; then
       printf '%s\n' "$top"
+      return 0
+    fi
+    if [[ -f "$candidate/Trackdub.slnx" || -d "$candidate/src/Trackdub.Domain" ]]; then
+      printf '%s\n' "$candidate"
       return 0
     fi
   done
