@@ -98,7 +98,9 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
         with:
-          dotnet-version: '11.0.100-rc.3.26522.148'
+          dotnet-version: |
+            10.0.x
+            11.0.100-rc.3.26522.148
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
