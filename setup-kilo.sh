@@ -52,7 +52,7 @@ GH_VERSION="2.103.2"
 GH_SHA256="62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8"
 
 GH_STACK_VERSION="v0.2.1"
-GH_STACK_SHA256="ffe9d48b6342faffc3b0cb420202ff1df32693debd7423274bbdf859"
+GH_STACK_SHA256="ffe9d48b6342faffc3b0cb420202ff1df32e24faf32693debd7423274bbdf859"
 GH_STACK_DIR="/opt/gh-stack"
 
 # Change to 1 to build Trackdub during setup.
