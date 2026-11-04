@@ -503,30 +503,15 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
                 features = featureExtractor.Extract(chunkSpan);
             }
 
-            Tensor<float>? hiddenStates = null;
-            if (boundRun is not null)
-            {
-                boundRun.RunEncoder(features, cancellationToken);
-            }
-            else
-            {
-                using var encoderInputs = new InputSet(
-                [
-                    NamedOnnxValue.CreateFromTensor("input_features", features)
-                ]);
-                using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderResults =
-                    sessionLease.EncoderSession.RunWithRetry(encoderInputs.Values, cancellationToken: cancellationToken);
-                hiddenStates = encoderResults.Single(static result => result.Name == "last_hidden_state").AsTensor<float>();
-            }
-
-            WhisperDecodeResult decodeResult = await GreedyDecodeAsync(
-                sessionLease.DecoderSession,
-                boundRun,
+            var context = new WhisperChunkDecodeContext(
                 tokenizer,
-                hiddenStates,
+                features,
+                boundRun,
                 forcedLanguage,
                 chunkDurationSeconds,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
+            WhisperDecodeResult decodeResult = await DecodeChunkAsync(sessionLease, context).ConfigureAwait(false);
+
             repetitionGuarded |= decodeResult.RepetitionGuarded;
             string decodedText = tokenizer.DecodeText(decodeResult.OutputTokens);
             if (WhisperGenAiAudioTranscriptionEngine.IsDegenerateTranscriptText(decodedText))
@@ -552,22 +537,7 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
             }
         }
 
-        IReadOnlyList<RecognizedTranscriptWord> regionWords = repetitionGuarded
-            ? ReindexWords(chunkWords
-                .Select(static word => new RecognizedTranscriptWord(
-                    word.WordIndex,
-                    word.StartSeconds,
-                    word.EndSeconds,
-                    word.Text,
-                    0d))
-                .ToArray())
-            : ReindexWords(chunkWords);
-
-        return new RegionTranscription(
-            string.Join(" ", chunkTexts).Trim(),
-            ResolveDetectedLanguage(detectedLanguages),
-            regionWords,
-            repetitionGuarded);
+        return CreateRegionTranscription(chunkTexts, chunkWords, detectedLanguages, repetitionGuarded);
     }
 
     private static Task<WhisperDecodeResult> GreedyDecodeAsync(
@@ -634,6 +604,73 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
             tokenConfidences,
             repetitionGuarded));
     }
+
+    private static async Task<WhisperDecodeResult> DecodeChunkAsync(
+        OnnxExecutionSessionFactory.WhisperSessionLease sessionLease,
+        WhisperChunkDecodeContext context)
+    {
+        if (context.BoundRun is not null)
+        {
+            context.BoundRun.RunEncoder(context.Features, context.CancellationToken);
+            return await GreedyDecodeAsync(
+                sessionLease.DecoderSession,
+                context.BoundRun,
+                context.Tokenizer,
+                encoderHiddenStates: null,
+                context.ForcedLanguage,
+                context.ChunkDurationSeconds,
+                context.CancellationToken).ConfigureAwait(false);
+        }
+
+        using var encoderInputs = new InputSet(
+        [
+            NamedOnnxValue.CreateFromTensor("input_features", context.Features)
+        ]);
+        IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderResults =
+            sessionLease.EncoderSession.RunWithRetry(encoderInputs.Values, cancellationToken: context.CancellationToken);
+        return await WhisperEncoderOutputLifetime.ConsumeAsync(
+            encoderResults,
+            hiddenStates => GreedyDecodeAsync(
+                sessionLease.DecoderSession,
+                context.BoundRun,
+                context.Tokenizer,
+                hiddenStates,
+                context.ForcedLanguage,
+                context.ChunkDurationSeconds,
+                context.CancellationToken)).ConfigureAwait(false);
+    }
+
+    private static RegionTranscription CreateRegionTranscription(
+        List<string> chunkTexts,
+        List<RecognizedTranscriptWord> chunkWords,
+        List<string> detectedLanguages,
+        bool repetitionGuarded)
+    {
+        IReadOnlyList<RecognizedTranscriptWord> regionWords = repetitionGuarded
+            ? ReindexWords(chunkWords
+                .Select(static word => new RecognizedTranscriptWord(
+                    word.WordIndex,
+                    word.StartSeconds,
+                    word.EndSeconds,
+                    word.Text,
+                    0d))
+                .ToArray())
+            : ReindexWords(chunkWords);
+
+        return new RegionTranscription(
+            string.Join(" ", chunkTexts).Trim(),
+            ResolveDetectedLanguage(detectedLanguages),
+            regionWords,
+            repetitionGuarded);
+    }
+
+    private sealed record WhisperChunkDecodeContext(
+        WhisperTokenizerDecoder Tokenizer,
+        DenseTensor<float> Features,
+        WhisperTrtRtxRun? BoundRun,
+        string? ForcedLanguage,
+        double ChunkDurationSeconds,
+        CancellationToken CancellationToken);
 
     internal static int CalculateMaxDecodeOutputTokensForTesting(double chunkDurationSeconds) =>
         CalculateMaxDecodeOutputTokens(chunkDurationSeconds);
