@@ -208,7 +208,7 @@ public sealed class CompositedPlaybackLiveTests
             string? current = AppContext.BaseDirectory;
             for (int depth = 0; depth < 12 && !string.IsNullOrWhiteSpace(current); depth++)
             {
-                string candidate = Path.Join(current, "src", "Trackdub.App.Avalonia", "bin", "Debug", "net10.0-windows10.0.19041.0");
+                string candidate = Path.Join(current, "src", "Trackdub.App.Avalonia", "bin", "Debug", "net11.0-windows10.0.19041.0");
                 if (Directory.Exists(Path.Join(candidate, "libvlc")))
                 {
                     return candidate;

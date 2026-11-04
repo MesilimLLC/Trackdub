@@ -84,7 +84,7 @@ public sealed class PortableExecutionProviderBootstrapper : IExecutionProviderBo
             ExecutionProviderKind.Qnn or
             ExecutionProviderKind.VitisAi =>
                 new(provider, ExecutionProviderKind.Cpu, Succeeded: false,
-                    Detail: $"{provider} is not available in the portable net10.0 build. Falling back to CPU.",
+                    Detail: $"{provider} is not available in the portable net11.0 build. Falling back to CPU.",
                     FailureReason: $"{provider} unavailable in portable build; CPU fallback activated."),
 
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported execution provider kind."),

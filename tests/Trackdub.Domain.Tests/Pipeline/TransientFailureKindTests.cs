@@ -20,7 +20,7 @@ public sealed class TransientFailureKindTests
     public void IsTransient_returns_true_for_IOException_with_share_violation_hresult()
     {
         // Runtime-OS-conditional so the test runs on any TFM; previously the #if WINDOWS /
-        // #elif LINUX || MACOS guards collapsed to empty bodies on plain net10.0 and never
+        // #elif LINUX || MACOS guards collapsed to empty bodies on plain net11.0 and never
         // asserted anything for Windows-host runners either.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {

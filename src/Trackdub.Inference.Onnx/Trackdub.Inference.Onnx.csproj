@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
-      <!-- Directory.Build.props sets TargetFramework=net10.0; clear it so multi-target restore/build includes both legs consistently. -->
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
+      <!-- Directory.Build.props sets TargetFramework=net11.0; clear it so multi-target restore/build includes both legs consistently. -->
       <TargetFramework Condition="'$(TargetFrameworks)' != ''"/>
     <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,11 +12,11 @@
 
   <!-- LINML: LinML.Catalog is referenced (portable TFM, any build host). Call sites gate on
        OperatingSystem.IsLinux() at run time, so the portable artifact behaves the same wherever it is built. -->
-  <PropertyGroup Condition="'$(TargetFramework)' != 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' != 'net11.0-windows10.0.19041.0'">
     <DefineConstants>$(DefineConstants);LINML</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(TrackdubOrtRuntimeFlavor)' == 'Dnnl'">
@@ -41,9 +41,9 @@
     <AssemblyMetadata Include="TrackdubHostOrtRuntimeVersion" Value="$(OnnxRuntimeVersion)"
                       Condition="'$(TrackdubOrtHost)' == 'Stock'" />
     <AssemblyMetadata Include="TrackdubHostOrtRuntimeVersion" Value="$(WindowsMlOnnxRuntimeVersion)"
-                      Condition="'$(TrackdubOrtHost)' != 'Stock' And '$(TargetFramework)' == 'net10.0-windows10.0.19041.0'" />
+                      Condition="'$(TrackdubOrtHost)' != 'Stock' And '$(TargetFramework)' == 'net11.0-windows10.0.19041.0'" />
     <AssemblyMetadata Include="TrackdubHostOrtRuntimeVersion" Value="$(OnnxRuntimeVersion)"
-                      Condition="'$(TrackdubOrtHost)' != 'Stock' And '$(TargetFramework)' != 'net10.0-windows10.0.19041.0'" />
+                      Condition="'$(TrackdubOrtHost)' != 'Stock' And '$(TargetFramework)' != 'net11.0-windows10.0.19041.0'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -79,7 +79,7 @@
        same Windows ML runtime through its .WinML package. The Windows ML package's lib folder is the
        managed Microsoft.ML.OnnxRuntime.dll (native 1.27.1). Stock ORT 1.30's managed binding is not
        referenced here, so it cannot win the compile or the app output. -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <PackageReference Include="Microsoft.Windows.AI.MachineLearning" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" GeneratePathProperty="true" />
     <!-- Restored so the worker and native-pair hash can see the CUDA build. Assets stay out of this project. -->
@@ -91,13 +91,13 @@
   <!-- DNNL excludes Windows ML's runtime assets and its native package ships no managed binding, so
        the stock managed Microsoft.ML.OnnxRuntime.dll has to reach the app output (compile still
        binds against the Windows ML lib reference above). -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' == 'Dnnl'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' == 'Dnnl'">
     <PackageReference Update="Microsoft.ML.OnnxRuntime.Managed" ExcludeAssets="compile" PrivateAssets="compile" />
   </ItemGroup>
 
   <!-- Keep the portable TFM's package graph identical across restore hosts. Locked restores use
-       one net10.0 graph; runtime asset selection below remains RID-specific. -->
-  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows10.0.19041.0'">
+       one net11.0 graph; runtime asset selection below remains RID-specific. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net11.0-windows10.0.19041.0'">
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" />
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" GeneratePathProperty="true" />
@@ -106,7 +106,7 @@
   </ItemGroup>
 
   <!-- Non-Windows: exclude Windows-specific sources -->
-  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' != 'net11.0-windows10.0.19041.0'">
     <Compile Remove="ExecutionProviders\Windows\**" />
     <Compile Remove="WindowsMl\**" />
     <Compile Remove="Migraphx\WindowsMlMigraphxCatalogService.cs" />
@@ -123,7 +123,7 @@
        it was built. -->
 
   <!-- Windows: remove the deferred WinML stub (compiled separately) -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <Compile Remove="WindowsMl\WindowsMlExecutionProviderBootstrapper.Deferred.cs" />
     <!-- LinML.Catalog is portable-TFM only; Windows uses the Windows ML catalog. -->
     <Compile Remove="ExecutionProviders\LinMl\LinMl*.cs" />

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <TargetFramework Condition="'$(TargetFrameworks)' != ''" />
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>trackdub</ToolCommandName>
@@ -14,7 +14,7 @@
     <PackageProjectUrl>https://github.com/Mesililm-LLC/Trackdub</PackageProjectUrl>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <WindowsPackageType>None</WindowsPackageType>
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
     <!-- Headless unpackaged CLI: Composition/Sdk own WinML bootstrap; skip entry-exe auto-init. -->

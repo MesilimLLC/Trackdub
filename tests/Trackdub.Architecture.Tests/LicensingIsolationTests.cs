@@ -5,7 +5,7 @@ namespace Trackdub.Architecture.Tests;
 /// <summary>
 /// Enforces that <c>Trackdub.Licensing</c> remains a standalone, zero-dependency library:
 /// no project references to other Trackdub projects, no third-party crypto packages,
-/// and targets only <c>net10.0</c>.
+/// and targets only <c>net11.0</c>.
 /// </summary>
 public sealed class LicensingIsolationTests
 {
@@ -86,7 +86,7 @@ public sealed class LicensingIsolationTests
         var effectiveTargetFramework = localTargetFramework
             ?? ResolveDirectoryBuildPropsTargetFramework(repoRoot);
 
-        Assert.Equal("net10.0", effectiveTargetFramework);
+        Assert.Equal("net11.0", effectiveTargetFramework);
     }
 
     private static XDocument LoadLicensingCsproj()

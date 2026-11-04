@@ -10,7 +10,7 @@ namespace Trackdub.Inference.Tests;
 /// Property-based test verifying the GPU classification logic in DeviceEnumerator.
 /// Tests the internal ClassifyDeviceKind method directly with generated inputs.
 ///
-/// This file is excluded from the net10.0 build because DeviceEnumerator.cs is
+/// This file is excluded from the net11.0 build because DeviceEnumerator.cs is
 /// Windows-only (DXGI COM interop).
 ///
 /// **Validates: Requirements 1.4**

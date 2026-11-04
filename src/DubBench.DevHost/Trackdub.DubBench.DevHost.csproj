@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">WinExe</OutputType>
     <OutputType Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'">Exe</OutputType>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <TargetFramework Condition="'$(TargetFrameworks)' != ''" />
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

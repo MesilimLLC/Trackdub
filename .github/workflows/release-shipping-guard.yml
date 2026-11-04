@@ -39,7 +39,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/.dotnet
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.100-rc.3.26522.148'
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
@@ -55,11 +55,11 @@ jobs:
 
       - name: Build DevHost (Release)
         shell: bash
-        run: dotnet build src/DubBench.DevHost/Trackdub.DubBench.DevHost.csproj -c Release --no-restore -f net10.0 -m:1
+        run: dotnet build src/DubBench.DevHost/Trackdub.DubBench.DevHost.csproj -c Release --no-restore -f net11.0 -m:1
 
       - name: Publish DevHost (Release)
         shell: bash
-        run: dotnet publish src/DubBench.DevHost/Trackdub.DubBench.DevHost.csproj -c Release -f net10.0 --no-build --no-restore -m:1
+        run: dotnet publish src/DubBench.DevHost/Trackdub.DubBench.DevHost.csproj -c Release -f net11.0 --no-build --no-restore -m:1
 
       # Unknown-license guard. AvaloniaUI.DiagnosticsSupport has no license
       # metadata and must never reach a shipping artifact. The csproj

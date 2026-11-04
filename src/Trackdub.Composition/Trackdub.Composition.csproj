@@ -5,8 +5,8 @@
          RID-specific publish of a consumer would also build it without the RID and publish two different
          inference-worker\ copies (NETSDK1152). -->
     <IsRidAgnostic>false</IsRidAgnostic>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
-      <!-- Directory.Build.props sets TargetFramework=net10.0; clear it so multi-target restore/build includes both legs consistently. -->
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
+      <!-- Directory.Build.props sets TargetFramework=net11.0; clear it so multi-target restore/build includes both legs consistently. -->
       <TargetFramework Condition="'$(TargetFrameworks)' != ''"/>
     <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,7 +15,7 @@
     <TrackdubDnnlNativePackageRoot Condition="'$(TrackdubDnnlNativePackageRoot)' == ''">$(MSBuildThisFileDirectory)..\Trackdub.OnnxRuntime.Dnnl.Native</TrackdubDnnlNativePackageRoot>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
 
@@ -48,14 +48,14 @@
     <None Include="StarterPacks\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
     <!-- GenAI on the Windows ML runtime: one onnxruntime.dll serves DirectML, catalog EPs and GenAI. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" />
   </ItemGroup>
 
   <!-- Keep the portable TFM's package graph identical across restore hosts; locked restores share
-       one net10.0 graph. RID-specific runtime asset selection remains platform-dependent. -->
-  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows10.0.19041.0'">
+       one net11.0 graph. RID-specific runtime asset selection remains platform-dependent. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net11.0-windows10.0.19041.0'">
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" />
     <!-- Pin to match Inference.Onnx requirement; OnnxRuntimeGenAI pulls 1.8.x transitively -->
     <PackageReference Include="Microsoft.Windows.AI.MachineLearning" ExcludeAssets="native;build;buildMultitargeting;buildTransitive;contentFiles;analyzers" />
@@ -86,13 +86,13 @@
                       ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <PackageReference Include="Microsoft.Windows.AI.MachineLearning" GeneratePathProperty="true">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <_WinMlRuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</_WinMlRuntimeIdentifier>
     <_WinMlRuntimeIdentifier Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_WinMlRuntimeIdentifier>
     <!-- Managed WinML projection ships under lib/, not runtimes/*/native/. -->
@@ -100,7 +100,7 @@
     <_WindowsAppSDKML>true</_WindowsAppSDKML>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <!-- WinML 2.x ships onnxruntime.dll and DirectML.dll under RID-specific runtimes/*/native paths.
          This target force-overwrites to guarantee WinML's ORT wins over the CPU-only onnxruntime.dll
          that Microsoft.ML.OnnxRuntime (pulled transitively by OnnxRuntimeGenAI) would otherwise copy. -->
@@ -113,7 +113,7 @@
 
   <Target Name="CopyWinMlAssetsToOutput"
           AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '@(_WinMlAssets)' != ''">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '@(_WinMlAssets)' != ''">
     <!-- Root: load next to Trackdub.Composition.dll at runtime. -->
     <Copy SourceFiles="@(_WinMlAssets)"
           DestinationFiles="@(_WinMlAssets->'$(TargetDir)%(TargetPath)')"
@@ -129,7 +129,7 @@
 
   <Target Name="AddWinMlAssetsToOutputItems"
           BeforeTargets="GetCopyToOutputDirectoryItems"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '@(_WinMlAssets)' != ''">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '@(_WinMlAssets)' != ''">
     <ItemGroup>
       <ContentWithTargetPath Include="@(_WinMlAssets)"
                              CopyToOutputDirectory="Always"
@@ -142,7 +142,7 @@
        application's Windows ML onnxruntime.dll. -->
   <Target Name="RejectWorkerCudaNativesAtAppRoot"
           AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
     <Error Condition="Exists('$(TargetDir)onnxruntime_providers_cuda.dll') Or Exists('$(TargetDir)onnxruntime_providers_tensorrt.dll') Or Exists('$(TargetDir)onnxruntime_providers_shared.dll')"
            Text="Stock CUDA/TensorRT provider DLLs were copied to the application root. They belong under inference-worker\ only." />
   </Target>
@@ -150,7 +150,7 @@
   <!-- ADR-0017: the ORT 1.30 worker ships in its own inference-worker\ folder, where
        InferenceWorkerClient looks for it, so its onnxruntime.dll never shares a directory with
        Windows ML's. -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl'">
     <ProjectReference Include="..\Trackdub.InferenceWorker\Trackdub.InferenceWorker.csproj"
                       ReferenceOutputAssembly="false"
                       Private="false"
@@ -160,7 +160,7 @@
   <Target Name="AddInferenceWorkerToOutputItems"
           BeforeTargets="GetCopyToOutputDirectoryItems"
           DependsOnTargets="ResolveProjectReferences"
-          Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(DesignTimeBuild)' != 'true'">
+          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(DesignTimeBuild)' != 'true'">
     <PropertyGroup>
       <_InferenceWorkerOutputDir>@(_InferenceWorkerTargetPath->'%(RootDir)%(Directory)')</_InferenceWorkerOutputDir>
     </PropertyGroup>
@@ -181,7 +181,7 @@
        natives whichever OS built it; the package only ships linux-x64 GPU natives. -->
   <Target Name="CopyOrtGpuAssetsToOutput"
           AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(TargetFramework)' == 'net10.0' And ('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'linux-x64') And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntime_Gpu)' != ''">
+          Condition="'$(TargetFramework)' == 'net11.0' And ('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'linux-x64') And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntime_Gpu)' != ''">
     <ItemGroup>
       <_OrtGpuAssets Include="$(PkgMicrosoft_ML_OnnxRuntime_Gpu)\runtimes\linux-x64\native\libonnxruntime.so" TargetPath="libonnxruntime.so" />
       <_OrtGpuAssets Include="$(PkgMicrosoft_ML_OnnxRuntime_Gpu)\runtimes\linux-x64\native\libonnxruntime_providers_cuda.so" TargetPath="libonnxruntime_providers_cuda.so" />

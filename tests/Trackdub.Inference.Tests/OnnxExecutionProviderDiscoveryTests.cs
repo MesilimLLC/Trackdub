@@ -138,7 +138,7 @@ public sealed class OnnxExecutionProviderDiscoveryTests
         else
         {
             Assert.False(directMl.IsAvailable);
-            Assert.Contains("net10.0-windows10.0.19041.0", directMl.Detail);
+            Assert.Contains("net11.0-windows10.0.19041.0", directMl.Detail);
         }
     }
 
@@ -207,7 +207,7 @@ public sealed class OnnxExecutionProviderDiscoveryTests
                              or ExecutionProviderKind.VitisAi))
             {
                 Assert.False(availability.IsAvailable);
-                Assert.Contains("net10.0-windows10.0.19041.0", availability.Detail);
+                Assert.Contains("net11.0-windows10.0.19041.0", availability.Detail);
             }
         }
     }

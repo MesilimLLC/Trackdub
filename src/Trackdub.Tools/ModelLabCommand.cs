@@ -687,7 +687,7 @@ public sealed record ModelLabCommandOptions(
         string oliveExecutablePath = "olive";
         string cacheDirectoryPath = Path.Join(modelsRootPath, ".model-lab-cache");
         string benchmarkProjectPath = Path.Join(repositoryRootPath, "src", "Trackdub.Benchmarks", "Trackdub.Benchmarks.csproj");
-        string benchmarkFramework = "net10.0-windows10.0.19041.0";
+        string benchmarkFramework = "net11.0-windows10.0.19041.0";
         int benchmarkRuns = 3;
         var candidates = new List<ModelLabCandidateOptions>();
         bool skipBenchmark = false;
@@ -935,7 +935,7 @@ public sealed record ModelLabCommandOptions(
             "olive",
             Path.Join(Environment.CurrentDirectory, ".model-lab-cache"),
             Path.Join(Environment.CurrentDirectory, "Trackdub.Benchmarks.csproj"),
-            "net10.0-windows10.0.19041.0",
+            "net11.0-windows10.0.19041.0",
             3,
             [],
             SkipBenchmark: false,

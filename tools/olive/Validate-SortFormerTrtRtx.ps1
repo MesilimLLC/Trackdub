@@ -174,7 +174,7 @@ try {
         Write-Host ""
         Write-Host "=== Verifying staged model on TensorRT RTX (trackdub providers trt-rtx verify) ===" -ForegroundColor Cyan
         $stagedModelPath = Join-Path $StagingOnnxDir "model.onnx"
-        $verifyOutput = & dotnet run --project (Join-Path $RepoRoot "src\Trackdub.Cli") -c Release -f net10.0-windows10.0.19041.0 -- `
+        $verifyOutput = & dotnet run --project (Join-Path $RepoRoot "src\Trackdub.Cli") -c Release -f net11.0-windows10.0.19041.0 -- `
             providers trt-rtx verify --model "cgus/diar_streaming_sortformer_4spk-v2.1-onnx" --entry $stagedModelPath 2>&1
         $verifyExitCode = $LASTEXITCODE
         $verifyJsonLine = $verifyOutput | Where-Object { $_ -match '^\s*\{.*"passed"\s*:' } | Select-Object -Last 1

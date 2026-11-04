@@ -2,7 +2,7 @@
 set -euo pipefail
 
 solution="${1:-Trackdub.Avalonia.slnf}"
-framework="${TRACKDUB_PORTABLE_FRAMEWORK:-net10.0}"
+framework="${TRACKDUB_PORTABLE_FRAMEWORK:-net11.0}"
 configuration="${TRACKDUB_CONFIGURATION:-Release}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/../.." && pwd -P)"

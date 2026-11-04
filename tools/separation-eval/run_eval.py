@@ -44,7 +44,7 @@ PINNED_SPLEETER_FILES = ("vocals.onnx", "accompaniment.onnx")
 
 
 def default_runner() -> list[str]:
-    framework = "net10.0-windows10.0.19041.0" if platform.system() == "Windows" else "net10.0"
+    framework = "net11.0-windows10.0.19041.0" if platform.system() == "Windows" else "net11.0"
     return ["dotnet", "run", "--project", "src/Trackdub.Benchmarks.DevHost", "-f", framework,
             "-c", "Release", "--"]
 

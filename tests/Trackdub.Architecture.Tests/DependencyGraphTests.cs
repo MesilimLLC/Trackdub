@@ -350,11 +350,11 @@ public sealed class DependencyGraphTests
 
         var requiredGraphsByLockFile = new Dictionary<string, string[]>
         {
-            ["src/Trackdub.Contracts/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net10.0/{rid}").ToArray(),
-            ["src/Trackdub.Domain/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net10.0/{rid}").ToArray(),
-            ["src/Trackdub.Inference/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net10.0/{rid}").ToArray(),
+            ["src/Trackdub.Contracts/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net11.0/{rid}").ToArray(),
+            ["src/Trackdub.Domain/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net11.0/{rid}").ToArray(),
+            ["src/Trackdub.Inference/packages.lock.json"] = portableRuntimeIdentifiers.Select(rid => $"net11.0/{rid}").ToArray(),
             ["src/Trackdub.Inference.Onnx/packages.lock.json"] = portableRuntimeIdentifiers
-                .SelectMany(rid => new[] { $"net10.0/{rid}", $"net10.0-windows10.0.19041/{rid}" })
+                .SelectMany(rid => new[] { $"net11.0/{rid}", $"net11.0-windows10.0.19041/{rid}" })
                 .ToArray()
         };
 

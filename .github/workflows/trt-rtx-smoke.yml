@@ -34,7 +34,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.100-rc.3.26522.148'
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
@@ -63,7 +63,7 @@ jobs:
 
       - name: Build Benchmarks
         shell: pwsh
-        run: dotnet build src/Trackdub.Benchmarks.DevHost/Trackdub.Benchmarks.DevHost.csproj -f net10.0-windows10.0.19041.0 -m:1 --no-restore
+        run: dotnet build src/Trackdub.Benchmarks.DevHost/Trackdub.Benchmarks.DevHost.csproj -f net11.0-windows10.0.19041.0 -m:1 --no-restore
 
       - name: Download starter-pack models
         shell: pwsh
@@ -86,7 +86,7 @@ jobs:
             $variantArgs = if ($target.ContainsKey('Variant')) { @('--variant', $target.Variant) } else { @() }
             $label = if ($target.ContainsKey('Variant')) { "$($target.Id)@$($target.Variant)" } else { $target.Id }
             Write-Host "Downloading $label"
-            dotnet run --project src/Trackdub.Cli -f net10.0-windows10.0.19041.0 --no-restore -- `
+            dotnet run --project src/Trackdub.Cli -f net11.0-windows10.0.19041.0 --no-restore -- `
               models download $target.Id @variantArgs
             if ($LASTEXITCODE -ne 0) {
               throw "Model download failed for $label (exit code $LASTEXITCODE)."
@@ -96,7 +96,7 @@ jobs:
       - name: Run TRT RTX provider smoke
         shell: pwsh
         run: |
-          dotnet run --project src/Trackdub.Benchmarks.DevHost -f net10.0-windows10.0.19041.0 --no-build -- `
+          dotnet run --project src/Trackdub.Benchmarks.DevHost -f net11.0-windows10.0.19041.0 --no-build -- `
             --scope trt-rtx-smoke `
             --provider trt-rtx `
             --runs 1 `

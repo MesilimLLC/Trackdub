@@ -4,8 +4,8 @@ namespace Trackdub.Inference.Onnx;
 
 /// <summary>
 /// Reports which execution-provider routes this build can actually create sessions for.
-/// The portable net10.0 target carries plain ONNX Runtime plus the TensorRT RTX plugin
-/// route; DirectML and the Windows ML catalog EPs require the net10.0-windows10.0.19041.0
+/// The portable net11.0 target carries plain ONNX Runtime plus the TensorRT RTX plugin
+/// route; DirectML and the Windows ML catalog EPs require the net11.0-windows10.0.19041.0
 /// build. Hardware, license, and bundle readiness are still decided by discovery probes.
 /// </summary>
 public static class OnnxRuntimeBuildCapabilities

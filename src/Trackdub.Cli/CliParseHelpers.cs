@@ -344,7 +344,7 @@ internal static class CliParseHelpers
             Console.Error.WriteLine(
                 $"Warning: execution provider '{ExecutionProviderTokens.ToCanonicalTag(requestedKind)}' "
                 + "cannot run in this build. DirectML and Windows ML catalog providers require the "
-                + "net10.0-windows10.0.19041.0 target; this build supports trt-rtx and cpu.");
+                + "net11.0-windows10.0.19041.0 target; this build supports trt-rtx and cpu.");
         }
 
         // CLI/preset already merged by ResolvePresetExecutionPreferences; when still empty,
@@ -400,7 +400,7 @@ internal static class CliParseHelpers
 
     // Mirrors OnnxRuntimeBuildCapabilities in Trackdub.Inference.Onnx; kept local because the
     // layering rules keep Inference.Onnx compile-private to Composition. WINDOWS is defined by
-    // this project for the net10.0-windows10.0.19041.0 target only.
+    // this project for the net11.0-windows10.0.19041.0 target only.
     private static bool IsProviderSupportedInThisBuild(ExecutionProviderKind kind) =>
         kind switch
         {

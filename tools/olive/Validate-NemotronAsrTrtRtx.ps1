@@ -217,7 +217,7 @@ try {
         Write-Host ""
         Write-Host "=== Verifying staged encoder + decoder_joint on TensorRT RTX (trackdub providers trt-rtx verify) ===" -ForegroundColor Cyan
         $stagedEncoderPath = Join-Path $StagingDir "encoder.onnx"
-        $verifyOutput = & dotnet run --project (Join-Path $RepoRoot "src\Trackdub.Cli") -c Release -f net10.0-windows10.0.19041.0 -- `
+        $verifyOutput = & dotnet run --project (Join-Path $RepoRoot "src\Trackdub.Cli") -c Release -f net11.0-windows10.0.19041.0 -- `
             providers trt-rtx verify --model "tonythethompson/nemotron-3.5-asr-streaming-0.6b-onnx" --entry $stagedEncoderPath 2>&1
         $verifyExitCode = $LASTEXITCODE
         $verifyJsonLine = $verifyOutput | Where-Object { $_ -match '^\s*\{.*"passed"\s*:' } | Select-Object -Last 1

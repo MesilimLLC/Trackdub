@@ -1,22 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks>net11.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FsCheck.Xunit" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Condition="'$(TargetFramework)' == 'net10.0'" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'" ExcludeAssets="native" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Condition="'$(TargetFramework)' == 'net11.0'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'" ExcludeAssets="native" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
@@ -35,18 +35,18 @@
     <ProjectReference Include="..\..\src\Trackdub.Composition\Trackdub.Composition.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <ProjectReference Update="..\..\src\Trackdub.Inference.Onnx\Trackdub.Inference.Onnx.csproj"
-                      SetTargetFramework="TargetFramework=net10.0-windows10.0.19041.0" />
+                      SetTargetFramework="TargetFramework=net11.0-windows10.0.19041.0" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
     <Compile Remove="DeviceEnumeratorClassificationPropertyTests.cs" />
     <Compile Remove="WindowsMlProviderRegistrationPolicyTests.cs" />
   </ItemGroup>
 
   <!-- LinML.Catalog is referenced by the portable TFM only. -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <Compile Remove="LinMlOpenVinoCatalogTests.cs" />
     <Compile Remove="LinMlMigraphxCatalogTests.cs" />
     <Compile Remove="LinMlTensorRtRtxBootstrapTests.cs" />
