@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using Trackdub.Contracts;
 using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.AudioQuality;
 
@@ -35,6 +38,58 @@ public sealed record TranscriptAudioRoutingPlan(
             AsrAudioArtifact = normalizedAudioArtifact,
             AsrDecision = CreateRawDecision(SpeechPipelineStageKind.Asr, SourceKind),
         };
+
+    public TranscriptAudioRoutingPlan WithStudioVoiceAsrSource(ProjectArtifact enhancedAudioArtifact)
+    {
+        ArgumentNullException.ThrowIfNull(enhancedAudioArtifact);
+        const string profileId = "nvidia-afx-studio-voice-high-quality";
+        const string effectSelector = "studio_voice_high_quality";
+        string profileHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(profileId)))
+            .ToLowerInvariant();
+
+        return this with
+        {
+            AsrAudioArtifact = enhancedAudioArtifact,
+            AsrDecision = AsrDecision with
+            {
+                ProfileId = profileId,
+                ProfileVersion = 1,
+                CatalogVersion = "nvidia-afx-profile-v1",
+                FilterChain = effectSelector,
+                ProfileHash = profileHash,
+                RequiresProcessing = true,
+                OutputArtifactId = enhancedAudioArtifact.Id,
+                OutputRelativePath = enhancedAudioArtifact.RelativePath,
+            },
+        };
+    }
+
+    public TranscriptAudioRoutingPlan WithSpeechEnhancementAsrSource(
+        ProjectArtifact enhancedAudioArtifact,
+        SpeechAudioEnhancementBackend? backend,
+        string? backendProfile) =>
+        backend == SpeechAudioEnhancementBackend.NvidiaAfx
+        && string.Equals(
+            backendProfile,
+            NvidiaAfxIntegration.StudioVoiceHighQualitySelector,
+            StringComparison.Ordinal)
+            ? WithStudioVoiceAsrSource(enhancedAudioArtifact)
+            : this;
+
+    public static bool IsStudioVoiceEnhancementArtifact(ProjectArtifact artifact)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        const string provenancePrefix = "generated-nvidia-afx-speech-enhancement:";
+        string provenanceSuffix = $":profile={NvidiaAfxIntegration.StudioVoiceHighQualitySelector}";
+        return artifact.Provenance is { } provenance
+            && provenance.StartsWith(provenancePrefix, StringComparison.Ordinal)
+            && provenance.EndsWith(provenanceSuffix, StringComparison.Ordinal);
+    }
+
+    public TranscriptAudioRoutingPlan WithStudioVoiceAsrSourceIfApplicable(ProjectArtifact enhancedAudioArtifact) =>
+        IsStudioVoiceEnhancementArtifact(enhancedAudioArtifact)
+            ? WithStudioVoiceAsrSource(enhancedAudioArtifact)
+            : this;
 
     private static SpeechAudioStageDecision CreateRawDecision(
         SpeechPipelineStageKind stage,

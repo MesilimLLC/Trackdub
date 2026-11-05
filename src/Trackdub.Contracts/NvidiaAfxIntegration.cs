@@ -12,6 +12,8 @@ public static class NvidiaAfxIntegration
 
     public const string DisplayName = "NVIDIA Audio Effects (AFX)";
 
+    public const string StudioVoiceHighQualitySelector = "studio_voice_high_quality";
+
     public const string StubStatusLabel = "Disabled";
 
     public const string StubReason =

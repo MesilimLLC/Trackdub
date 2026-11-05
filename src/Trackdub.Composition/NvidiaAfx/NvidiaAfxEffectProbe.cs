@@ -23,7 +23,7 @@ public sealed record NvidiaAfxEffectProbeResult(
     int? OutputSampleRate);
 
 /// <summary>
-/// Default probe: creates and loads a Maxine effect session, streams about one second of audio
+/// Default probe: creates and loads a Maxine effect session, streams a native-valid audio span
 /// through it, then disposes it. Audio is run because creating and loading an effect does not prove
 /// it can process it, and a sustained run is needed because some effects accept the first frame and
 /// fail later (Speaker Focus on SDK 2.1). A failed run later still falls back to DeepFilterNet.
@@ -32,7 +32,7 @@ public sealed class NvidiaAfxSessionEffectProbe : INvidiaAfxEffectProbe
 {
     public static NvidiaAfxSessionEffectProbe Instance { get; } = new();
 
-    /// <summary>Frames of 10 ms each, so one second of audio.</summary>
+    /// <summary>Frame count for common 10 ms profiles; long-frame profiles use their own count.</summary>
     internal const int ProbeFrames = 100;
 
     public NvidiaAfxEffectProbeResult Probe(
@@ -56,7 +56,7 @@ public sealed class NvidiaAfxSessionEffectProbe : INvidiaAfxEffectProbe
             int frameSamples = checked((int)session.NumInputSamplesPerFrame);
             float[] frame = new float[frameSamples];
             float[]? farEnd = profile.RequiresFarEndReference ? new float[frameSamples] : null;
-            for (int frameIndex = 0; frameIndex < ProbeFrames; frameIndex++)
+            for (int frameIndex = 0; frameIndex < profile.ReadinessProbeFrameCount; frameIndex++)
             {
                 for (int index = 0; index < frame.Length; index++)
                 {

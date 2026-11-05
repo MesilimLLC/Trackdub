@@ -56,11 +56,21 @@ public sealed class NvidiaAfxRuntimePackageGatesTests
     }
 
     [Fact]
-    public void BundledManifest_HasNoDownloadablePackages()
+    public void BundledManifest_HasVerifiedStudioVoicePackagesForSupportedWindowsArchitectures()
     {
         string manifestPath = ResolveBundledManifestPath();
         NvidiaAfxRuntimeManifest manifest = NvidiaAfxRuntimeManifestLoader.Load(manifestPath);
-        Assert.False(NvidiaAfxRuntimePackageGates.ManifestHasAnyDownloadablePackage(manifest));
+
+        Assert.True(NvidiaAfxRuntimePackageGates.ManifestHasAnyDownloadablePackage(manifest));
+        Assert.Equal(["turing", "ampere", "ada", "blackwell"], manifest.Packages.Select(package => package.Architecture));
+        Assert.All(manifest.Packages, package =>
+        {
+            Assert.Equal("3.0.0", package.RuntimeVersion);
+            Assert.Equal(10, package.PartCount);
+            Assert.Equal(2, package.ModelRelativePaths.Length);
+            Assert.All(package.ModelRelativePaths, path => Assert.Contains("studio_voice_high_quality", path, StringComparison.Ordinal));
+            Assert.True(NvidiaAfxRuntimePackageGates.IsDownloadable(package));
+        });
     }
 
     private static string NvidiaAfxIntegrationLicenseUrl() =>

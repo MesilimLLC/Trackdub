@@ -68,4 +68,5 @@ public sealed class NvidiaAfxSessionHelpersTests
         // 8 kHz → 16 kHz telephony: 100 input samples → 200 output samples (ratio 960/480).
         Assert.Equal(200, NvidiaAfxSession.ComputeTrimmedOutputLength(100, inputFrame: 480, outputFrame: 960));
     }
+
 }

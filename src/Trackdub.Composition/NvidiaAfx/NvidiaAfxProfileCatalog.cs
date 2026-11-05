@@ -36,7 +36,11 @@ public sealed record NvidiaAfxProfileDefinition(
     /// </summary>
     int? OutputSampleRate = null,
     /// <summary>NVIDIA Early Access effect under an evaluation license; disabled unless explicitly allowed.</summary>
-    bool IsEarlyAccess = false)
+    bool IsEarlyAccess = false,
+    /// <summary>Fallback input frame duration when the native effect does not report its frame size.</summary>
+    int InputFrameDurationMilliseconds = 10,
+    /// <summary>Number of native frames to run for a readiness probe.</summary>
+    int ReadinessProbeFrameCount = 100)
 {
     public int ResolveOutputSampleRate(int inputSampleRate) =>
         OutputSampleRate ?? inputSampleRate;
@@ -181,6 +185,22 @@ public static class NvidiaAfxProfileCatalog
             // (verified live on SDK 3.0.0), so no control is offered.
             SupportsIntensityRatio: false,
             IsEarlyAccess: true),
+        new(
+            NvidiaAfxProfile.StudioVoice,
+            "Studio Voice (High Quality)",
+            Selector: NvidiaAfxIntegration.StudioVoiceHighQualitySelector,
+            IsChainedEffect: false,
+            SupportedSampleRates: [16000, 48000],
+            MaxChannels: 1,
+            ModelsBySampleRate:
+            [
+                new(16000, [new("nvafxstudiovoicehighquality", "studio_voice_high_quality_16k")]),
+                new(48000, [new("nvafxstudiovoicehighquality", "studio_voice_high_quality_48k")]),
+            ],
+            RequiresFarEndReference: false,
+            SupportsIntensityRatio: false,
+            InputFrameDurationMilliseconds: 6000,
+            ReadinessProbeFrameCount: 1),
         new(
             NvidiaAfxProfile.AcousticEchoCancellation,
             "Acoustic Echo Cancellation",

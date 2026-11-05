@@ -38,7 +38,7 @@ public sealed class NvidiaAfxRuntimeDownloader(
         string archivePath = Path.Join(componentDirectory, $"{package.Architecture}{TempSuffix}");
         Directory.CreateDirectory(componentDirectory);
 
-        await DownloadArchiveAsync(package.DownloadUrl, archivePath, package.SizeBytes, progress, cancellationToken).ConfigureAwait(false);
+        await DownloadArchiveAsync(package, archivePath, progress, cancellationToken).ConfigureAwait(false);
         await VerifyArchiveAsync(archivePath, package.Sha256, package.SizeBytes, cancellationToken).ConfigureAwait(false);
 
         string installPath = await ExtractAtomicallyAsync(componentDirectory, archivePath, cancellationToken).ConfigureAwait(false);
@@ -49,32 +49,44 @@ public sealed class NvidiaAfxRuntimeDownloader(
     }
 
     private async Task DownloadArchiveAsync(
-        string url,
+        NvidiaAfxRuntimePackage package,
         string destinationPath,
-        long expectedBytes,
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await httpClient.GetAsync(
-            url,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-
-        await using Stream contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using FileStream output = File.Create(destinationPath);
         byte[] buffer = new byte[65536];
         long written = 0;
-        int read;
-        while ((read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
+        for (int partIndex = 1; partIndex <= package.PartCount; partIndex++)
         {
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            written += read;
-            if (expectedBytes > 0)
+            string partUrl = package.PartCount == 1
+                ? package.DownloadUrl
+                : BuildPartUrl(package.DownloadUrl, partIndex);
+            using HttpResponseMessage response = await httpClient.GetAsync(
+                partUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            await using Stream contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            int read;
+            while ((read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
             {
-                progress?.Report((double)written / expectedBytes * 0.9d);
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                written += read;
+                if (package.SizeBytes > 0)
+                {
+                    progress?.Report((double)written / package.SizeBytes * 0.9d);
+                }
             }
         }
+    }
+
+    private static string BuildPartUrl(string url, int partIndex)
+    {
+        var builder = new UriBuilder(url);
+        builder.Path += $".part{partIndex:D3}";
+        return builder.Uri.AbsoluteUri;
     }
 
     private static async Task VerifyArchiveAsync(

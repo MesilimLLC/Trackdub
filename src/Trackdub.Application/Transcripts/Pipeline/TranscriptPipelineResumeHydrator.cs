@@ -82,6 +82,7 @@ internal static class TranscriptPipelineResumeHydrator
             VadAudioArtifact = enhancedArtifact,
             DiarizationAudioArtifact = enhancedArtifact
         };
+        enhancedRoutingPlan = enhancedRoutingPlan.WithStudioVoiceAsrSourceIfApplicable(enhancedArtifact);
 
         return context with
         {

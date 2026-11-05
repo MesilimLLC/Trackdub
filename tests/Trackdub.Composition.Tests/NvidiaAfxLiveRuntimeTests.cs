@@ -129,6 +129,31 @@ public sealed class NvidiaAfxLiveRuntimeTests(Xunit.ITestOutputHelper output)
     }
 
     [NvidiaAfxLiveRuntimeFact]
+    public void Studio_voice_processes_real_audio_at_each_supported_rate()
+    {
+        (string root, string architecture) = ResolveRuntime();
+        NvidiaAfxProfileDefinition definition = NvidiaAfxProfileCatalog.GetDefinition(NvidiaAfxProfile.StudioVoice);
+
+        foreach (int sampleRate in definition.SupportedSampleRates)
+        {
+            float[] input = BuildNoisySpeechLikeSignal(sampleRate, seconds: 6);
+            using NvidiaAfxSession session = NvidiaAfxSession.Create(
+                definition,
+                root,
+                sampleRate,
+                intensityRatio: 0f,
+                architecture);
+            float[] processed = session.Process(input);
+
+            Assert.Equal(input.Length, processed.Length);
+            Assert.All(processed, sample => Assert.True(float.IsFinite(sample)));
+            Assert.True(
+                input.Zip(processed, (source, enhanced) => Math.Abs(source - enhanced)).Average() > 1e-4,
+                $"Studio Voice produced unchanged output at {sampleRate} Hz.");
+        }
+    }
+
+    [NvidiaAfxLiveRuntimeFact]
     public void Probe_agrees_with_a_full_run_for_early_access_profiles()
     {
         (string root, string architecture) = ResolveRuntime();

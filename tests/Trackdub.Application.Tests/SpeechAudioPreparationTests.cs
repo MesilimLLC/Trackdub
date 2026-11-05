@@ -10,7 +10,7 @@ using Trackdub.TestDoubles;
 
 namespace Trackdub.Application.Tests;
 
-public sealed class SpeechAudioPreparationTests
+public sealed partial class SpeechAudioPreparationTests
 {
     [Fact]
     public void Planner_selects_stage_specific_full_mix_asr_profile_for_hiss()

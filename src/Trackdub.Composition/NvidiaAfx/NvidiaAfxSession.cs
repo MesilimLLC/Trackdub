@@ -7,7 +7,7 @@ namespace Trackdub.Composition.NvidiaAfx;
 
 internal sealed class NvidiaAfxSession : IDisposable
 {
-    // Every AFX effect processes fixed 10 ms frames (80 / 160 / 480 samples at 8 / 16 / 48 kHz).
+    // Most AFX effects process 10 ms frames. Studio Voice High Quality uses 6-second frames.
     private const int FramesPerSecond = 100;
 
     private readonly NvidiaAfxEffectHandle _handle;
@@ -177,7 +177,7 @@ internal sealed class NvidiaAfxSession : IDisposable
                 safeHandle,
                 NvidiaAfxNativeParameters.NumInputSamplesPerFrame,
                 fallbackParameter: NvidiaAfxNativeParameters.SamplesPerFrameLegacy,
-                defaultValue: checked((uint)(sampleRate / FramesPerSecond)));
+                defaultValue: checked((uint)((long)sampleRate * profile.InputFrameDurationMilliseconds / 1000)));
             int outputSampleRate = QueryOutputSampleRate(
                 safeHandle,
                 expectedOutputSampleRate);
@@ -293,7 +293,7 @@ internal sealed class NvidiaAfxSession : IDisposable
             throw new InvalidOperationException("Invalid AFX frame size.");
         }
 
-        const int framesPerChunk = FramesPerSecond;
+        int framesPerChunk = Math.Clamp(nearEnd.SampleRate / inputFrame, 1, FramesPerSecond);
         long nearTotal = nearEnd.SampleFrameCount;
         long expected = GetOutputSampleCount(nearTotal, inputFrame, outputFrame);
         float[] nearChunk = new float[inputFrame * framesPerChunk];
