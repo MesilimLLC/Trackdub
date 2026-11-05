@@ -39,13 +39,16 @@ public sealed record TranscriptAudioRoutingPlan(
             AsrDecision = CreateRawDecision(SpeechPipelineStageKind.Asr, SourceKind),
         };
 
+    private static readonly string _studioVoiceProfileHash =
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("nvidia-afx-studio-voice-high-quality")))
+            .ToLowerInvariant();
+
     public TranscriptAudioRoutingPlan WithStudioVoiceAsrSource(ProjectArtifact enhancedAudioArtifact)
     {
         ArgumentNullException.ThrowIfNull(enhancedAudioArtifact);
         const string profileId = "nvidia-afx-studio-voice-high-quality";
         const string effectSelector = "studio_voice_high_quality";
-        string profileHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(profileId)))
-            .ToLowerInvariant();
+        string profileHash = _studioVoiceProfileHash;
 
         return this with
         {
