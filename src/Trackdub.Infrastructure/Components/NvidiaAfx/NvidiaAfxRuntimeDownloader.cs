@@ -38,14 +38,38 @@ public sealed class NvidiaAfxRuntimeDownloader(
         string archivePath = Path.Join(componentDirectory, $"{package.Architecture}{TempSuffix}");
         Directory.CreateDirectory(componentDirectory);
 
-        await DownloadArchiveAsync(package, archivePath, progress, cancellationToken).ConfigureAwait(false);
-        await VerifyArchiveAsync(archivePath, package.Sha256, package.SizeBytes, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await DownloadArchiveAsync(package, archivePath, progress, cancellationToken).ConfigureAwait(false);
+            await VerifyArchiveAsync(archivePath, package.Sha256, package.SizeBytes, cancellationToken).ConfigureAwait(false);
 
-        string installPath = await ExtractAtomicallyAsync(componentDirectory, archivePath, cancellationToken).ConfigureAwait(false);
-        componentStore.MarkInstalled(ComponentId);
-        progress?.Report(1.0);
-        logger.LogInformation($"NVIDIA AFX runtime package installed at '{installPath}' ({package.Architecture}).");
-        return installPath;
+            string installPath = await ExtractAtomicallyAsync(componentDirectory, archivePath, cancellationToken).ConfigureAwait(false);
+            componentStore.MarkInstalled(ComponentId);
+            progress?.Report(1.0);
+            logger.LogInformation($"NVIDIA AFX runtime package installed at '{installPath}' ({package.Architecture}).");
+            return installPath;
+        }
+        catch
+        {
+            TryDelete(archivePath);
+            throw;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Preserve the original failure; a leftover partial archive is retried and truncated
+            // by the next download.
+        }
     }
 
     private async Task DownloadArchiveAsync(
@@ -72,6 +96,12 @@ public sealed class NvidiaAfxRuntimeDownloader(
             int read;
             while ((read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
             {
+                if (package.SizeBytes > 0 && written + read > package.SizeBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"NVIDIA AFX runtime archive exceeds the declared size of {package.SizeBytes} bytes.");
+                }
+
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 written += read;
                 if (package.SizeBytes > 0)

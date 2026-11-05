@@ -19,8 +19,13 @@ public static class NvidiaAfxIntegration
     public const string StubReason =
         "NVIDIA AFX is switched off by the integration kill switch (NvidiaAfxIntegration.IsStubbed()).";
 
+    /// <summary>License for the user-installed AFX SDK and its non-Studio-Voice feature packages.</summary>
     public const string LicenseUrl =
         "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/";
+
+    /// <summary>License for the Trackdub-hosted Studio Voice High Quality runtime package.</summary>
+    public const string StudioVoiceLicenseUrl =
+        "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/";
 
     public const string DeveloperResourcesUrl = "https://www.nvidia.com/broadcast-sdk-resources";
 

@@ -168,6 +168,140 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         Assert.Equal(shouldResume ? vadRun.Id : recordedRun.Id, result.VadStageRunId);
     }
 
+    [Theory]
+    [InlineData("studio_voice_high_quality", "nvidia-afx", true, false)]
+    [InlineData("deepfilternet3", "deepfilternet", false, false)]
+    [InlineData("studio_voice_high_quality", "nvidia-afx", false, true)]
+    public async Task ExecuteAsync_hydrates_asr_routing_only_for_native_studio_voice(
+        string backendProfile,
+        string backend,
+        bool expectAsrRouted,
+        bool staleSource)
+    {
+        var artifactStore = new FakeArtifactStore(tempRoot);
+        var mediaRepository = new FakeMediaAssetRepository();
+        var stageRunStore = new FakeProjectStageRunStore();
+        var transcriptRepository = new FakeTranscriptRepository();
+        var artifactWriter = new TranscriptArtifactWriter(
+            artifactStore,
+            new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
+            mediaRepository);
+
+        Guid projectId = Guid.NewGuid();
+        Guid mediaAssetId = Guid.NewGuid();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var project = new TrackdubProject(projectId, "Resume", now, now);
+        var mediaAsset = new MediaAsset(
+            mediaAssetId,
+            projectId,
+            "source.mp4",
+            "source.mp4",
+            "source-hash",
+            100,
+            now,
+            "mp4",
+            10.0d,
+            HasAudio: true,
+            HasVideo: false,
+            now);
+        var normalized = new ProjectArtifact(
+            Guid.NewGuid(),
+            projectId,
+            mediaAssetId,
+            ArtifactKind.NormalizedAudio,
+            "artifacts/audio.wav",
+            "audio-hash",
+            100,
+            10.0d,
+            16000,
+            1,
+            now);
+        StageRunRecord enhancementRun = StageRunRecord
+            .Start(projectId, StageNames.SpeechEnhancement, now)
+            .Complete(now);
+        var enhanced = new ProjectArtifact(
+            Guid.NewGuid(),
+            projectId,
+            mediaAssetId,
+            ArtifactKind.SpeechEnhancedAudio,
+            "artifacts/audio/speech-enhancement/x/speech.wav",
+            "enhanced-hash",
+            100,
+            10.0d,
+            16000,
+            1,
+            now,
+            StageRunId: enhancementRun.Id,
+            Provenance: $"generated-{backend}-speech-enhancement:{(staleSource ? Guid.NewGuid() : normalized.Id):D}:profile={backendProfile}");
+
+        artifactStore.Seed(normalized.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        artifactStore.Seed(enhanced.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        mediaRepository.Seed(mediaAsset);
+        await mediaRepository.SaveArtifactAsync(normalized, CancellationToken.None);
+        await mediaRepository.SaveArtifactAsync(enhanced, CancellationToken.None);
+
+        var resumeState = new TranscriptProjectState(
+            new OpenProjectResult(
+                project,
+                mediaAsset,
+                null,
+                SourceMediaStatus.Available,
+                null,
+                mediaRepository.Artifacts,
+                null),
+            CurrentTranscriptRevision: null,
+            TranscriptSegments: [],
+            Speakers: [],
+            SpeakerTurns: [],
+            CurrentTranslationRevision: null,
+            TranslatedSegments: [],
+            IsTranslationStale: false,
+            TranscriptLanguage: null,
+            StageRuns: [enhancementRun],
+            SupportedTargetLanguages: [],
+            SelectedTranslationTargetLanguage: null,
+            StaleTranslatedSegmentIndices: new HashSet<int>(),
+            WaveformSummary: null,
+            AvailableVoices: [],
+            VoiceAssignments: [],
+            TtsTakes: [],
+            TtsSegmentStates: [],
+            VoiceAssignmentWarnings: []);
+
+        var context = new TranscriptGenerationContext(
+            project,
+            mediaAsset,
+            normalized,
+            TranscriptAudioRoutingPlan.Raw(normalized, SpeechAudioSourceKind.FullMix),
+            enableSpeakerDiarization: false,
+            sourceLanguage: "en")
+        {
+            ProjectState = resumeState,
+            ProjectRootPath = artifactStore.GetPath(".")
+        };
+
+        var pipeline = new TranscriptGenerationPipeline(
+            [new NoOpEnhancementStage()],
+            artifactStore,
+            artifactWriter,
+            transcriptRepository,
+            stageRunStore: stageRunStore);
+
+        TranscriptGenerationContext result = await pipeline.ExecuteAsync(
+            context,
+            TestContext.Current.CancellationToken);
+
+        Guid expectedEnhancedStageSourceId = staleSource ? normalized.Id : enhanced.Id;
+        Assert.Equal(expectedEnhancedStageSourceId, result.AudioRoutingPlan.VadAudioArtifact.Id);
+        Assert.Equal(expectedEnhancedStageSourceId, result.AudioRoutingPlan.DiarizationAudioArtifact.Id);
+        Assert.Equal(
+            expectAsrRouted ? enhanced.Id : normalized.Id,
+            result.AudioRoutingPlan.AsrAudioArtifact.Id);
+        Assert.Equal(
+            expectAsrRouted ? "nvidia-afx-studio-voice-high-quality" : SpeechAudioProcessingProfileCatalog.NoneProfileId,
+            result.AudioRoutingPlan.AsrDecision.ProfileId);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(tempRoot))

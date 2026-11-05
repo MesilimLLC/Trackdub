@@ -52,6 +52,80 @@ public sealed class NvidiaAfxRuntimeDownloaderTests
         }
     }
 
+    [Fact]
+    public async Task DownloadAndInstallAsync_RejectsContentLargerThanDeclaredSize()
+    {
+        string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-afx-download-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            byte[] archive = CreateArchive();
+            string url = "https://cdn.example.com/afx/runtime.zip";
+            using var httpClient = new HttpClient(new StaticHandler(new Uri(url), archive));
+            var store = new ComponentStore(tempRoot, new NoopLogger());
+            var downloader = new NvidiaAfxRuntimeDownloader(store, httpClient, new NoopLogger(), static () => false);
+            var package = new NvidiaAfxRuntimePackage(
+                Architecture: "ada",
+                DownloadUrl: url,
+                Sha256: Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(),
+                SizeBytes: archive.Length - 1,
+                RuntimeVersion: "3.0.0",
+                LicenseUrl: "https://example.com/license",
+                ModelRelativePaths: [],
+                PartCount: 1);
+
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => downloader.DownloadAndInstallAsync(package, null, CancellationToken.None));
+
+            Assert.Contains("exceeds the declared size", error.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(store.GetComponentDirectory(NvidiaAfxRuntimeDownloader.ComponentId)));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAndInstallAsync_RemovesPartialArchiveWhenVerificationFails()
+    {
+        string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-afx-download-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            byte[] archive = CreateArchive();
+            string url = "https://cdn.example.com/afx/runtime.zip";
+            using var httpClient = new HttpClient(new StaticHandler(new Uri(url), archive));
+            var store = new ComponentStore(tempRoot, new NoopLogger());
+            var downloader = new NvidiaAfxRuntimeDownloader(store, httpClient, new NoopLogger(), static () => false);
+            var package = new NvidiaAfxRuntimePackage(
+                Architecture: "ada",
+                DownloadUrl: url,
+                Sha256: new string('a', 64),
+                SizeBytes: archive.Length,
+                RuntimeVersion: "3.0.0",
+                LicenseUrl: "https://example.com/license",
+                ModelRelativePaths: [],
+                PartCount: 1);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => downloader.DownloadAndInstallAsync(package, null, CancellationToken.None));
+
+            Assert.False(store.IsInstalled(NvidiaAfxRuntimeDownloader.ComponentId));
+            Assert.Empty(Directory.EnumerateFiles(store.GetComponentDirectory(NvidiaAfxRuntimeDownloader.ComponentId)));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
     private static byte[] CreateArchive()
     {
         using var stream = new MemoryStream();
@@ -80,6 +154,17 @@ public sealed class NvidiaAfxRuntimeDownloaderTests
             Uri requestUri = request.RequestUri!;
             RequestedUris.Add(requestUri);
             HttpResponseMessage response = _parts.TryGetValue(requestUri, out byte[]? content)
+                ? new(HttpStatusCode.OK) { Content = new ByteArrayContent(content) }
+                : new(HttpStatusCode.NotFound);
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class StaticHandler(Uri url, byte[] content) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = request.RequestUri == url
                 ? new(HttpStatusCode.OK) { Content = new ByteArrayContent(content) }
                 : new(HttpStatusCode.NotFound);
             return Task.FromResult(response);

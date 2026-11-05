@@ -23,7 +23,7 @@ Run the live proofs (skipped unless the variable is set):
 
 ```powershell
 $env:TRACKDUB_NVIDIA_AFX_RUNTIME_ROOT = "<SDK root>"
-dotnet test tests/Trackdub.Composition.Tests -f net10.0-windows10.0.19041.0 --filter "FullyQualifiedName~NvidiaAfxLiveRuntime"
+dotnet test tests/Trackdub.Composition.Tests -f net11.0-windows10.0.19041.0 --filter "FullyQualifiedName~NvidiaAfxLiveRuntime"
 ```
 
 ## Runtime layout

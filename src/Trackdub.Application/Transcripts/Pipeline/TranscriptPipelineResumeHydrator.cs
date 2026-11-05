@@ -77,12 +77,31 @@ internal static class TranscriptPipelineResumeHydrator
             return context;
         }
 
+        // Accept the normalized audio and the pre-enhancement VAD source as valid lineage; the
+        // enhancement stage consumes one of those, and a stale artifact from a changed source
+        // must not reach ASR.
+        Guid[] sourceArtifactIds =
+        [
+            context.NormalizedAudioArtifact.Id,
+            context.AudioRoutingPlan.VadAudioArtifact.Id
+        ];
+
+        // A Studio Voice artifact whose persisted source no longer matches the current source
+        // must not feed any stage; leave the original routing so the run uses the current audio.
+        if (TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact)
+            && !TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact, sourceArtifactIds))
+        {
+            return context;
+        }
+
         TranscriptAudioRoutingPlan enhancedRoutingPlan = context.AudioRoutingPlan with
         {
             VadAudioArtifact = enhancedArtifact,
             DiarizationAudioArtifact = enhancedArtifact
         };
-        enhancedRoutingPlan = enhancedRoutingPlan.WithStudioVoiceAsrSourceIfApplicable(enhancedArtifact);
+        enhancedRoutingPlan = enhancedRoutingPlan.WithStudioVoiceAsrSourceIfApplicable(
+            enhancedArtifact,
+            sourceArtifactIds);
 
         return context with
         {

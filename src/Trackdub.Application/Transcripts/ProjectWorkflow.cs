@@ -507,6 +507,12 @@ public sealed class ProjectWorkflow(
         ProjectArtifact selectedSource = normalizedAudioArtifact;
         const SpeechAudioSourceKind sourceKind = SpeechAudioSourceKind.FullMix;
 
+        // A SpeechEnhancedAudio artifact from a completed enhancement run stays eligible
+        // as the preparation input either way; when reuse is suppressed it must not also
+        // suppress a fresh enhancement pass.
+        ProjectArtifact? existingEnhanced =
+            TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(existingArtifacts, stageRuns);
+
         // If speech processed audio from a completed preparation run already exists, skip
         // both enhancement and preparation. Artifacts registered by a canceled or failed
         // producer are never reused, even when they are the newest rows.
@@ -516,17 +522,16 @@ public sealed class ProjectWorkflow(
             : null;
         if (existingProcessed is not null)
         {
-            return TranscriptAudioRoutingPlan.Raw(existingProcessed, sourceKind)
-                .WithUnprocessedAsrSource(normalizedAudioArtifact);
+            return ApplyStudioVoiceAsrRouting(
+                TranscriptAudioRoutingPlan.Raw(existingProcessed, sourceKind)
+                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
+                enhancementResult: null,
+                existingEnhanced,
+                normalizedAudioArtifact.Id);
         }
 
         SpeechAudioEnhancementStageResult? enhancementResult = null;
 
-        // A SpeechEnhancedAudio artifact from a completed enhancement run stays eligible
-        // as the preparation input either way; when reuse is suppressed it must not also
-        // suppress a fresh enhancement pass.
-        ProjectArtifact? existingEnhanced =
-            TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(existingArtifacts, stageRuns);
         if (speechAudioEnhancementStageHandler is not null && (existingEnhanced is null || !allowExistingReuse))
         {
             try
@@ -558,8 +563,12 @@ public sealed class ProjectWorkflow(
             ProjectArtifact fallbackSource = enhancementResult?.EnhancedAudioArtifact
                 ?? existingEnhanced
                 ?? selectedSource;
-            return TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
-                .WithUnprocessedAsrSource(normalizedAudioArtifact);
+            return ApplyStudioVoiceAsrRouting(
+                TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
+                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
+                enhancementResult,
+                existingEnhanced,
+                normalizedAudioArtifact.Id);
         }
 
         ProjectArtifact prepNormalizedAudio = enhancementResult?.EnhancedAudioArtifact
@@ -577,7 +586,11 @@ public sealed class ProjectWorkflow(
                         existingArtifacts),
                     cancellationToken)
                 .ConfigureAwait(false);
-            return preparedPlan.WithUnprocessedAsrSource(normalizedAudioArtifact);
+            return ApplyStudioVoiceAsrRouting(
+                preparedPlan.WithUnprocessedAsrSource(normalizedAudioArtifact),
+                enhancementResult,
+                existingEnhanced,
+                normalizedAudioArtifact.Id);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not TaskCanceledException)
         {
@@ -586,9 +599,37 @@ public sealed class ProjectWorkflow(
             ProjectArtifact fallbackSource = enhancementResult?.EnhancedAudioArtifact
                 ?? existingEnhanced
                 ?? selectedSource;
-            return TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
-                .WithUnprocessedAsrSource(normalizedAudioArtifact);
+            return ApplyStudioVoiceAsrRouting(
+                TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
+                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
+                enhancementResult,
+                existingEnhanced,
+                normalizedAudioArtifact.Id);
         }
+    }
+
+    /// <summary>
+    /// Routes ASR to the Studio Voice artifact only when the native effect produced it. A fresh
+    /// enhancement result is authoritative; a reused artifact must still carry matching source
+    /// lineage so a changed source cannot transcribe stale enhanced audio.
+    /// </summary>
+    private static TranscriptAudioRoutingPlan ApplyStudioVoiceAsrRouting(
+        TranscriptAudioRoutingPlan plan,
+        SpeechAudioEnhancementStageResult? enhancementResult,
+        ProjectArtifact? existingEnhanced,
+        Guid sourceArtifactId)
+    {
+        if (enhancementResult is not null)
+        {
+            return plan.WithSpeechEnhancementAsrSource(
+                enhancementResult.EnhancedAudioArtifact,
+                enhancementResult.Backend,
+                enhancementResult.BackendProfile);
+        }
+
+        return existingEnhanced is not null
+            ? plan.WithStudioVoiceAsrSourceIfApplicable(existingEnhanced, [sourceArtifactId])
+            : plan;
     }
 
     private sealed record TranscriptAudioRoutingRequest

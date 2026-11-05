@@ -222,6 +222,43 @@ public sealed class NvidiaAfxLiveRuntimeTests(Xunit.ITestOutputHelper output)
         Assert.True(maxDifference < 1e-3, $"Streamed output diverges from whole-buffer output by {maxDifference}.");
     }
 
+    [NvidiaAfxLiveRuntimeFact]
+    public async Task Studio_voice_streamed_processing_matches_whole_buffer_across_six_second_frames()
+    {
+        (string root, string architecture) = ResolveRuntime();
+        NvidiaAfxProfileDefinition definition = NvidiaAfxProfileCatalog.GetDefinition(NvidiaAfxProfile.StudioVoice);
+
+        foreach (int sampleRate in definition.SupportedSampleRates)
+        {
+            // 13 s spans more than two six-second frames and ends mid-frame, so the new
+            // one-frame-per-chunk path and the final zero-padding/trim are both exercised.
+            float[] input = BuildNoisySpeechLikeSignal(sampleRate, seconds: 13)[..((sampleRate * 13) - 7)];
+
+            using NvidiaAfxSession whole = NvidiaAfxSession.Create(definition, root, sampleRate, 0f, architecture);
+            float[] expected = whole.Process(input);
+
+            using NvidiaAfxSession streamed = NvidiaAfxSession.Create(definition, root, sampleRate, 0f, architecture);
+            var collected = new List<float>();
+            long written = await streamed.ProcessStreamAsync(
+                new ArrayAudioSamples(input, sampleRate),
+                farEnd: null,
+                (chunk, _) =>
+                {
+                    collected.AddRange(chunk.ToArray());
+                    return ValueTask.CompletedTask;
+                },
+                CancellationToken.None);
+
+            Assert.Equal(expected.Length, written);
+            Assert.Equal(expected.Length, collected.Count);
+            double maxDifference = expected.Zip(collected, (a, b) => Math.Abs(a - b)).Max();
+            output.WriteLine($"Studio Voice @ {sampleRate} Hz whole vs streamed max |difference| = {maxDifference:G3}");
+            Assert.True(
+                maxDifference < 1e-3,
+                $"Studio Voice streamed output diverges from whole-buffer output at {sampleRate} Hz by {maxDifference}.");
+        }
+    }
+
     private sealed class ArrayAudioSamples(float[] data, int sampleRate) : IAudioSamples
     {
         public int SampleRate => sampleRate;

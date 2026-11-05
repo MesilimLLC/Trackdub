@@ -39,27 +39,28 @@ public sealed record TranscriptAudioRoutingPlan(
             AsrDecision = CreateRawDecision(SpeechPipelineStageKind.Asr, SourceKind),
         };
 
+    private const string StudioVoiceProfileId = "nvidia-afx-studio-voice-high-quality";
+    private const string StudioVoiceProvenancePrefix = "generated-nvidia-afx-speech-enhancement:";
+    private static readonly string StudioVoiceProvenanceSuffix =
+        $":profile={NvidiaAfxIntegration.StudioVoiceHighQualitySelector}";
     private static readonly string _studioVoiceProfileHash =
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("nvidia-afx-studio-voice-high-quality")))
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(StudioVoiceProfileId)))
             .ToLowerInvariant();
 
     public TranscriptAudioRoutingPlan WithStudioVoiceAsrSource(ProjectArtifact enhancedAudioArtifact)
     {
         ArgumentNullException.ThrowIfNull(enhancedAudioArtifact);
-        const string profileId = "nvidia-afx-studio-voice-high-quality";
-        const string effectSelector = NvidiaAfxIntegration.StudioVoiceHighQualitySelector;
-        string profileHash = _studioVoiceProfileHash;
 
         return this with
         {
             AsrAudioArtifact = enhancedAudioArtifact,
             AsrDecision = AsrDecision with
             {
-                ProfileId = profileId,
+                ProfileId = StudioVoiceProfileId,
                 ProfileVersion = 1,
                 CatalogVersion = "nvidia-afx-profile-v1",
-                FilterChain = effectSelector,
-                ProfileHash = profileHash,
+                FilterChain = NvidiaAfxIntegration.StudioVoiceHighQualitySelector,
+                ProfileHash = _studioVoiceProfileHash,
                 RequiresProcessing = true,
                 OutputArtifactId = enhancedAudioArtifact.Id,
                 OutputRelativePath = enhancedAudioArtifact.RelativePath,
@@ -79,18 +80,40 @@ public sealed record TranscriptAudioRoutingPlan(
             ? WithStudioVoiceAsrSource(enhancedAudioArtifact)
             : this;
 
-    public static bool IsStudioVoiceEnhancementArtifact(ProjectArtifact artifact)
+    /// <summary>
+    /// True when the artifact was produced by the native Studio Voice effect. When
+    /// <paramref name="sourceArtifactIds"/> is supplied, the persisted source lineage must also match
+    /// one of the current source artifacts, so a stale enhancement from an earlier source is never
+    /// routed to ASR after the source changes.
+    /// </summary>
+    public static bool IsStudioVoiceEnhancementArtifact(
+        ProjectArtifact artifact,
+        IReadOnlyCollection<Guid>? sourceArtifactIds = null)
     {
         ArgumentNullException.ThrowIfNull(artifact);
-        const string provenancePrefix = "generated-nvidia-afx-speech-enhancement:";
-        string provenanceSuffix = $":profile={NvidiaAfxIntegration.StudioVoiceHighQualitySelector}";
-        return artifact.Provenance is { } provenance
-            && provenance.StartsWith(provenancePrefix, StringComparison.Ordinal)
-            && provenance.EndsWith(provenanceSuffix, StringComparison.Ordinal);
+        if (artifact.Provenance is not { } provenance
+            || !provenance.StartsWith(StudioVoiceProvenancePrefix, StringComparison.Ordinal)
+            || !provenance.EndsWith(StudioVoiceProvenanceSuffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (sourceArtifactIds is null || sourceArtifactIds.Count == 0)
+        {
+            return true;
+        }
+
+        return sourceArtifactIds.Any(sourceArtifactId =>
+            string.Equals(
+                provenance,
+                $"{StudioVoiceProvenancePrefix}{sourceArtifactId:D}{StudioVoiceProvenanceSuffix}",
+                StringComparison.Ordinal));
     }
 
-    public TranscriptAudioRoutingPlan WithStudioVoiceAsrSourceIfApplicable(ProjectArtifact enhancedAudioArtifact) =>
-        IsStudioVoiceEnhancementArtifact(enhancedAudioArtifact)
+    public TranscriptAudioRoutingPlan WithStudioVoiceAsrSourceIfApplicable(
+        ProjectArtifact enhancedAudioArtifact,
+        IReadOnlyCollection<Guid>? sourceArtifactIds = null) =>
+        IsStudioVoiceEnhancementArtifact(enhancedAudioArtifact, sourceArtifactIds)
             ? WithStudioVoiceAsrSource(enhancedAudioArtifact)
             : this;
 

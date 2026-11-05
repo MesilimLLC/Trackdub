@@ -42,6 +42,16 @@ public sealed record NvidiaAfxProfileDefinition(
     /// <summary>Number of native frames to run for a readiness probe.</summary>
     int ReadinessProbeFrameCount = 100)
 {
+    /// <summary>
+    /// Number of native frames to run for a readiness probe. A probe that processes no audio
+    /// cannot prove the effect works, so non-positive values are rejected at construction.
+    /// </summary>
+    public int ReadinessProbeFrameCount { get; init; } = ReadinessProbeFrameCount >= 1
+        ? ReadinessProbeFrameCount
+        : throw new ArgumentOutOfRangeException(
+            nameof(ReadinessProbeFrameCount),
+            "A readiness probe must process at least one native frame.");
+
     public int ResolveOutputSampleRate(int inputSampleRate) =>
         OutputSampleRate ?? inputSampleRate;
 

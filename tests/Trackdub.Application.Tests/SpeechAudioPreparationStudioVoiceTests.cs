@@ -26,6 +26,25 @@ public sealed partial class SpeechAudioPreparationTests
         Assert.Same(original, plan.VadAudioArtifact);
     }
 
+    [Fact]
+    public void WithSpeechEnhancementAsrSource_routes_asr_for_native_studio_voice()
+    {
+        MediaAsset mediaAsset = CreateMediaAsset();
+        ProjectArtifact original = CreateArtifact(mediaAsset, ArtifactKind.NormalizedAudio, "media/normalized_audio.wav");
+        ProjectArtifact enhanced = CreateArtifact(mediaAsset, ArtifactKind.SpeechEnhancedAudio, "artifacts/audio/speech-enhancement/x/speech.wav");
+        TranscriptAudioRoutingPlan plan = TranscriptAudioRoutingPlan.Raw(original, SpeechAudioSourceKind.FullMix);
+
+        TranscriptAudioRoutingPlan routed = plan.WithSpeechEnhancementAsrSource(
+            enhanced,
+            SpeechAudioEnhancementBackend.NvidiaAfx,
+            NvidiaAfxIntegration.StudioVoiceHighQualitySelector);
+
+        Assert.Same(enhanced, routed.AsrAudioArtifact);
+        Assert.Equal("nvidia-afx-studio-voice-high-quality", routed.AsrDecision.ProfileId);
+        Assert.True(routed.AsrDecision.RequiresProcessing);
+        Assert.Equal(enhanced.Id, routed.AsrDecision.OutputArtifactId);
+    }
+
     [Theory]
     [InlineData(SpeechAudioEnhancementBackend.Ffmpeg, "studio_voice_high_quality")]
     [InlineData(SpeechAudioEnhancementBackend.DeepFilterNet, "studio_voice_high_quality")]
@@ -62,5 +81,33 @@ public sealed partial class SpeechAudioPreparationTests
         Assert.True(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(studioVoice));
         Assert.False(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(fallback));
         Assert.False(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(original));
+    }
+
+    [Fact]
+    public void IsStudioVoiceEnhancementArtifact_rejects_stale_source_lineage()
+    {
+        MediaAsset mediaAsset = CreateMediaAsset();
+        ProjectArtifact currentSource = CreateArtifact(mediaAsset, ArtifactKind.NormalizedAudio, "media/normalized_audio.wav");
+        Guid previousSourceId = Guid.NewGuid();
+        ProjectArtifact studioVoice = CreateArtifact(mediaAsset, ArtifactKind.SpeechEnhancedAudio, "artifacts/audio/speech-enhancement/x/speech.wav") with
+        {
+            Provenance = $"generated-nvidia-afx-speech-enhancement:{previousSourceId:D}:profile={NvidiaAfxIntegration.StudioVoiceHighQualitySelector}"
+        };
+        ProjectArtifact currentStudioVoice = studioVoice with
+        {
+            Provenance = $"generated-nvidia-afx-speech-enhancement:{currentSource.Id:D}:profile={NvidiaAfxIntegration.StudioVoiceHighQualitySelector}"
+        };
+
+        Assert.True(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(studioVoice, [previousSourceId]));
+        Assert.False(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(studioVoice, [currentSource.Id]));
+        Assert.True(TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(currentStudioVoice, [currentSource.Id]));
+
+        TranscriptAudioRoutingPlan plan = TranscriptAudioRoutingPlan.Raw(currentSource, SpeechAudioSourceKind.FullMix);
+        Assert.Same(
+            currentSource,
+            plan.WithStudioVoiceAsrSourceIfApplicable(studioVoice, [currentSource.Id]).AsrAudioArtifact);
+        Assert.Same(
+            currentStudioVoice,
+            plan.WithStudioVoiceAsrSourceIfApplicable(currentStudioVoice, [currentSource.Id]).AsrAudioArtifact);
     }
 }

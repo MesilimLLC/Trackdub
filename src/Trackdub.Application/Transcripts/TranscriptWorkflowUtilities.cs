@@ -142,11 +142,22 @@ public static class TranscriptWorkflowUtilities
 
     public static ProjectArtifact? ResolveAsrAudioArtifact(
         IReadOnlyList<ProjectArtifact> artifacts,
-        IReadOnlyList<StageRunRecord>? stageRuns = null) =>
-        ResolveLatestCompletedAudioPreparationAsrArtifact(artifacts, stageRuns)
-        ?? GetAcceptedSpeechEnhancedAudio(artifacts, stageRuns)
-        ?? GetLatestAcceptedVocalStem(artifacts, stageRuns)
-        ?? GetLatestArtifactByKind(artifacts, ArtifactKind.NormalizedAudio);
+        IReadOnlyList<StageRunRecord>? stageRuns = null)
+    {
+        ProjectArtifact? enhanced = GetAcceptedSpeechEnhancedAudio(artifacts, stageRuns);
+
+        // Studio Voice is the only enhancement that improves ASR. When the native effect ran,
+        // re-transcription and overlap rescue must use its output instead of the unprocessed mix.
+        if (enhanced is not null && TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhanced))
+        {
+            return enhanced;
+        }
+
+        return ResolveLatestCompletedAudioPreparationAsrArtifact(artifacts, stageRuns)
+            ?? enhanced
+            ?? GetLatestAcceptedVocalStem(artifacts, stageRuns)
+            ?? GetLatestArtifactByKind(artifacts, ArtifactKind.NormalizedAudio);
+    }
 
     public static ProjectArtifact? GetLatestAcceptedVocalStem(
         IReadOnlyList<ProjectArtifact> artifacts,

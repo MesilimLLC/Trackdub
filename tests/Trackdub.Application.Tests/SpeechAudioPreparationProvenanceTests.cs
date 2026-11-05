@@ -183,6 +183,31 @@ public sealed class SpeechAudioPreparationProvenanceTests
     }
 
     [Fact]
+    public void ResolveAsrAudioArtifact_prefers_native_studio_voice_enhancement()
+    {
+        Guid projectId = Guid.NewGuid();
+        Guid mediaAssetId = Guid.NewGuid();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        StageRunRecord enhancementRun = StageRunRecord
+            .Start(projectId, StageNames.SpeechEnhancement, now)
+            .Complete(now.AddMinutes(1));
+        var normalized = new ProjectArtifact(
+            Guid.NewGuid(), projectId, mediaAssetId, ArtifactKind.NormalizedAudio,
+            ProjectArtifactPaths.NormalizedAudioRelativePath, "hash", 100, 12.0d, 48000, 1, now);
+        ProjectArtifact enhanced = CreateEnhancedArtifact(projectId, enhancementRun.Id, now.AddMinutes(1)) with
+        {
+            MediaAssetId = mediaAssetId,
+            Provenance = $"generated-nvidia-afx-speech-enhancement:{normalized.Id:D}:profile=studio_voice_high_quality"
+        };
+
+        ProjectArtifact? resolved = TranscriptWorkflowUtilities.ResolveAsrAudioArtifact(
+            [normalized, enhanced],
+            [enhancementRun]);
+
+        Assert.Equal(enhanced.Id, resolved?.Id);
+    }
+
+    [Fact]
     public void ResolveAsrAudioArtifact_uses_earlier_completed_run_when_latest_preparation_run_canceled()
     {
         Guid projectId = Guid.NewGuid();
