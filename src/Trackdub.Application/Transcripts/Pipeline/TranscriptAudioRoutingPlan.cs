@@ -47,7 +47,7 @@ public sealed record TranscriptAudioRoutingPlan(
     {
         ArgumentNullException.ThrowIfNull(enhancedAudioArtifact);
         const string profileId = "nvidia-afx-studio-voice-high-quality";
-        const string effectSelector = "studio_voice_high_quality";
+        const string effectSelector = NvidiaAfxIntegration.StudioVoiceHighQualitySelector;
         string profileHash = _studioVoiceProfileHash;
 
         return this with
