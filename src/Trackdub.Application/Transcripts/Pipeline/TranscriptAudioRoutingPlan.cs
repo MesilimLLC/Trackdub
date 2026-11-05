@@ -91,9 +91,12 @@ public sealed record TranscriptAudioRoutingPlan(
         IReadOnlyCollection<Guid>? sourceArtifactIds = null)
     {
         ArgumentNullException.ThrowIfNull(artifact);
-        if (artifact.Provenance is not { } provenance
-            || !provenance.StartsWith(StudioVoiceProvenancePrefix, StringComparison.Ordinal)
-            || !provenance.EndsWith(StudioVoiceProvenanceSuffix, StringComparison.Ordinal))
+        if (artifact.Provenance is not { } provenance)
+        {
+            return false;
+        }
+
+        if (!HasStudioVoiceProvenance(provenance))
         {
             return false;
         }
@@ -108,6 +111,16 @@ public sealed record TranscriptAudioRoutingPlan(
                 provenance,
                 $"{StudioVoiceProvenancePrefix}{sourceArtifactId:D}{StudioVoiceProvenanceSuffix}",
                 StringComparison.Ordinal));
+    }
+
+    private static bool HasStudioVoiceProvenance(string provenance)
+    {
+        if (!provenance.StartsWith(StudioVoiceProvenancePrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return provenance.EndsWith(StudioVoiceProvenanceSuffix, StringComparison.Ordinal);
     }
 
     public TranscriptAudioRoutingPlan WithStudioVoiceAsrSourceIfApplicable(

@@ -158,53 +158,48 @@ public sealed class SpeechAudioPreparationProvenanceTests
     }
 
     [Fact]
-    public void ResolveAsrAudioArtifact_does_not_fall_back_to_a_failed_enhancement_producer()
+    public void ResolveAsrAudioArtifact_does_not_fall_back_to_a_failed_enhancement_producer() =>
+        AssertResolvedAsrSource(EnhancementOutcome.Failed);
+
+    [Fact]
+    public void ResolveAsrAudioArtifact_prefers_native_studio_voice_enhancement() =>
+        AssertResolvedAsrSource(EnhancementOutcome.Completed);
+
+    private static void AssertResolvedAsrSource(EnhancementOutcome outcome)
     {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         Guid projectId = Guid.NewGuid();
         Guid mediaAssetId = Guid.NewGuid();
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        StageRunRecord failedRun = StageRunRecord
-            .Start(projectId, StageNames.SpeechEnhancement, now)
-            .Fail(now.AddMinutes(1), "failed");
-        var normalized = new ProjectArtifact(
+        StageRunRecord run = StageRunRecord
+            .Start(projectId, StageNames.SpeechEnhancement, now);
+        run = outcome == EnhancementOutcome.Completed
+            ? run.Complete(now.AddMinutes(1))
+            : run.Fail(now.AddMinutes(1), "failed");
+        ProjectArtifact normalized = new(
             Guid.NewGuid(), projectId, mediaAssetId, ArtifactKind.NormalizedAudio,
             ProjectArtifactPaths.NormalizedAudioRelativePath, "hash", 100, 12.0d, 48000, 1, now);
-        ProjectArtifact failedEnhanced = CreateEnhancedArtifact(projectId, failedRun.Id, now.AddMinutes(1)) with
+        ProjectArtifact enhanced = CreateEnhancedArtifact(projectId, run.Id, now.AddMinutes(1)) with
         {
             ProjectId = projectId,
             MediaAssetId = mediaAssetId,
-        };
-
-        ProjectArtifact? resolved = TranscriptWorkflowUtilities.ResolveAsrAudioArtifact(
-            [normalized, failedEnhanced],
-            [failedRun]);
-
-        Assert.Equal(normalized.Id, resolved?.Id);
-    }
-
-    [Fact]
-    public void ResolveAsrAudioArtifact_prefers_native_studio_voice_enhancement()
-    {
-        Guid projectId = Guid.NewGuid();
-        Guid mediaAssetId = Guid.NewGuid();
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        StageRunRecord enhancementRun = StageRunRecord
-            .Start(projectId, StageNames.SpeechEnhancement, now)
-            .Complete(now.AddMinutes(1));
-        var normalized = new ProjectArtifact(
-            Guid.NewGuid(), projectId, mediaAssetId, ArtifactKind.NormalizedAudio,
-            ProjectArtifactPaths.NormalizedAudioRelativePath, "hash", 100, 12.0d, 48000, 1, now);
-        ProjectArtifact enhanced = CreateEnhancedArtifact(projectId, enhancementRun.Id, now.AddMinutes(1)) with
-        {
-            MediaAssetId = mediaAssetId,
-            Provenance = $"generated-nvidia-afx-speech-enhancement:{normalized.Id:D}:profile=studio_voice_high_quality"
+            Provenance = outcome == EnhancementOutcome.Completed
+                ? $"generated-nvidia-afx-speech-enhancement:{normalized.Id:D}:profile=studio_voice_high_quality"
+                : "speech-enhancement",
         };
 
         ProjectArtifact? resolved = TranscriptWorkflowUtilities.ResolveAsrAudioArtifact(
             [normalized, enhanced],
-            [enhancementRun]);
+            [run]);
 
-        Assert.Equal(enhanced.Id, resolved?.Id);
+        Assert.Equal(
+            outcome == EnhancementOutcome.Completed ? enhanced.Id : normalized.Id,
+            resolved?.Id);
+    }
+
+    private enum EnhancementOutcome
+    {
+        Failed,
+        Completed,
     }
 
     [Fact]

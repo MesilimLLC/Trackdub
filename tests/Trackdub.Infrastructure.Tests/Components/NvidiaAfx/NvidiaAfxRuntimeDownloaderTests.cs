@@ -9,6 +9,8 @@ namespace Trackdub.Infrastructure.Tests.Components.NvidiaAfx;
 
 public sealed class NvidiaAfxRuntimeDownloaderTests
 {
+    private const string SinglePartUrl = "https://cdn.example.com/afx/runtime.zip";
+
     [Fact]
     public async Task DownloadAndInstallAsync_ReassemblesAndVerifiesArchiveParts()
     {
@@ -20,22 +22,14 @@ public sealed class NvidiaAfxRuntimeDownloaderTests
             int split = archive.Length / 2;
             byte[] firstPart = archive[..split];
             byte[] secondPart = archive[split..];
-            string baseUrl = "https://cdn.example.com/afx/runtime.zip";
+            string baseUrl = SinglePartUrl;
             var handler = new PartHandler(
                 new Uri(baseUrl + ".part001"), firstPart,
                 new Uri(baseUrl + ".part002"), secondPart);
             using var httpClient = new HttpClient(handler);
             var store = new ComponentStore(tempRoot, new NoopLogger());
             var downloader = new NvidiaAfxRuntimeDownloader(store, httpClient, new NoopLogger(), static () => false);
-            var package = new NvidiaAfxRuntimePackage(
-                Architecture: "ada",
-                DownloadUrl: baseUrl,
-                Sha256: Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(),
-                SizeBytes: archive.Length,
-                RuntimeVersion: "3.0.0",
-                LicenseUrl: "https://example.com/license",
-                ModelRelativePaths: [],
-                PartCount: 2);
+            NvidiaAfxRuntimePackage package = CreatePackage(archive, archive.Length, partCount: 2);
 
             string installPath = await downloader.DownloadAndInstallAsync(package, null, CancellationToken.None);
 
@@ -45,84 +39,80 @@ public sealed class NvidiaAfxRuntimeDownloaderTests
         }
         finally
         {
-            if (Directory.Exists(tempRoot))
-            {
-                Directory.Delete(tempRoot, recursive: true);
-            }
+            DeleteTempRoot(tempRoot);
         }
     }
 
     [Fact]
-    public async Task DownloadAndInstallAsync_RejectsContentLargerThanDeclaredSize()
+    public Task DownloadAndInstallAsync_RejectsContentLargerThanDeclaredSize() =>
+        AssertInvalidArchiveAsync(exceedsDeclaredSize: true);
+
+    [Fact]
+    public Task DownloadAndInstallAsync_RemovesPartialArchiveWhenVerificationFails() =>
+        AssertInvalidArchiveAsync(exceedsDeclaredSize: false);
+
+    private static Task AssertInvalidArchiveAsync(bool exceedsDeclaredSize) =>
+        WithSinglePartDownloaderAsync(
+            archive => exceedsDeclaredSize
+                ? CreatePackage(archive, archive.Length - 1)
+                : CreatePackage(archive, archive.Length, new string('a', 64)),
+            async (downloader, store, package) =>
+            {
+                InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => downloader.DownloadAndInstallAsync(package, null, CancellationToken.None));
+
+                if (exceedsDeclaredSize)
+                {
+                    Assert.Contains("exceeds the declared size", error.Message, StringComparison.Ordinal);
+                }
+                else
+                {
+                    Assert.False(store.IsInstalled(NvidiaAfxRuntimeDownloader.ComponentId));
+                }
+
+                Assert.Empty(Directory.EnumerateFiles(store.GetComponentDirectory(NvidiaAfxRuntimeDownloader.ComponentId)));
+            });
+
+    private static async Task WithSinglePartDownloaderAsync(
+        Func<byte[], NvidiaAfxRuntimePackage> createPackage,
+        Func<NvidiaAfxRuntimeDownloader, ComponentStore, NvidiaAfxRuntimePackage, Task> testAsync)
     {
         string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-afx-download-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
         try
         {
             byte[] archive = CreateArchive();
-            string url = "https://cdn.example.com/afx/runtime.zip";
-            using var httpClient = new HttpClient(new StaticHandler(new Uri(url), archive));
+            using var httpClient = new HttpClient(new StaticHandler(new Uri(SinglePartUrl), archive));
             var store = new ComponentStore(tempRoot, new NoopLogger());
             var downloader = new NvidiaAfxRuntimeDownloader(store, httpClient, new NoopLogger(), static () => false);
-            var package = new NvidiaAfxRuntimePackage(
-                Architecture: "ada",
-                DownloadUrl: url,
-                Sha256: Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(),
-                SizeBytes: archive.Length - 1,
-                RuntimeVersion: "3.0.0",
-                LicenseUrl: "https://example.com/license",
-                ModelRelativePaths: [],
-                PartCount: 1);
-
-            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => downloader.DownloadAndInstallAsync(package, null, CancellationToken.None));
-
-            Assert.Contains("exceeds the declared size", error.Message, StringComparison.Ordinal);
-            Assert.Empty(Directory.EnumerateFiles(store.GetComponentDirectory(NvidiaAfxRuntimeDownloader.ComponentId)));
+            await testAsync(downloader, store, createPackage(archive));
         }
         finally
         {
-            if (Directory.Exists(tempRoot))
-            {
-                Directory.Delete(tempRoot, recursive: true);
-            }
+            DeleteTempRoot(tempRoot);
         }
     }
 
-    [Fact]
-    public async Task DownloadAndInstallAsync_RemovesPartialArchiveWhenVerificationFails()
+    private static NvidiaAfxRuntimePackage CreatePackage(
+        byte[] archive,
+        long sizeBytes,
+        string? sha256 = null,
+        int partCount = 1) =>
+        new(
+            Architecture: "ada",
+            DownloadUrl: SinglePartUrl,
+            Sha256: sha256 ?? Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(),
+            SizeBytes: sizeBytes,
+            RuntimeVersion: "3.0.0",
+            LicenseUrl: "https://example.com/license",
+            ModelRelativePaths: [],
+            PartCount: partCount);
+
+    private static void DeleteTempRoot(string tempRoot)
     {
-        string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-afx-download-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        try
+        if (Directory.Exists(tempRoot))
         {
-            byte[] archive = CreateArchive();
-            string url = "https://cdn.example.com/afx/runtime.zip";
-            using var httpClient = new HttpClient(new StaticHandler(new Uri(url), archive));
-            var store = new ComponentStore(tempRoot, new NoopLogger());
-            var downloader = new NvidiaAfxRuntimeDownloader(store, httpClient, new NoopLogger(), static () => false);
-            var package = new NvidiaAfxRuntimePackage(
-                Architecture: "ada",
-                DownloadUrl: url,
-                Sha256: new string('a', 64),
-                SizeBytes: archive.Length,
-                RuntimeVersion: "3.0.0",
-                LicenseUrl: "https://example.com/license",
-                ModelRelativePaths: [],
-                PartCount: 1);
-
-            await Assert.ThrowsAsync<InvalidOperationException>(
-                () => downloader.DownloadAndInstallAsync(package, null, CancellationToken.None));
-
-            Assert.False(store.IsInstalled(NvidiaAfxRuntimeDownloader.ComponentId));
-            Assert.Empty(Directory.EnumerateFiles(store.GetComponentDirectory(NvidiaAfxRuntimeDownloader.ComponentId)));
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-            {
-                Directory.Delete(tempRoot, recursive: true);
-            }
+            Directory.Delete(tempRoot, recursive: true);
         }
     }
 

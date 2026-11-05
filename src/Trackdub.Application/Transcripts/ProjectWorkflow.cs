@@ -44,11 +44,15 @@ public sealed class ProjectWorkflow(
         var currentArtifacts = new List<ProjectArtifact> { createResult.AudioArtifact };
 
         TranscriptAudioRoutingPlan audioRoutingPlan = await TryPrepareSpeechAudioAsync(
-            createResult.Project.Id,
-            createResult.MediaAsset,
-            createResult.AudioArtifact,
-            currentArtifacts,
-            cancellationToken).ConfigureAwait(false);
+            new TranscriptAudioRoutingRequest
+            {
+                ProjectId = createResult.Project.Id,
+                MediaAsset = createResult.MediaAsset,
+                NormalizedAudioArtifact = createResult.AudioArtifact,
+                ExistingArtifacts = currentArtifacts,
+                CancellationToken = cancellationToken,
+                PrepareSpeechAudio = true,
+            }).ConfigureAwait(false);
 
         await transcriptGenerationService.GenerateTranscriptAsync(
             createResult.Project,
@@ -92,60 +96,71 @@ public sealed class ProjectWorkflow(
         return await stateService.RefreshArtifactsAndStageRunsAsync(currentState, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<TranscriptProjectState> RunInitialTranscriptionAsync(
+    public Task<TranscriptProjectState> RunInitialTranscriptionAsync(
         TranscriptRunOptions options,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(options.SourceLanguage);
-        InferenceModelPreferences preferences = options.ModelPreferences ?? InferenceModelPreferences.Empty;
-        PreparedTranscriptAudio audio = await PrepareTranscriptAudioAsync(
-            StageNames.Asr,
-            "transcription",
-            options,
-            cancellationToken).ConfigureAwait(false);
+        CancellationToken cancellationToken) =>
+        RunPreparedGenerationAsync(
+            new PreparedGenerationRequest
+            {
+                IsInitial = true,
+                StageName = StageNames.Asr,
+                AudioPurpose = "transcription",
+                Options = options,
+                CancellationToken = cancellationToken,
+            });
 
-        await transcriptGenerationService.GenerateTranscriptAsync(
-            audio.ProjectState.ProjectState.Project,
-            audio.MediaAsset,
-            audio.NormalizedAudioArtifact,
-            audio.AudioRoutingPlan,
-            options.EnableSpeakerDiarization,
-            preferences,
-            cancellationToken,
-            normalizedSourceLanguage,
-            options.Progress).ConfigureAwait(false);
-
-        return await ReloadAsync(audio.ProjectState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<TranscriptProjectState> RunTranscriptStageAsync(
+    public Task<TranscriptProjectState> RunTranscriptStageAsync(
         string stageName,
         TranscriptRunOptions options,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stageName);
-        ArgumentNullException.ThrowIfNull(options);
-        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(options.SourceLanguage);
-        PreparedTranscriptAudio audio = await PrepareTranscriptAudioAsync(
-            stageName,
-            "this stage",
-            options,
-            cancellationToken).ConfigureAwait(false);
+        return RunPreparedGenerationAsync(
+            new PreparedGenerationRequest
+            {
+                IsInitial = false,
+                StageName = stageName,
+                AudioPurpose = "this stage",
+                Options = options,
+                CancellationToken = cancellationToken,
+            });
+    }
 
-        await transcriptGenerationService.GenerateTranscriptStageAsync(
-            audio.ProjectState.ProjectState.Project,
-            audio.MediaAsset,
-            audio.NormalizedAudioArtifact,
-            audio.AudioRoutingPlan,
-            stageName,
-            options.EnableSpeakerDiarization,
-            options.ModelPreferences ?? InferenceModelPreferences.Empty,
-            cancellationToken,
-            normalizedSourceLanguage,
-            options.Progress).ConfigureAwait(false);
+    private async Task<TranscriptProjectState> RunPreparedGenerationAsync(PreparedGenerationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request.Options);
+        string? normalizedSourceLanguage = TranscriptWorkflowUtilities.NormalizeTranscriptLanguageCode(request.Options.SourceLanguage);
+        PreparedTranscriptAudio audio = await PrepareTranscriptAudioAsync(request).ConfigureAwait(false);
 
-        return await ReloadAsync(audio.ProjectState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
+        if (request.IsInitial)
+        {
+            await transcriptGenerationService.GenerateTranscriptAsync(
+                audio.ProjectState.ProjectState.Project,
+                audio.MediaAsset,
+                audio.NormalizedAudioArtifact,
+                audio.AudioRoutingPlan,
+                request.Options.EnableSpeakerDiarization,
+                request.Options.ModelPreferences ?? InferenceModelPreferences.Empty,
+                request.CancellationToken,
+                normalizedSourceLanguage,
+                request.Options.Progress).ConfigureAwait(false);
+        }
+        else
+        {
+            await transcriptGenerationService.GenerateTranscriptStageAsync(
+                audio.ProjectState.ProjectState.Project,
+                audio.MediaAsset,
+                audio.NormalizedAudioArtifact,
+                audio.AudioRoutingPlan,
+                request.StageName,
+                request.Options.EnableSpeakerDiarization,
+                request.Options.ModelPreferences ?? InferenceModelPreferences.Empty,
+                request.CancellationToken,
+                normalizedSourceLanguage,
+                request.Options.Progress).ConfigureAwait(false);
+        }
+
+        return await ReloadAsync(audio.ProjectState.SelectedTranslationTargetLanguage, request.CancellationToken).ConfigureAwait(false);
     }
 
     public Task<TranscriptProjectState> OpenAsync(CancellationToken cancellationToken) =>
@@ -224,9 +239,9 @@ public sealed class ProjectWorkflow(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not TaskCanceledException)
         {
-            await WriteDialogueIsolationUnavailableAsync(
-                currentState.ProjectState.Project.Id,
-                mediaAsset.Id,
+            await WriteDegradationAsync(
+                DialogueIsolationUnavailable,
+                new DegradationTarget(currentState.ProjectState.Project.Id, mediaAsset.Id),
                 ex.Message,
                 CancellationToken.None).ConfigureAwait(false);
             throw;
@@ -258,13 +273,17 @@ public sealed class ProjectWorkflow(
         // processed output must not be silently reused here.
         DateTimeOffset stageWorkStartedUtc = DateTimeOffset.UtcNow;
         await TryPrepareSpeechAudioAsync(
-            currentState.ProjectState.Project.Id,
-            mediaAsset,
-            normalizedAudio,
-            artifacts,
-            cancellationToken,
-            allowExistingReuse: false,
-            stageRuns: currentState.StageRuns).ConfigureAwait(false);
+            new TranscriptAudioRoutingRequest
+            {
+                ProjectId = currentState.ProjectState.Project.Id,
+                MediaAsset = mediaAsset,
+                NormalizedAudioArtifact = normalizedAudio,
+                ExistingArtifacts = artifacts,
+                StageRuns = currentState.StageRuns,
+                CancellationToken = cancellationToken,
+                PrepareSpeechAudio = true,
+                AllowExistingReuse = false,
+            }).ConfigureAwait(false);
 
         TranscriptProjectState refreshed = await stateService
             .RefreshArtifactsAndStageRunsAsync(currentState, cancellationToken)
@@ -329,9 +348,34 @@ public sealed class ProjectWorkflow(
         return await ReloadAsync(currentState.SelectedTranslationTargetLanguage, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task WriteDialogueIsolationUnavailableAsync(
-        Guid projectId,
-        Guid mediaAssetId,
+    private static readonly PreparationDegradation DialogueIsolationUnavailable = new()
+    {
+        StageName = StageNames.Separation,
+        Code = DialogueIsolationUnavailableCode,
+        Message = DialogueIsolationUnavailableMessage,
+        SelectedFallback = "raw-audio",
+        RecommendedAction = "Set up a separation model and regenerate stems.",
+    };
+
+    private static readonly PreparationDegradation PreparationFailed = new()
+    {
+        StageName = StageNames.AudioPreparation,
+        Code = "SPEECH_PREPARATION_FAILED",
+        Message = "Speech audio preparation was unavailable or failed; the unprocessed audio will be used for transcription.",
+        SelectedFallback = "unprocessed-audio",
+    };
+
+    private static readonly PreparationDegradation EnhancementFailed = new()
+    {
+        StageName = StageNames.SpeechEnhancement,
+        Code = "SPEECH_ENHANCEMENT_FAILED",
+        Message = "Speech enhancement failed; the unenhanced audio will be used for transcription.",
+        SelectedFallback = "unenhanced-audio",
+    };
+
+    private async Task WriteDegradationAsync(
+        PreparationDegradation degradation,
+        DegradationTarget target,
         string? detail,
         CancellationToken cancellationToken)
     {
@@ -344,87 +388,21 @@ public sealed class ProjectWorkflow(
         {
             await degradationWriter.WriteAsync(
                 new PipelineDegradationRecord(
-                    StageNames.Separation,
-                    DialogueIsolationUnavailableCode,
-                    DialogueIsolationUnavailableMessage,
+                    degradation.StageName,
+                    degradation.Code,
+                    degradation.Message,
                     Detail: detail,
-                    SelectedFallback: "raw-audio",
-                    RecommendedAction: "Set up a separation model and regenerate stems.",
+                    SelectedFallback: degradation.SelectedFallback,
+                    RecommendedAction: degradation.RecommendedAction,
                     DateTimeOffset.UtcNow,
                     StageRunId: null),
-                projectId,
-                mediaAssetId,
+                target.ProjectId,
+                target.MediaAssetId,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // Degradation write is best-effort; failure must not abort the raw-audio fallback.
-        }
-    }
-
-    private async Task WritePreparationFallbackAsync(
-        Guid projectId,
-        Guid mediaAssetId,
-        string? detail,
-        CancellationToken cancellationToken)
-    {
-        if (degradationWriter is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await degradationWriter.WriteAsync(
-                new PipelineDegradationRecord(
-                    StageNames.AudioPreparation,
-                    "SPEECH_PREPARATION_FAILED",
-                    "Speech audio preparation was unavailable or failed; the unprocessed audio will be used for transcription.",
-                    Detail: detail,
-                    SelectedFallback: "unprocessed-audio",
-                    RecommendedAction: null,
-                    DateTimeOffset.UtcNow,
-                    StageRunId: null),
-                projectId,
-                mediaAssetId,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Degradation write is best-effort.
-        }
-    }
-
-    private async Task WriteEnhancementFallbackAsync(
-        Guid projectId,
-        Guid mediaAssetId,
-        string? detail,
-        CancellationToken cancellationToken)
-    {
-        if (degradationWriter is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await degradationWriter.WriteAsync(
-                new PipelineDegradationRecord(
-                    StageNames.SpeechEnhancement,
-                    "SPEECH_ENHANCEMENT_FAILED",
-                    "Speech enhancement failed; the unenhanced audio will be used for transcription.",
-                    Detail: detail,
-                    SelectedFallback: "unenhanced-audio",
-                    RecommendedAction: null,
-                    DateTimeOffset.UtcNow,
-                    StageRunId: null),
-                projectId,
-                mediaAssetId,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Degradation write is best-effort.
+            // Degradation write is best-effort; failure must not abort the fallback.
         }
     }
 
@@ -434,30 +412,26 @@ public sealed class ProjectWorkflow(
         CancellationToken cancellationToken) =>
         projectMediaIngestService.EnsureNormalizedAudioAsync(mediaAsset, artifacts, cancellationToken);
 
-    private async Task<PreparedTranscriptAudio> PrepareTranscriptAudioAsync(
-        string stageName,
-        string audioPurpose,
-        TranscriptRunOptions options,
-        CancellationToken cancellationToken)
+    private async Task<PreparedTranscriptAudio> PrepareTranscriptAudioAsync(PreparedGenerationRequest request)
     {
-        TranscriptProjectState projectState = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        TranscriptProjectState projectState = await OpenAsync(request.CancellationToken).ConfigureAwait(false);
         MediaAsset mediaAsset = TranscriptWorkflowUtilities.GetRequiredMediaAsset(projectState);
         IReadOnlyList<ProjectArtifact> artifacts = projectState.ProjectState.Artifacts;
         PipelineProgressReporter.Phase(
-            options.Progress,
-            stageName,
+            request.Options.Progress,
+            request.StageName,
             "Preparing audio",
-            $"Ensuring normalized audio for {audioPurpose}.");
+            $"Ensuring normalized audio for {request.AudioPurpose}.");
         ProjectArtifact normalizedAudioArtifact = await EnsureNormalizedAudioForPipelineAsync(
             mediaAsset,
             artifacts,
-            cancellationToken).ConfigureAwait(false);
+            request.CancellationToken).ConfigureAwait(false);
         PipelineProgressReporter.Phase(
-            options.Progress,
-            stageName,
-            options.PrepareSpeechAudio ? "Routing speech audio" : "Using source audio",
-            options.PrepareSpeechAudio
-                ? $"Preparing the best speech audio for {audioPurpose}."
+            request.Options.Progress,
+            request.StageName,
+            request.Options.PrepareSpeechAudio ? "Routing speech audio" : "Using source audio",
+            request.Options.PrepareSpeechAudio
+                ? $"Preparing the best speech audio for {request.AudioPurpose}."
                 : "Source cleanup is off; using normalized source audio.");
         var routingRequest = new TranscriptAudioRoutingRequest
         {
@@ -466,8 +440,8 @@ public sealed class ProjectWorkflow(
             NormalizedAudioArtifact = normalizedAudioArtifact,
             ExistingArtifacts = artifacts,
             StageRuns = projectState.StageRuns,
-            CancellationToken = cancellationToken,
-            PrepareSpeechAudio = options.PrepareSpeechAudio
+            CancellationToken = request.CancellationToken,
+            PrepareSpeechAudio = request.Options.PrepareSpeechAudio
         };
         TranscriptAudioRoutingPlan routingPlan = await PrepareSpeechAudioRoutingAsync(routingRequest)
             .ConfigureAwait(false);
@@ -484,129 +458,150 @@ public sealed class ProjectWorkflow(
                     .WithUnprocessedAsrSource(request.NormalizedAudioArtifact));
         }
 
-        return TryPrepareSpeechAudioAsync(
-            request.ProjectId,
-            request.MediaAsset,
-            request.NormalizedAudioArtifact,
-            request.ExistingArtifacts,
-            request.CancellationToken,
-            stageRuns: request.StageRuns);
+        return TryPrepareSpeechAudioAsync(request);
     }
 
-    private async Task<TranscriptAudioRoutingPlan> TryPrepareSpeechAudioAsync(
-        Guid projectId,
-        MediaAsset mediaAsset,
-        ProjectArtifact normalizedAudioArtifact,
-        IReadOnlyList<ProjectArtifact> existingArtifacts,
-        CancellationToken cancellationToken,
-        bool allowExistingReuse = true,
-        IReadOnlyList<StageRunRecord>? stageRuns = null)
+    private async Task<TranscriptAudioRoutingPlan> TryPrepareSpeechAudioAsync(TranscriptAudioRoutingRequest request)
     {
         // Transcript stages route from the full mix, not a separated vocal stem. Optional audio
         // preparation may enhance and clean that mix before VAD, ASR, and diarization.
-        ProjectArtifact selectedSource = normalizedAudioArtifact;
-        const SpeechAudioSourceKind sourceKind = SpeechAudioSourceKind.FullMix;
 
         // A SpeechEnhancedAudio artifact from a completed enhancement run stays eligible
         // as the preparation input either way; when reuse is suppressed it must not also
         // suppress a fresh enhancement pass.
         ProjectArtifact? existingEnhanced =
-            TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(existingArtifacts, stageRuns);
+            TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(request.ExistingArtifacts, request.StageRuns);
 
         // If speech processed audio from a completed preparation run already exists, skip
         // both enhancement and preparation. Artifacts registered by a canceled or failed
         // producer are never reused, even when they are the newest rows.
         // Reuse is suppressed when the caller requires fresh evidence of the stage's work.
-        ProjectArtifact? existingProcessed = allowExistingReuse
-            ? TranscriptWorkflowUtilities.GetAcceptedSpeechProcessedAudio(existingArtifacts, stageRuns)
+        ProjectArtifact? existingProcessed = request.AllowExistingReuse
+            ? TranscriptWorkflowUtilities.GetAcceptedSpeechProcessedAudio(request.ExistingArtifacts, request.StageRuns)
             : null;
         if (existingProcessed is not null)
         {
-            return ApplyStudioVoiceAsrRouting(
-                TranscriptAudioRoutingPlan.Raw(existingProcessed, sourceKind)
-                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
-                enhancementResult: null,
-                existingEnhanced,
-                normalizedAudioArtifact.Id);
+            return BuildRoutingPlan(request, existingProcessed, enhancementResult: null, existingEnhanced);
         }
 
-        SpeechAudioEnhancementStageResult? enhancementResult = null;
-
-        if (speechAudioEnhancementStageHandler is not null && (existingEnhanced is null || !allowExistingReuse))
-        {
-            try
-            {
-                enhancementResult = await speechAudioEnhancementStageHandler
-                    .HandleAsync(
-                        new SpeechAudioEnhancementStageRequest(
-                            projectId,
-                            mediaAsset,
-                            selectedSource,
-                            existingArtifacts),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException and not TaskCanceledException)
-            {
-                await WriteEnhancementFallbackAsync(projectId, mediaAsset.Id, ex.Message, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
+        SpeechAudioEnhancementStageResult? enhancementResult = await RunEnhancementAsync(
+            request,
+            existingEnhanced).ConfigureAwait(false);
 
         if (speechAudioPreparationStageHandler is null)
         {
-            await WritePreparationFallbackAsync(
-                projectId,
-                mediaAsset.Id,
+            await WriteDegradationAsync(
+                PreparationFailed,
+                new DegradationTarget(request.ProjectId, request.MediaAsset.Id),
                 "Speech audio preparation is not configured in this host.",
-                cancellationToken).ConfigureAwait(false);
-            ProjectArtifact fallbackSource = enhancementResult?.EnhancedAudioArtifact
-                ?? existingEnhanced
-                ?? selectedSource;
-            return ApplyStudioVoiceAsrRouting(
-                TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
-                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
+                request.CancellationToken).ConfigureAwait(false);
+            return BuildRoutingPlan(
+                request,
+                ResolveFallbackSource(request, enhancementResult, existingEnhanced),
                 enhancementResult,
-                existingEnhanced,
-                normalizedAudioArtifact.Id);
+                existingEnhanced);
         }
 
-        ProjectArtifact prepNormalizedAudio = enhancementResult?.EnhancedAudioArtifact
-            ?? existingEnhanced
-            ?? normalizedAudioArtifact;
+        ProjectArtifact prepNormalizedAudio = ResolveFallbackSource(request, enhancementResult, existingEnhanced);
 
         try
         {
             TranscriptAudioRoutingPlan preparedPlan = await speechAudioPreparationStageHandler
                 .HandleAsync(
                     new SpeechAudioPreparationStageRequest(
-                        projectId,
-                        mediaAsset,
+                        request.ProjectId,
+                        request.MediaAsset,
                         prepNormalizedAudio,
-                        existingArtifacts),
-                    cancellationToken)
+                        request.ExistingArtifacts),
+                    request.CancellationToken)
                 .ConfigureAwait(false);
             return ApplyStudioVoiceAsrRouting(
-                preparedPlan.WithUnprocessedAsrSource(normalizedAudioArtifact),
+                preparedPlan.WithUnprocessedAsrSource(request.NormalizedAudioArtifact),
                 enhancementResult,
                 existingEnhanced,
-                normalizedAudioArtifact.Id);
+                request.NormalizedAudioArtifact.Id);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not TaskCanceledException)
         {
-            await WritePreparationFallbackAsync(projectId, mediaAsset.Id, ex.Message, cancellationToken)
-                .ConfigureAwait(false);
-            ProjectArtifact fallbackSource = enhancementResult?.EnhancedAudioArtifact
-                ?? existingEnhanced
-                ?? selectedSource;
-            return ApplyStudioVoiceAsrRouting(
-                TranscriptAudioRoutingPlan.Raw(fallbackSource, sourceKind)
-                    .WithUnprocessedAsrSource(normalizedAudioArtifact),
+            await WriteDegradationAsync(
+                PreparationFailed,
+                new DegradationTarget(request.ProjectId, request.MediaAsset.Id),
+                ex.Message,
+                request.CancellationToken).ConfigureAwait(false);
+            return BuildRoutingPlan(
+                request,
+                ResolveFallbackSource(request, enhancementResult, existingEnhanced),
                 enhancementResult,
-                existingEnhanced,
-                normalizedAudioArtifact.Id);
+                existingEnhanced);
         }
     }
+
+    private async Task<SpeechAudioEnhancementStageResult?> RunEnhancementAsync(
+        TranscriptAudioRoutingRequest request,
+        ProjectArtifact? existingEnhanced)
+    {
+        if (speechAudioEnhancementStageHandler is null)
+        {
+            return null;
+        }
+
+        if (!ShouldRunEnhancement(existingEnhanced, request.AllowExistingReuse))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await speechAudioEnhancementStageHandler
+                .HandleAsync(
+                    new SpeechAudioEnhancementStageRequest(
+                        request.ProjectId,
+                        request.MediaAsset,
+                        request.NormalizedAudioArtifact,
+                        request.ExistingArtifacts),
+                    request.CancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not TaskCanceledException)
+        {
+            await WriteDegradationAsync(
+                EnhancementFailed,
+                new DegradationTarget(request.ProjectId, request.MediaAsset.Id),
+                ex.Message,
+                request.CancellationToken).ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private static bool ShouldRunEnhancement(ProjectArtifact? existingEnhanced, bool allowExistingReuse)
+    {
+        if (existingEnhanced is null)
+        {
+            return true;
+        }
+
+        return !allowExistingReuse;
+    }
+
+    private static ProjectArtifact ResolveFallbackSource(
+        TranscriptAudioRoutingRequest request,
+        SpeechAudioEnhancementStageResult? enhancementResult,
+        ProjectArtifact? existingEnhanced) =>
+        enhancementResult?.EnhancedAudioArtifact
+            ?? existingEnhanced
+            ?? request.NormalizedAudioArtifact;
+
+    private static TranscriptAudioRoutingPlan BuildRoutingPlan(
+        TranscriptAudioRoutingRequest request,
+        ProjectArtifact source,
+        SpeechAudioEnhancementStageResult? enhancementResult,
+        ProjectArtifact? existingEnhanced) =>
+        ApplyStudioVoiceAsrRouting(
+            TranscriptAudioRoutingPlan.Raw(source, SpeechAudioSourceKind.FullMix)
+                .WithUnprocessedAsrSource(request.NormalizedAudioArtifact),
+            enhancementResult,
+            existingEnhanced,
+            request.NormalizedAudioArtifact.Id);
 
     /// <summary>
     /// Routes ASR to the Studio Voice artifact only when the native effect produced it. A fresh
@@ -647,7 +642,37 @@ public sealed class ProjectWorkflow(
         public required CancellationToken CancellationToken { get; init; }
 
         public required bool PrepareSpeechAudio { get; init; }
+
+        public bool AllowExistingReuse { get; init; } = true;
     }
+
+    private sealed record PreparedGenerationRequest
+    {
+        public required bool IsInitial { get; init; }
+
+        public required string StageName { get; init; }
+
+        public required string AudioPurpose { get; init; }
+
+        public required TranscriptRunOptions Options { get; init; }
+
+        public required CancellationToken CancellationToken { get; init; }
+    }
+
+    private sealed record PreparationDegradation
+    {
+        public required string StageName { get; init; }
+
+        public required string Code { get; init; }
+
+        public required string Message { get; init; }
+
+        public required string SelectedFallback { get; init; }
+
+        public string? RecommendedAction { get; init; }
+    }
+
+    private sealed record DegradationTarget(Guid ProjectId, Guid MediaAssetId);
 
     private sealed record PreparedTranscriptAudio(
         TranscriptProjectState ProjectState,
