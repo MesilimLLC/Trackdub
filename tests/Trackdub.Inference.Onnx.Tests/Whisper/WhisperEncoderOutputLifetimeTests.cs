@@ -13,19 +13,58 @@ public sealed class WhisperEncoderOutputLifetimeTests
         var input = NamedOnnxValue.CreateFromTensor(
             "x",
             new DenseTensor<float>(new float[] { 42f }, [1]));
-        IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = session.Run([input]);
+        var outputs = new TrackingOutputs(session.Run([input]));
+        var decodeStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDecode = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
-        float decodedValue = await WhisperEncoderOutputLifetime.ConsumeAsync(
+        Task<float> decode = WhisperEncoderOutputLifetime.ConsumeAsync(
             outputs,
             async hiddenStates =>
             {
                 Assert.Equal(42f, hiddenStates.GetValue(0));
-                await Task.Yield();
+                decodeStarted.SetResult(true);
+                await releaseDecode.Task;
+                Assert.False(outputs.IsDisposed);
                 return hiddenStates.GetValue(0);
             },
             outputName: "y");
 
+        await decodeStarted.Task;
+        Assert.False(outputs.IsDisposed);
+
+        releaseDecode.SetResult(true);
+        float decodedValue = await decode;
+
+        Assert.True(outputs.IsDisposed);
         Assert.Equal(42f, decodedValue);
+    }
+
+    private sealed class TrackingOutputs : IDisposableReadOnlyCollection<DisposableNamedOnnxValue>
+    {
+        private readonly IDisposableReadOnlyCollection<DisposableNamedOnnxValue> inner;
+
+        public TrackingOutputs(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> inner)
+        {
+            this.inner = inner;
+        }
+
+        public bool IsDisposed { get; private set; }
+
+        public int Count => inner.Count;
+
+        public DisposableNamedOnnxValue this[int index] => inner[index];
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+            inner.Dispose();
+        }
+
+        public IEnumerator<DisposableNamedOnnxValue> GetEnumerator() => inner.GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     // x (float32 [1]) -> Identity -> y (float32 [1]); ir_version 7, opset 9.
