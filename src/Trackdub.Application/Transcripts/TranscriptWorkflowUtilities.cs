@@ -21,6 +21,7 @@ namespace Trackdub.Application.Transcripts;
 public static class TranscriptWorkflowUtilities
 {
     private const string AsrStageName = "asr";
+    private const string VadStageName = "vad";
     private const string SelectedSourceProvenanceKey = "selectedSource";
     private const string EnglishLanguageCode = "en";
     private const string SpanishLanguageCode = "es";
@@ -144,19 +145,123 @@ public static class TranscriptWorkflowUtilities
         IReadOnlyList<ProjectArtifact> artifacts,
         IReadOnlyList<StageRunRecord>? stageRuns = null)
     {
-        ProjectArtifact? enhanced = GetAcceptedSpeechEnhancedAudio(artifacts, stageRuns);
-
         // Studio Voice is the only enhancement that improves ASR. When the native effect ran,
         // re-transcription and overlap rescue must use its output instead of the unprocessed mix.
-        if (enhanced is not null && TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhanced))
+        // Its provenance must still point to a current normalized or pre-enhancement VAD source.
+        (ProjectArtifact? preferredEnhanced, ProjectArtifact? fallbackEnhanced) =
+            ResolveAsrEnhancementCandidates(artifacts, stageRuns);
+        if (preferredEnhanced is not null)
         {
-            return enhanced;
+            return preferredEnhanced;
         }
 
         return ResolveLatestCompletedAudioPreparationAsrArtifact(artifacts, stageRuns)
-            ?? enhanced
+            ?? fallbackEnhanced
             ?? GetLatestAcceptedVocalStem(artifacts, stageRuns)
             ?? GetLatestArtifactByKind(artifacts, ArtifactKind.NormalizedAudio);
+    }
+
+    private static (ProjectArtifact? Preferred, ProjectArtifact? Fallback) ResolveAsrEnhancementCandidates(
+        IReadOnlyList<ProjectArtifact> artifacts,
+        IReadOnlyList<StageRunRecord>? stageRuns)
+    {
+        ProjectArtifact? enhanced = GetAcceptedSpeechEnhancedAudio(artifacts, stageRuns);
+        if (enhanced is null)
+        {
+            return (null, null);
+        }
+
+        if (!TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhanced))
+        {
+            return (null, enhanced);
+        }
+
+        Guid[] currentSourceArtifactIds = GetCurrentSpeechEnhancementSourceIds(artifacts, stageRuns);
+        bool hasCurrentLineage = currentSourceArtifactIds.Length > 0 &&
+            TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhanced, currentSourceArtifactIds);
+
+        // Stale Studio Voice audio is unavailable to both the preferred and fallback routes.
+        return hasCurrentLineage ? (enhanced, null) : (null, null);
+    }
+
+    private static Guid[] GetCurrentSpeechEnhancementSourceIds(
+        IReadOnlyList<ProjectArtifact> artifacts,
+        IReadOnlyList<StageRunRecord>? stageRuns)
+    {
+        List<Guid> sourceArtifactIds = [];
+        ProjectArtifact? normalizedAudio = GetLatestArtifactByKind(artifacts, ArtifactKind.NormalizedAudio);
+        if (normalizedAudio is not null)
+        {
+            sourceArtifactIds.Add(normalizedAudio.Id);
+        }
+
+        StageRunRecord? preparationRun = GetLatestAudioPreparationRun(stageRuns);
+        if (preparationRun is not null && normalizedAudio is not null)
+        {
+            ProjectArtifact? vadAudio = ResolveStageProcessedAudioArtifact(artifacts, VadStageName, preparationRun.Id);
+            var lineageValidator = new AudioSourceLineageValidator(normalizedAudio, artifacts);
+            if (vadAudio is not null && lineageValidator.IsCurrent(vadAudio))
+            {
+                sourceArtifactIds.Add(vadAudio.Id);
+            }
+        }
+
+        return sourceArtifactIds.Distinct().ToArray();
+    }
+
+    private sealed class AudioSourceLineageValidator(
+        ProjectArtifact normalizedAudio,
+        IReadOnlyList<ProjectArtifact> artifacts)
+    {
+        private readonly HashSet<Guid> visitedArtifactIds = new();
+
+        public bool IsCurrent(ProjectArtifact artifact)
+        {
+            visitedArtifactIds.Clear();
+            return HasCurrentSourceLineage(artifact);
+        }
+
+        private bool HasCurrentSourceLineage(ProjectArtifact artifact)
+        {
+            if (artifact.Id == normalizedAudio.Id)
+            {
+                return true;
+            }
+
+            if (!visitedArtifactIds.Add(artifact.Id))
+            {
+                return false;
+            }
+
+            ProjectArtifact? sourceArtifact = ResolveSourceArtifact(artifact);
+            return sourceArtifact is not null && HasCurrentSourceLineage(sourceArtifact);
+        }
+
+        private ProjectArtifact? ResolveSourceArtifact(ProjectArtifact artifact)
+        {
+            string? sourceArtifactId = null;
+            if (artifact.Kind == ArtifactKind.SpeechProcessedAudio)
+            {
+                TryGetProvenanceValue(artifact.Provenance, "source", out sourceArtifactId);
+            }
+            else if (artifact.Kind == ArtifactKind.SpeechEnhancedAudio && artifact.Provenance is { } provenance)
+            {
+                const string provenanceMarker = "-speech-enhancement:";
+                int markerIndex = provenance.IndexOf(provenanceMarker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
+                {
+                    int sourceStart = markerIndex + provenanceMarker.Length;
+                    int sourceEnd = provenance.IndexOf(':', sourceStart);
+                    sourceArtifactId = sourceEnd < 0
+                        ? provenance[sourceStart..]
+                        : provenance[sourceStart..sourceEnd];
+                }
+            }
+
+            return Guid.TryParse(sourceArtifactId, out Guid sourceId)
+                ? artifacts.FirstOrDefault(candidate => candidate.Id == sourceId)
+                : null;
+        }
     }
 
     public static ProjectArtifact? GetLatestAcceptedVocalStem(
