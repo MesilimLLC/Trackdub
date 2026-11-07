@@ -25,10 +25,14 @@ public sealed class TranscriptGenerationServiceResumeTests
         ServiceHarness harness = CreateHarness();
         (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
             await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        ProjectArtifact enhancedArtifact = await harness.SeedSpeechEnhancementResumeStateAsync(
+            project,
+            mediaAsset,
+            TestContext.Current.CancellationToken);
         await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            audioArtifact,
+            enhancedArtifact,
             [new SpeechRegion(0, 0.0, 2.0)]);
 
         await harness.Service.GenerateTranscriptAsync(
@@ -131,10 +135,14 @@ public sealed class TranscriptGenerationServiceResumeTests
         ServiceHarness harness = CreateHarness();
         (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
             await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        ProjectArtifact enhancedArtifact = await harness.SeedSpeechEnhancementResumeStateAsync(
+            project,
+            mediaAsset,
+            TestContext.Current.CancellationToken);
         StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            audioArtifact,
+            enhancedArtifact,
             [new SpeechRegion(0, 0.0, 2.0)]);
         await harness.SeedAsrResumeStateAsync(
             project,
@@ -143,6 +151,7 @@ public sealed class TranscriptGenerationServiceResumeTests
             new AsrResumeSeedRequest
             {
                 VadStageRunId = vadRun.Id,
+                VadAudioArtifact = enhancedArtifact,
                 Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "hello", "en")],
                 CancellationToken = TestContext.Current.CancellationToken
             });
@@ -168,6 +177,35 @@ public sealed class TranscriptGenerationServiceResumeTests
             harness.StageRunStore.All,
             run => run.StageName == StageNames.Asr && run.Status == StageRunStatus.Skipped);
         Assert.Equal(2, harness.TranscriptRepository.Revisions.Count);
+    }
+
+    [Fact]
+    public async Task GenerateTranscriptAsync_preflights_vad_when_speech_enhancement_cannot_be_resumed()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+
+        await harness.Service.GenerateTranscriptAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            routingPlan,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken,
+            sourceLanguage: "en");
+
+        Assert.Contains(StageNames.Vad, harness.PreFlightChecker.CheckedStageNames);
+        Assert.Equal(0, harness.VadDetector.DetectCallCount);
+        Assert.Contains(
+            harness.StageRunStore.All,
+            run => run.StageName == StageNames.Vad && run.Status == StageRunStatus.Skipped);
     }
 
     [Fact]
@@ -413,6 +451,7 @@ public sealed class TranscriptGenerationServiceResumeTests
     private sealed record AsrResumeSeedRequest
     {
         public required Guid VadStageRunId { get; init; }
+        public ProjectArtifact? VadAudioArtifact { get; init; }
         public required IReadOnlyList<RecognizedTranscriptSegment> Segments { get; init; }
         public required CancellationToken CancellationToken { get; init; }
     }
@@ -505,6 +544,38 @@ public sealed class TranscriptGenerationServiceResumeTests
             return vadRun;
         }
 
+        public async Task<ProjectArtifact> SeedSpeechEnhancementResumeStateAsync(
+            TrackdubProject project,
+            MediaAsset mediaAsset,
+            CancellationToken cancellationToken)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            StageRunRecord enhancementRun = StageRunRecord
+                .Start(project.Id, StageNames.SpeechEnhancement, now)
+                .Complete(now);
+            await StageRunStore.CreateAsync(enhancementRun, cancellationToken).ConfigureAwait(false);
+            var enhancedArtifact = new ProjectArtifact(
+                Guid.NewGuid(),
+                project.Id,
+                mediaAsset.Id,
+                ArtifactKind.SpeechEnhancedAudio,
+                "artifacts/audio/speech-enhancement/resume/speech.wav",
+                "enhanced-audio-hash",
+                100,
+                10.0d,
+                16000,
+                1,
+                now,
+                StageRunId: enhancementRun.Id,
+                Provenance: "generated-test-speech-enhancement");
+
+            ArtifactStore.Seed(
+                enhancedArtifact.RelativePath,
+                BuildMinimalWav(sampleRate: 16000, durationSamples: 1600));
+            await MediaRepository.SaveArtifactAsync(enhancedArtifact, cancellationToken).ConfigureAwait(false);
+            return enhancedArtifact;
+        }
+
         public async Task<StageRunRecord> SeedAsrResumeStateAsync(
             TrackdubProject project,
             MediaAsset mediaAsset,
@@ -524,7 +595,7 @@ public sealed class TranscriptGenerationServiceResumeTests
                     StageRunId = asrRun.Id,
                     Lineage = RawAsrTranscriptArtifactLineage.Create(
                         audioArtifact,
-                        audioArtifact,
+                        request.VadAudioArtifact ?? audioArtifact,
                         request.VadStageRunId)
                 },
                 cancellationToken).ConfigureAwait(false);

@@ -137,18 +137,67 @@ public sealed class TranscriptGenerationServiceStageTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateTranscriptStageAsync_asr_reruns_vad_when_latest_successful_run_has_no_snapshot()
+    {
+        var detector = new FakeSpeechRegionDetector();
+        detector.SetRegions(new SpeechRegion(0, 0.6d, 0.9d));
+        var transcriptionEngine = new CapturingTranscriptionEngine();
+        var stageRunStore = new FakeProjectStageRunStore();
+        FakeArtifactStore artifactStore = CreateArtifactStoreWithAudio();
+        (TranscriptGenerationService service, TranscriptArtifactWriter artifactWriter) = CreateMinimalService(
+            transcriptionEngine,
+            stageRunStore: stageRunStore,
+            vadDetector: detector,
+            artifactStore: artifactStore);
+        TranscriptGenerationContext context = CreateContext();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        StageRunRecord previousVadRun = StageRunRecord
+            .Start(context.Project.Id, StageNames.Vad, now.AddSeconds(-2))
+            .Complete(now.AddSeconds(-2));
+        StageRunRecord latestVadRun = StageRunRecord
+            .Start(context.Project.Id, StageNames.Vad, now.AddSeconds(-1))
+            .Complete(now.AddSeconds(-1));
+        await stageRunStore.CreateAsync(previousVadRun, TestContext.Current.CancellationToken);
+        await stageRunStore.CreateAsync(latestVadRun, TestContext.Current.CancellationToken);
+        await artifactWriter.WriteSpeechRegionsArtifactAsync(
+            new SpeechRegionsArtifactWriteRequest(
+                context.Project,
+                context.MediaAsset,
+                [new SpeechRegion(0, 0.0d, 0.4d)],
+                previousVadRun,
+                context.AudioRoutingPlan.VadAudioArtifact),
+            TestContext.Current.CancellationToken);
+
+        await service.GenerateTranscriptStageAsync(
+            context.Project,
+            context.MediaAsset,
+            context.NormalizedAudioArtifact,
+            context.AudioRoutingPlan,
+            StageNames.Asr,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, detector.DetectCallCount);
+        Assert.Equal(0.6d, Assert.Single(transcriptionEngine.ReceivedRegions).StartSeconds);
+    }
+
+    [Fact]
     public async Task GenerateTranscriptStageAsync_asr_ignores_diarization_without_current_vad_lineage()
     {
         var transcriptionEngine = new CapturingTranscriptionEngine();
         FakeArtifactStore artifactStore = CreateArtifactStoreWithAudio();
+        var stageRunStore = new FakeProjectStageRunStore();
         (TranscriptGenerationService service, TranscriptArtifactWriter artifactWriter) = CreateMinimalService(
             transcriptionEngine,
+            stageRunStore: stageRunStore,
             artifactStore: artifactStore);
         TranscriptGenerationContext context = CreateContext();
         DateTimeOffset now = DateTimeOffset.UtcNow;
         StageRunRecord vadRun = StageRunRecord
             .Start(context.Project.Id, StageNames.Vad, now)
             .Complete(now);
+        await stageRunStore.CreateAsync(vadRun, TestContext.Current.CancellationToken);
         await artifactWriter.WriteSpeechRegionsArtifactAsync(
             new SpeechRegionsArtifactWriteRequest(
                 context.Project,
@@ -264,37 +313,16 @@ public sealed class TranscriptGenerationServiceStageTests : IDisposable
     [Fact]
     public async Task GenerateTranscriptStageAsync_asr_short_audio_fallback_ignores_existing_diarization_plan()
     {
-        var transcriptionEngine = new CapturingTranscriptionEngine();
-        (TranscriptGenerationService service, TranscriptArtifactWriter artifactWriter) = CreateMinimalService(transcriptionEngine);
+        var transcriptionEngine = new SegmentReturningTranscriptionEngine();
+        var stageRunStore = new FakeProjectStageRunStore();
+        (TranscriptGenerationService service, TranscriptArtifactWriter artifactWriter) = CreateMinimalService(
+            transcriptionEngine,
+            stageRunStore: stageRunStore);
         TranscriptGenerationContext context = CreateContext();
-
-        await artifactWriter.WriteSpeechRegionsArtifactAsync(
-            new SpeechRegionsArtifactWriteRequest(
-                context.Project,
-                context.MediaAsset,
-                [],
-                StageRunRecord.Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
-                    .Complete(DateTimeOffset.UtcNow),
-                context.AudioRoutingPlan.VadAudioArtifact),
-            TestContext.Current.CancellationToken);
-        ProjectSpeaker speaker = ProjectSpeaker.Create(
-            context.Project.Id,
-            "Existing speaker",
-            DateTimeOffset.UtcNow);
-        SpeakerTurn staleTurn = SpeakerTurn.Create(
-            context.Project.Id,
-            speaker.Id,
-            startSeconds: 0.25d,
-            endSeconds: 0.75d);
-        await artifactWriter.WriteDiarizationArtifactAsync(
-            new DiarizationArtifactWriteRequest
-            {
-                ProjectId = context.Project.Id,
-                MediaAsset = context.MediaAsset,
-                Speakers = [speaker],
-                Turns = [staleTurn],
-                StageRunId = Guid.NewGuid()
-            },
+        Guid emptyVadRunId = await SeedEmptyVadAndStaleDiarizationAsync(
+            context,
+            artifactWriter,
+            stageRunStore,
             TestContext.Current.CancellationToken);
 
         await service.GenerateTranscriptStageAsync(
@@ -311,6 +339,80 @@ public sealed class TranscriptGenerationServiceStageTests : IDisposable
         Assert.Equal(0, fallbackRegion.Index);
         Assert.Equal(0d, fallbackRegion.StartSeconds);
         Assert.Equal(context.MediaAsset.DurationSeconds, fallbackRegion.EndSeconds);
+
+        await AssertRawAsrLineageUsesShortAudioFallbackAsync(
+            context,
+            artifactWriter,
+            emptyVadRunId,
+            TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<Guid> SeedEmptyVadAndStaleDiarizationAsync(
+        TranscriptGenerationContext context,
+        TranscriptArtifactWriter artifactWriter,
+        FakeProjectStageRunStore stageRunStore,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        StageRunRecord emptyVadRun = StageRunRecord
+            .Start(context.Project.Id, StageNames.Vad, now)
+            .Complete(now);
+        await stageRunStore.CreateAsync(emptyVadRun, cancellationToken);
+        await artifactWriter.WriteSpeechRegionsArtifactAsync(
+            new SpeechRegionsArtifactWriteRequest(
+                context.Project,
+                context.MediaAsset,
+                [],
+                emptyVadRun,
+                context.AudioRoutingPlan.VadAudioArtifact),
+            cancellationToken);
+
+        ProjectSpeaker speaker = ProjectSpeaker.Create(context.Project.Id, "Existing speaker", now);
+        SpeakerTurn staleTurn = SpeakerTurn.Create(
+            context.Project.Id,
+            speaker.Id,
+            startSeconds: 0.25d,
+            endSeconds: 0.75d);
+        await artifactWriter.WriteDiarizationArtifactAsync(
+            new DiarizationArtifactWriteRequest
+            {
+                ProjectId = context.Project.Id,
+                MediaAsset = context.MediaAsset,
+                Speakers = [speaker],
+                Turns = [staleTurn],
+                StageRunId = Guid.NewGuid()
+            },
+            cancellationToken);
+        return emptyVadRun.Id;
+    }
+
+    private static async Task AssertRawAsrLineageUsesShortAudioFallbackAsync(
+        TranscriptGenerationContext context,
+        TranscriptArtifactWriter artifactWriter,
+        Guid emptyVadRunId,
+        CancellationToken cancellationToken)
+    {
+        RawAsrTranscriptArtifactLineage fallbackLineage = RawAsrTranscriptArtifactLineage.Create(
+            context.AudioRoutingPlan.AsrAudioArtifact,
+            context.AudioRoutingPlan.VadAudioArtifact,
+            null);
+        RawAsrTranscriptArtifact? fallbackTranscript = await artifactWriter.TryReadRawAsrTranscriptAsync(
+            new RawAsrTranscriptArtifactReadRequest
+            {
+                ProjectId = context.Project.Id,
+                Lineage = fallbackLineage
+            },
+            cancellationToken);
+        Assert.NotNull(fallbackTranscript);
+
+        RawAsrTranscriptArtifact? staleVadTranscript = await artifactWriter.TryReadRawAsrTranscriptAsync(
+            new RawAsrTranscriptArtifactReadRequest
+            {
+                ProjectId = context.Project.Id,
+                Lineage = fallbackLineage with { VadStageRunId = emptyVadRunId }
+            },
+            cancellationToken);
+        Assert.Null(staleVadTranscript);
     }
 
     [Theory]
@@ -323,14 +425,17 @@ public sealed class TranscriptGenerationServiceStageTests : IDisposable
         (TranscriptGenerationService service, TranscriptArtifactWriter localArtifactWriter) =
             CreateMinimalService(transcriptionEngine: transcriptionEngine, stageRunStore: stageRunStore);
         TranscriptGenerationContext context = CreateContext();
+        StageRunRecord vadRun = StageRunRecord
+            .Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
+            .Complete(DateTimeOffset.UtcNow);
+        await stageRunStore.CreateAsync(vadRun, TestContext.Current.CancellationToken);
 
         await localArtifactWriter.WriteSpeechRegionsArtifactAsync(
             new SpeechRegionsArtifactWriteRequest(
                 context.Project,
                 context.MediaAsset,
                 [new SpeechRegion(0, 0.0d, 1.0d)],
-                StageRunRecord.Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
-                    .Complete(DateTimeOffset.UtcNow),
+                vadRun,
                 context.AudioRoutingPlan.VadAudioArtifact),
             TestContext.Current.CancellationToken);
 

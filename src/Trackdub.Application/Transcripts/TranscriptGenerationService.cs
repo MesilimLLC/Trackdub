@@ -107,6 +107,7 @@ public sealed class TranscriptGenerationService(
             ProjectRootPath = projectRootPath,
             ExecutionSnapshot = executionSnapshot,
             AudioRoutingPlan = audioRoutingPlan,
+            NormalizedAudioArtifact = normalizedAudioArtifact,
             EnableSpeakerDiarization = enableSpeakerDiarization,
             EnableAsrTextRefinement = preferences.EnableAsrTextRefinement,
             ForceRerun = forceRerun,
@@ -215,7 +216,13 @@ public sealed class TranscriptGenerationService(
                 context.AudioRoutingPlan.VadAudioArtifact,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (snapshot is null)
+        IReadOnlyList<StageRunRecord> projectRuns = await stageRunStore
+            .ListByProjectAsync(context.Project.Id, cancellationToken)
+            .ConfigureAwait(false);
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            projectRuns,
+            StageNames.Vad);
+        if (snapshot is null || snapshot.StageRunId != latestVadRun?.Id)
         {
             await EnsureStageModelsReadyAsync(StageNames.Vad, context.SourceLanguage, cancellationToken)
                 .ConfigureAwait(false);
@@ -294,6 +301,7 @@ public sealed class TranscriptGenerationService(
         {
             return context with
             {
+                VadStageRunId = null,
                 DiarizationResult = null,
                 RegionPlan = new TranscriptRegionPlan(regions, new Dictionary<int, Guid>())
             };
@@ -868,26 +876,17 @@ public sealed class TranscriptGenerationService(
             return resumableStages;
         }
 
-        CurrentVadResumeState currentVad = await GetCurrentVadResumeStateAsync(request).ConfigureAwait(false);
+        CurrentVadResumeState currentVad = new(null, null);
 
         foreach (string stageName in ResumableStageNames)
         {
-            if (!IsStageEligibleForResume(
-                    stageName,
-                    request.EnableSpeakerDiarization,
-                    request.EnableAsrTextRefinement,
-                    resumableStages) ||
-                !CanSkipStagePreflight(stageName, request, currentVad))
+            if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                currentVad = await GetCurrentVadResumeStateAsync(request, resumableStages)
+                    .ConfigureAwait(false);
             }
 
-            if (StageArtifactResumeEvaluator.CanResumeStage(
-                    request.ResumeState,
-                    artifactStore,
-                    stageName,
-                    request.ExecutionSnapshot,
-                    request.ProjectRootPath))
+            if (CanResumeStageForPreflight(stageName, request, resumableStages, currentVad))
             {
                 resumableStages.Add(stageName);
             }
@@ -896,25 +895,73 @@ public sealed class TranscriptGenerationService(
         return resumableStages;
     }
 
-    private async Task<CurrentVadResumeState> GetCurrentVadResumeStateAsync(TranscriptPreflightRequest request)
+    private bool CanResumeStageForPreflight(
+        string stageName,
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages,
+        CurrentVadResumeState currentVad)
     {
+        TranscriptAudioRoutingPlan currentRoutingPlan = GetCurrentRoutingPlan(request, resumableStages);
+        return IsStageEligibleForResume(
+                   stageName,
+                   request.EnableSpeakerDiarization,
+                   request.EnableAsrTextRefinement,
+                   resumableStages) &&
+               CanSkipStagePreflight(stageName, request, currentVad, currentRoutingPlan) &&
+               StageArtifactResumeEvaluator.CanResumeStage(
+                   request.ResumeState!,
+                   artifactStore,
+                   stageName,
+                   request.ExecutionSnapshot,
+                   request.ProjectRootPath);
+    }
+
+    private async Task<CurrentVadResumeState> GetCurrentVadResumeStateAsync(
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages)
+    {
+        if (!resumableStages.Contains(StageNames.SpeechEnhancement))
+        {
+            // An enhancement run can change the detector input, so the current VAD
+            // snapshot cannot safely suppress model preflight until that route is known.
+            return new CurrentVadResumeState(null, null);
+        }
+
+        TranscriptAudioRoutingPlan currentRoutingPlan = GetCurrentRoutingPlan(request, resumableStages);
         StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
             request.ResumeState!.StageRuns,
             StageNames.Vad);
         SpeechRegionsArtifactSnapshot? snapshot = latestVadRun is null
             ? null
             : await artifactWriter.TryReadSpeechRegionsSnapshotAsync(
-                request.AudioRoutingPlan.VadAudioArtifact.ProjectId,
-                request.AudioRoutingPlan.VadAudioArtifact,
+                currentRoutingPlan.VadAudioArtifact.ProjectId,
+                currentRoutingPlan.VadAudioArtifact,
                 request.CancellationToken).ConfigureAwait(false);
 
         return new CurrentVadResumeState(latestVadRun, snapshot);
     }
 
+    private static TranscriptAudioRoutingPlan GetCurrentRoutingPlan(
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages)
+    {
+        if (!resumableStages.Contains(StageNames.SpeechEnhancement))
+        {
+            return request.AudioRoutingPlan;
+        }
+
+        return TranscriptPipelineResumeHydrator.GetSpeechEnhancementResumeRoute(
+            request.NormalizedAudioArtifact,
+            request.AudioRoutingPlan,
+            request.ResumeState!.ProjectState.Artifacts,
+            request.ResumeState.StageRuns).AudioRoutingPlan;
+    }
+
     private static bool CanSkipStagePreflight(
         string stageName,
         TranscriptPreflightRequest request,
-        CurrentVadResumeState currentVad)
+        CurrentVadResumeState currentVad,
+        TranscriptAudioRoutingPlan currentRoutingPlan)
     {
         if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
         {
@@ -951,7 +998,7 @@ public sealed class TranscriptGenerationService(
 
         return TranscriptResumeLineageEvaluator.HasCurrentRawAsrArtifact(
             request.ResumeState,
-            request.AudioRoutingPlan,
+            currentRoutingPlan,
             currentVad.Snapshot.StageRunId);
     }
 
@@ -983,6 +1030,7 @@ public sealed class TranscriptGenerationService(
         public required string ProjectRootPath { get; init; }
         public required IReadOnlyDictionary<string, string> ExecutionSnapshot { get; init; }
         public required TranscriptAudioRoutingPlan AudioRoutingPlan { get; init; }
+        public required ProjectArtifact NormalizedAudioArtifact { get; init; }
         public required bool EnableSpeakerDiarization { get; init; }
         public required bool EnableAsrTextRefinement { get; init; }
         public required bool ForceRerun { get; init; }

@@ -75,7 +75,7 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
     {
         foreach ((ITranscriptGenerationStage stage, StageOptions options) in stages)
         {
-            if (ShouldResumeSkipStage(context, stage.StageName))
+            if (await ShouldResumeSkipStageAsync(context, stage.StageName, cancellationToken).ConfigureAwait(false))
             {
                 DateTimeOffset resumedStageStart = DateTimeOffset.UtcNow;
                 PipelineProgressReporter.Started(progress, stage.StageName);
@@ -168,12 +168,32 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
         return context;
     }
 
-    private bool ShouldResumeSkipStage(TranscriptGenerationContext context, string stageName)
+    private async Task<bool> ShouldResumeSkipStageAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken)
     {
-        if (artifactStore is null ||
-            context.ForceRerun ||
-            context.ProjectState is null ||
-            string.IsNullOrWhiteSpace(context.ProjectRootPath))
+        if (artifactStore is null)
+        {
+            return false;
+        }
+
+        if (context.ForceRerun)
+        {
+            return false;
+        }
+
+        if (context.ProjectState is null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.ProjectRootPath))
+        {
+            return false;
+        }
+
+        if (await VadSnapshotIsNotResumableAsync(context, stageName, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -190,6 +210,52 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
             stageName,
             context.ExecutionSnapshot,
             context.ProjectRootPath!);
+    }
+
+    private async Task<bool> VadSnapshotIsNotResumableAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !await HasCurrentVadSnapshotForResumeAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> HasCurrentVadSnapshotForResumeAsync(
+        TranscriptGenerationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (artifactWriter is null)
+        {
+            return false;
+        }
+
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                context.Project.Id,
+                context.AudioRoutingPlan.VadAudioArtifact,
+                cancellationToken)
+            .ConfigureAwait(false);
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            context.ProjectState!.StageRuns,
+            StageNames.Vad);
+        return SnapshotMatchesLatestVadRun(snapshot, latestVadRun);
+    }
+
+    private static bool SnapshotMatchesLatestVadRun(
+        SpeechRegionsArtifactSnapshot? snapshot,
+        StageRunRecord? latestVadRun)
+    {
+        if (snapshot is null || latestVadRun is null)
+        {
+            return false;
+        }
+
+        return snapshot.StageRunId == latestVadRun.Id;
     }
 
     private bool StageConfigurationAllowsResume(TranscriptGenerationContext context, string stageName) =>

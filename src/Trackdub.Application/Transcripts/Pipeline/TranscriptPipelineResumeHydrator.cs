@@ -65,16 +65,19 @@ internal static class TranscriptPipelineResumeHydrator
         return context;
     }
 
-    private static TranscriptGenerationContext HydrateSpeechEnhancement(
-        TranscriptGenerationContext context,
-        IReadOnlyList<ProjectArtifact> artifacts)
+    internal static (TranscriptAudioRoutingPlan AudioRoutingPlan, ProjectArtifact? EnhancedAudioArtifact)
+        GetSpeechEnhancementResumeRoute(
+        ProjectArtifact normalizedAudioArtifact,
+        TranscriptAudioRoutingPlan audioRoutingPlan,
+        IReadOnlyList<ProjectArtifact> artifacts,
+        IReadOnlyList<StageRunRecord>? stageRuns)
     {
-        ProjectArtifact? enhancedArtifact = TranscriptWorkflowUtilities.GetLatestArtifactByKind(
+        ProjectArtifact? enhancedArtifact = TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(
             artifacts,
-            ArtifactKind.SpeechEnhancedAudio);
+            stageRuns);
         if (enhancedArtifact is null)
         {
-            return context;
+            return (audioRoutingPlan, null);
         }
 
         // Accept the normalized audio and the pre-enhancement VAD source as valid lineage; the
@@ -82,8 +85,8 @@ internal static class TranscriptPipelineResumeHydrator
         // must not reach ASR.
         Guid[] sourceArtifactIds =
         [
-            context.NormalizedAudioArtifact.Id,
-            context.AudioRoutingPlan.VadAudioArtifact.Id
+            normalizedAudioArtifact.Id,
+            audioRoutingPlan.VadAudioArtifact.Id
         ];
 
         // A Studio Voice artifact whose persisted source no longer matches the current source
@@ -91,10 +94,10 @@ internal static class TranscriptPipelineResumeHydrator
         if (TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact)
             && !TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact, sourceArtifactIds))
         {
-            return context;
+            return (audioRoutingPlan, null);
         }
 
-        TranscriptAudioRoutingPlan enhancedRoutingPlan = context.AudioRoutingPlan with
+        TranscriptAudioRoutingPlan enhancedRoutingPlan = audioRoutingPlan with
         {
             VadAudioArtifact = enhancedArtifact,
             DiarizationAudioArtifact = enhancedArtifact
@@ -103,11 +106,24 @@ internal static class TranscriptPipelineResumeHydrator
             enhancedArtifact,
             sourceArtifactIds);
 
-        return context with
+        return (enhancedRoutingPlan, enhancedArtifact);
+    }
+
+    private static TranscriptGenerationContext HydrateSpeechEnhancement(
+        TranscriptGenerationContext context,
+        IReadOnlyList<ProjectArtifact> artifacts)
+    {
+        (TranscriptAudioRoutingPlan enhancedRoutingPlan, ProjectArtifact? enhancedArtifact) = GetSpeechEnhancementResumeRoute(
+            context.NormalizedAudioArtifact,
+            context.AudioRoutingPlan,
+            artifacts,
+            context.ProjectState?.StageRuns);
+        if (enhancedArtifact is null)
         {
-            AudioRoutingPlan = enhancedRoutingPlan,
-            EnhancedAudioArtifact = enhancedArtifact
-        };
+            return context;
+        }
+
+        return context with { AudioRoutingPlan = enhancedRoutingPlan, EnhancedAudioArtifact = enhancedArtifact };
     }
 
     private static async Task<TranscriptGenerationContext> HydrateVadAsync(

@@ -161,9 +161,10 @@ public sealed class TranscriptArtifactWriter(
             return null;
         }
 
-        SpeechRegionsArtifactDocument? document = await artifactStore
-            .ReadJsonAsync<SpeechRegionsArtifactDocument>(artifact.RelativePath, cancellationToken)
-            .ConfigureAwait(false);
+        SpeechRegionsArtifactDocument? document = await TryReadSpeechRegionsDocumentAsync(
+            artifact,
+            cancellationToken).ConfigureAwait(false);
+
         if (document is null)
         {
             return null;
@@ -175,6 +176,24 @@ public sealed class TranscriptArtifactWriter(
         }
 
         return new SpeechRegionsArtifactSnapshot(document.Regions, document.StageRunId);
+    }
+
+    private async Task<SpeechRegionsArtifactDocument?> TryReadSpeechRegionsDocumentAsync(
+        ProjectArtifact artifact,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await artifactStore
+                .ReadJsonAsync<SpeechRegionsArtifactDocument>(artifact.RelativePath, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidDataException)
+        {
+            // A malformed cache entry cannot be resumed. Treat it as absent so VAD can
+            // regenerate the snapshot; storage and cancellation failures still propagate.
+            return null;
+        }
     }
 
     public async Task<DiarizationResult?> TryReadDiarizationResultAsync(
