@@ -28,6 +28,7 @@ internal static class ExportResumeGating
     public const string SourceGainDbKey = "ExportSourceGainDb";
     public const string DubbedSpeechGainDbKey = "ExportDubbedSpeechGainDb";
     public const string DuckingGainDbKey = "ExportDuckingGainDb";
+    public const string BackgroundMediaGainDbKey = "ExportBackgroundMediaGainDb";
 
     /// <summary>
     /// The canonical set of snapshot keys that gate an export resume. When any of these differ
@@ -48,6 +49,7 @@ internal static class ExportResumeGating
         SourceGainDbKey,
         DubbedSpeechGainDbKey,
         DuckingGainDbKey,
+        BackgroundMediaGainDbKey,
     ];
 
     /// <summary>
@@ -69,9 +71,7 @@ internal static class ExportResumeGating
         string subtitleFormatsToken,
         VideoEncoderPreference videoEncoder,
         double targetLufs,
-        double sourceGainDb,
-        double dubbedSpeechGainDb,
-        double? duckingGainDb) =>
+        MixGainSettings mix) =>
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [ExportFormatKey] = ContainerKey(container),
@@ -83,15 +83,16 @@ internal static class ExportResumeGating
             [SubtitleFormatsKey] = subtitleFormatsToken,
             [VideoEncoderKey] = VideoEncoderPreferenceSettings.ToKey(videoEncoder),
             [TargetLufsKey] = FormatGain(ExportLoudnessTargets.NormalizeTargetLufs(targetLufs)),
-            [SourceGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(sourceGainDb, 0d)),
-            [DubbedSpeechGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(dubbedSpeechGainDb, 0d)),
+            [SourceGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(mix.SourceGainDb, 0d)),
+            [DubbedSpeechGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(mix.DubbedSpeechGainDb, 0d)),
             // When ducking is unset, export applies automatic ducking based on the source audio kind
             // (0 dB for Ambiance, -13 dB for NormalizedAudio). Persist the resolved value so the token
             // changes when the effective ducking level changes (e.g., when separation completes after
             // an initial export with the original mix).
-            [DuckingGainDbKey] = duckingGainDb is double explicitDuckingGainDb
+            [DuckingGainDbKey] = mix.DuckingGainExplicit && mix.DuckingGainDb is double explicitDuckingGainDb
                 ? FormatGain(MixGainSettings.NormalizeGainDb(explicitDuckingGainDb, 0d))
                 : FormatGain(MixPlanBuilder.ResolveAutomaticDuckingGainDb(sourceAudioKind)),
+            [BackgroundMediaGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(mix.BackgroundMediaGainDb, 0d)),
         };
 
     /// <summary>

@@ -11,6 +11,8 @@ public sealed record MixGainSettings(
     bool RestoreOriginalPan = false,
     bool ApplyTimbrePolish = true)
 {
+    public double BackgroundMediaGainDb { get; init; }
+
     public ProjectMixSettings ToProjectMixSettings() =>
         new(
             SourceGainDb: NormalizeGainDb(SourceGainDb, 0d),
@@ -18,7 +20,10 @@ public sealed record MixGainSettings(
             DuckingGainDb: DuckingGainExplicit ? NormalizeGainDb(DuckingGainDb ?? 0d, 0d) : null,
             DuckingGainExplicit: DuckingGainExplicit,
             RestoreOriginalPan: RestoreOriginalPan,
-            ApplyTimbrePolish: ApplyTimbrePolish);
+            ApplyTimbrePolish: ApplyTimbrePolish)
+        {
+            BackgroundMediaGainDb = NormalizeGainDb(BackgroundMediaGainDb, 0d)
+        };
 
     public static MixGainSettings FromProjectMixSettings(ProjectMixSettings? settings)
     {
@@ -34,7 +39,10 @@ public sealed record MixGainSettings(
             normalized.DuckingGainDb,
             normalized.DuckingGainExplicit,
             normalized.RestoreOriginalPan,
-            normalized.ApplyTimbrePolish);
+            normalized.ApplyTimbrePolish)
+        {
+            BackgroundMediaGainDb = normalized.BackgroundMediaGainDb
+        };
     }
 
     public static double NormalizeGainDb(double gainDb, double fallback) =>

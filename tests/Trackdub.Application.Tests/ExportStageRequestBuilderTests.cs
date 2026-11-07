@@ -15,7 +15,10 @@ public sealed class ExportStageRequestBuilderTests
             DubbedSpeechGainDb: 2d,
             DuckingGainDb: -12d,
             DuckingGainExplicit: true,
-            RestoreOriginalPan: true);
+            RestoreOriginalPan: true)
+        {
+            BackgroundMediaGainDb = -7d
+        };
 
         ExportStageRequest? request = ExportStageRequestBuilder.TryBuild(
             new ExportBuildInputs(
@@ -34,6 +37,7 @@ public sealed class ExportStageRequestBuilderTests
         Assert.Equal(-3d, request.SourceGainDb);
         Assert.Equal(2d, request.DubbedSpeechGainDb);
         Assert.Equal(-12d, request.DuckingGainDb);
+        Assert.Equal(-7d, request.BackgroundMediaGainDb);
         Assert.True(request.MatchOriginalLoudness);
         Assert.True(request.RestoreOriginalPan);
         Assert.True(request.BurnInSubtitles);

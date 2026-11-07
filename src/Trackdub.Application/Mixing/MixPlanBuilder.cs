@@ -26,7 +26,8 @@ public sealed record MixPlanBuildRequest(
     bool ApplyTimbrePolish = true,
     IReadOnlyList<TtsCandidateGroup>? CandidateGroups = null,
     double? MediaDurationSeconds = null,
-    IReadOnlyList<MixMediaClip>? MediaClips = null);
+    IReadOnlyList<MixMediaClip>? MediaClips = null,
+    double BackgroundMediaGainDb = 0d);
 
 public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 {
@@ -143,7 +144,18 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             request.RestoreOriginalPan,
             request.ApplyTimbrePolish,
             vocalStemArtifact?.RelativePath,
-            request.MediaClips);
+            BuildMediaClips(request));
+    }
+
+    private static IReadOnlyList<MixMediaClip>? BuildMediaClips(MixPlanBuildRequest request)
+    {
+        if (request.MediaClips is null)
+        {
+            return null;
+        }
+
+        double gainDb = NormalizeDb(request.BackgroundMediaGainDb, 0d);
+        return request.MediaClips.Select(clip => clip with { GainDb = gainDb }).ToArray();
     }
 
     private static ProjectArtifact? SelectSourceAudioArtifact(IReadOnlyList<ProjectArtifact> artifacts, IReadOnlyList<StageRunRecord>? stageRuns) =>

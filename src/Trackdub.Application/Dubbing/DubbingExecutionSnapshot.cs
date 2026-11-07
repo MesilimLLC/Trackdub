@@ -1,4 +1,5 @@
 using System.Globalization;
+using Trackdub.Application.Projects;
 using Trackdub.Application.Transcripts;
 using Trackdub.Contracts;
 using Trackdub.Contracts.Dubbing;
@@ -174,6 +175,14 @@ internal static class DubbingExecutionSnapshot
         DubbingSessionOptions options,
         ArtifactKind sourceAudioKind)
     {
+        var mix = new MixGainSettings(
+            options.ExportSourceGainDb ?? 0d,
+            options.ExportDubbedSpeechGainDb ?? 0d,
+            options.ExportDuckingGainDb,
+            DuckingGainExplicit: options.ExportDuckingGainDb is not null)
+        {
+            BackgroundMediaGainDb = options.ExportBackgroundMediaGainDb ?? 0d
+        };
         foreach ((string key, string value) in ExportResumeGating.Build(
             DubbingPipelineEngine.ResolveExportContainer(options.ExportFormat),
             sourceAudioKind,
@@ -185,9 +194,7 @@ internal static class DubbingExecutionSnapshot
             ExportResumeGating.SubtitleFormatsTokenFromRawOptions(options.SubtitleFormats),
             options.VideoEncoder,
             options.ExportTargetLufs ?? ExportLoudnessTargets.OnlineLufs,
-            options.ExportSourceGainDb ?? 0d,
-            options.ExportDubbedSpeechGainDb ?? 0d,
-            options.ExportDuckingGainDb))
+            mix))
         {
             snapshot[key] = value;
         }
