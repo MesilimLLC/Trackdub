@@ -49,7 +49,6 @@ internal static class ExportResumeGating
         SourceGainDbKey,
         DubbedSpeechGainDbKey,
         DuckingGainDbKey,
-        BackgroundMediaGainDbKey,
     ];
 
     /// <summary>
@@ -89,11 +88,17 @@ internal static class ExportResumeGating
             // (0 dB for Ambiance, -13 dB for NormalizedAudio). Persist the resolved value so the token
             // changes when the effective ducking level changes (e.g., when separation completes after
             // an initial export with the original mix).
-            [DuckingGainDbKey] = mix.DuckingGainExplicit && mix.DuckingGainDb is double explicitDuckingGainDb
-                ? FormatGain(MixGainSettings.NormalizeGainDb(explicitDuckingGainDb, 0d))
-                : FormatGain(MixPlanBuilder.ResolveAutomaticDuckingGainDb(sourceAudioKind)),
+            [DuckingGainDbKey] = FormatGain(ResolveEffectiveDuckingGainDb(mix, sourceAudioKind)),
             [BackgroundMediaGainDbKey] = FormatGain(MixGainSettings.NormalizeGainDb(mix.BackgroundMediaGainDb, 0d)),
         };
+
+    private static double ResolveEffectiveDuckingGainDb(MixGainSettings mix, ArtifactKind sourceAudioKind)
+    {
+        double automaticGainDb = MixPlanBuilder.ResolveAutomaticDuckingGainDb(sourceAudioKind);
+        return mix.DuckingGainExplicit && mix.DuckingGainDb is double requestedGainDb
+            ? MixGainSettings.NormalizeGainDb(requestedGainDb, automaticGainDb)
+            : automaticGainDb;
+    }
 
     /// <summary>
     /// Subtitle-formats token from the caller's RAW requested formats, used by BOTH the run-start
