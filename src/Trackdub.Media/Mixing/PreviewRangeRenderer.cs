@@ -198,6 +198,7 @@ public sealed class PreviewRangeRenderer(IArtifactStore artifactStore) : IPrevie
         MixMediaClip clip, double rangeStart, double rangeEnd,
         float[] output, int frameCount, int channelCount, int sampleRate, CancellationToken cancellationToken)
     {
+        float gain = DecibelsToLinear(clip.GainDb);
         if (!double.IsFinite(clip.StartSeconds) || clip.StartSeconds < 0d ||
             !double.IsFinite(clip.DurationSeconds) || clip.DurationSeconds <= 0d)
             throw new InvalidOperationException("Timeline mix clip has invalid timing.");
@@ -234,14 +235,14 @@ public sealed class PreviewRangeRenderer(IArtifactStore artifactStore) : IPrevie
             {
                 float first = MapSourceFrameToMono(samples, index);
                 float next = MapSourceFrameToMono(samples, nextIndex);
-                output[outputIndex] += first + ((next - first) * fraction);
+                output[outputIndex] += (first + ((next - first) * fraction)) * gain;
             }
             else
             {
                 (float Left, float Right) first = MapSourceFrameToStereo(samples, index);
                 (float Left, float Right) next = MapSourceFrameToStereo(samples, nextIndex);
-                output[outputIndex] += first.Left + ((next.Left - first.Left) * fraction);
-                output[outputIndex + 1] += first.Right + ((next.Right - first.Right) * fraction);
+                output[outputIndex] += (first.Left + ((next.Left - first.Left) * fraction)) * gain;
+                output[outputIndex + 1] += (first.Right + ((next.Right - first.Right) * fraction)) * gain;
             }
         }
     }

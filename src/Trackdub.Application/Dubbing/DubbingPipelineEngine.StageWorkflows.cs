@@ -466,7 +466,8 @@ public sealed partial class DubbingPipelineEngine
             // so the export-resume gate persists and compares the same token the
             // snapshot records, instead of the transcript-state-resolved formats.
 
-            RawSubtitleFormats: options.SubtitleFormats);
+            RawSubtitleFormats: options.SubtitleFormats,
+            BackgroundMediaGainDb: options.ExportBackgroundMediaGainDb ?? 0d);
     }
 
     private static async Task<StageWorkflowResult> RunLipSyncStageAsync(

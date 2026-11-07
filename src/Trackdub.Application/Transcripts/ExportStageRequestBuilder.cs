@@ -41,7 +41,21 @@ public static class ExportStageRequestBuilder
             inputs.MatchOriginalLoudness,
             mix.RestoreOriginalPan,
             mix.ApplyTimbrePolish,
-            inputs.VideoEncoder);
+            inputs.VideoEncoder,
+            BackgroundMediaGainDb: mix.BackgroundMediaGainDb);
+    }
+
+    public static MixGainSettings ToMixGainSettings(ExportStageRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new MixGainSettings(
+            request.SourceGainDb,
+            request.DubbedSpeechGainDb,
+            request.DuckingGainDb,
+            DuckingGainExplicit: request.DuckingGainDb is not null)
+        {
+            BackgroundMediaGainDb = request.BackgroundMediaGainDb
+        };
     }
 
     public static IReadOnlyList<ExportSubtitleFormat> BuildSubtitleFormats(

@@ -40,4 +40,19 @@ public sealed class DubbingExecutionSnapshotTests
         Assert.Equal(nameof(TranslationRunScope.MissingOrOutdated), missingSnapshot["TranslationScope"]);
         Assert.False(allSnapshot.ContainsKey("TranslationScope"));
     }
+
+    [Fact]
+    public void CaptureExecutionSnapshot_records_background_media_gain_for_export_resume()
+    {
+        var options = new DubbingSessionOptions
+        {
+            SourceMediaPath = "source.mp4",
+            TargetLanguageCode = "fr",
+            ExportBackgroundMediaGainDb = -8d,
+        };
+
+        Dictionary<string, string> snapshot = DubbingExecutionSnapshot.CaptureExecutionSnapshot(options);
+
+        Assert.Equal("-8", snapshot["ExportBackgroundMediaGainDb"]);
+    }
 }
