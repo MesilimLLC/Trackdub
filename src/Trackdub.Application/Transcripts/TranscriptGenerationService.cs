@@ -196,28 +196,49 @@ public sealed class TranscriptGenerationService(
                 .ConfigureAwait(false);
         }
 
-        TranscriptGenerationContext context = await PrepareStageContextAsync(
+        var context = new TranscriptGenerationContext(
             project,
             mediaAsset,
             normalizedAudioArtifact,
             audioRoutingPlan,
             enableSpeakerDiarization,
             sourceLanguage,
-            modelPreferences,
-            stageName,
-            cancellationToken).ConfigureAwait(false);
+            modelPreferences);
 
         TranscriptGenerationPipeline singleStagePipeline = CreateSingleStagePipeline(stages);
 
         pipelineRunLifecycle?.BeginRun();
         try
         {
+            context = await PrepareStageContextAsync(context, stageName, cancellationToken, progress)
+                .ConfigureAwait(false);
             await singleStagePipeline.ExecuteAsync(context, cancellationToken, progress).ConfigureAwait(false);
         }
         finally
         {
             pipelineRunLifecycle?.EndRun();
         }
+    }
+
+    private async Task<TranscriptGenerationContext> PrepareStageContextAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken,
+        IProgress<PipelineProgressEvent>? progress)
+    {
+        bool hasCurrentSpeechRegions = await artifactWriter
+            .TryReadSpeechRegionsAsync(context.AudioRoutingPlan.VadAudioArtifact, cancellationToken)
+            .ConfigureAwait(false) is not null;
+        if (!string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase) && !hasCurrentSpeechRegions)
+        {
+            await EnsureStageModelsReadyAsync(StageNames.Vad, context.SourceLanguage, cancellationToken)
+                .ConfigureAwait(false);
+            context = await vadGenerationStage.ExecuteAsync(context, cancellationToken, progress)
+                .ConfigureAwait(false);
+        }
+
+        return await HydrateContextForSingleStageAsync(context, stageName, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private IReadOnlyList<ITranscriptGenerationStage> ResolveTranscriptStages(string stageName) =>
@@ -254,7 +275,7 @@ public sealed class TranscriptGenerationService(
         }
 
         IReadOnlyList<SpeechRegion> speechRegions = await RequireSpeechRegionsArtifactAsync(
-            context.Project.Id,
+            context.AudioRoutingPlan.VadAudioArtifact,
             cancellationToken)
             .ConfigureAwait(false);
 
@@ -344,30 +365,6 @@ public sealed class TranscriptGenerationService(
         }
     }
 
-    private async Task<TranscriptGenerationContext> PrepareStageContextAsync(
-        TrackdubProject project,
-        MediaAsset mediaAsset,
-        ProjectArtifact normalizedAudioArtifact,
-        TranscriptAudioRoutingPlan audioRoutingPlan,
-        bool enableSpeakerDiarization,
-        string? sourceLanguage,
-        InferenceModelPreferences? modelPreferences,
-        string stageName,
-        CancellationToken cancellationToken)
-    {
-        var context = new TranscriptGenerationContext(
-            project,
-            mediaAsset,
-            normalizedAudioArtifact,
-            audioRoutingPlan,
-            enableSpeakerDiarization,
-            sourceLanguage,
-            modelPreferences);
-
-        return await HydrateContextForSingleStageAsync(context, stageName, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
     private TranscriptGenerationPipeline CreateSingleStagePipeline(
         IReadOnlyList<ITranscriptGenerationStage> stages)
     {
@@ -390,7 +387,7 @@ public sealed class TranscriptGenerationService(
             .ConfigureAwait(false);
 
         IReadOnlyList<SpeechRegion> speechRegions = await RequireSpeechRegionsArtifactAsync(
-            context.Project.Id,
+            context.AudioRoutingPlan.VadAudioArtifact,
             cancellationToken)
             .ConfigureAwait(false);
 
@@ -433,11 +430,11 @@ public sealed class TranscriptGenerationService(
     }
 
     private async Task<IReadOnlyList<SpeechRegion>> RequireSpeechRegionsArtifactAsync(
-        Guid projectId,
+        ProjectArtifact expectedInputAudioArtifact,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<SpeechRegion>? speechRegions = await artifactWriter
-            .TryReadSpeechRegionsAsync(projectId, cancellationToken)
+            .TryReadSpeechRegionsAsync(expectedInputAudioArtifact, cancellationToken)
             .ConfigureAwait(false);
 
         if (speechRegions is null)

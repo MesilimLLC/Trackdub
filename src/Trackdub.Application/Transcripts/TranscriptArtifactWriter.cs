@@ -1,13 +1,22 @@
 using Trackdub.Contracts;
 using Trackdub.Contracts.Projects;
 using Trackdub.Contracts.Pipeline;
+using Trackdub.Domain;
 using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.Media;
+using Trackdub.Domain.Projects;
 using Trackdub.Domain.Speakers;
 using Trackdub.Domain.Transcript;
 using Trackdub.Domain.Translation;
 
 namespace Trackdub.Application.Transcripts;
+
+public sealed record SpeechRegionsArtifactWriteRequest(
+    TrackdubProject Project,
+    MediaAsset MediaAsset,
+    IReadOnlyList<SpeechRegion> Regions,
+    StageRunRecord StageRun,
+    ProjectArtifact InputAudioArtifact);
 
 public sealed class TranscriptArtifactWriter(
     IArtifactStore artifactStore,
@@ -19,21 +28,21 @@ public sealed class TranscriptArtifactWriter(
     private readonly IMediaAssetRepository mediaAssetRepository = mediaAssetRepository ?? throw new ArgumentNullException(nameof(mediaAssetRepository));
 
     public async Task WriteSpeechRegionsArtifactAsync(
-        Guid projectId,
-        MediaAsset mediaAsset,
-        IReadOnlyList<SpeechRegion> regions,
-        Guid stageRunId,
+        SpeechRegionsArtifactWriteRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        string provenance = GetSpeechRegionsProvenance(request.InputAudioArtifact);
+
         // Run-scoped path: each stage run writes a unique file. The artifact metadata commit
         // below is the atomic pointer-swap that makes the new run visible to readers, which
         // resolve via the DB record (kind + latest StageRun). A crash between file write and
         // metadata save leaves only an orphan file (cleanable by a sweep), never a corrupted
         // pointer at a stable path.
-        string relativePath = ProjectArtifactPaths.GetSpeechRegionsRelativePath(stageRunId);
+        string relativePath = ProjectArtifactPaths.GetSpeechRegionsRelativePath(request.StageRun.Id);
         await artifactStore.WriteJsonAsync(
             relativePath,
-            new SpeechRegionsArtifactDocument(stageRunId, regions, DateTimeOffset.UtcNow),
+            new SpeechRegionsArtifactDocument(request.StageRun.Id, request.Regions, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
 
         FileFingerprint fingerprint = await fileFingerprintService.ComputeAsync(
@@ -42,8 +51,8 @@ public sealed class TranscriptArtifactWriter(
 
         var artifact = new ProjectArtifact(
             Guid.NewGuid(),
-            projectId,
-            mediaAsset.Id,
+            request.Project.Id,
+            request.MediaAsset.Id,
             ArtifactKind.SpeechRegions,
             relativePath,
             fingerprint.Sha256,
@@ -52,10 +61,21 @@ public sealed class TranscriptArtifactWriter(
             SampleRate: null,
             ChannelCount: null,
             DateTimeOffset.UtcNow,
-            StageRunId: stageRunId,
-            Provenance: "generated-vad");
+            StageRunId: request.StageRun.Id,
+            Provenance: provenance);
 
         await mediaAssetRepository.SaveArtifactAsync(artifact, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static string GetSpeechRegionsProvenance(ProjectArtifact inputAudioArtifact)
+    {
+        ArgumentNullException.ThrowIfNull(inputAudioArtifact);
+        if (inputAudioArtifact.Id == Guid.Empty)
+        {
+            throw new ArgumentException("Input audio artifact ID is required.", nameof(inputAudioArtifact));
+        }
+
+        return $"generated-vad:source-audio={inputAudioArtifact.Id:D}";
     }
 
     /// <summary>
@@ -63,15 +83,34 @@ public sealed class TranscriptArtifactWriter(
     /// the artifact repository so callers always see a fully-written file (file is committed
     /// before its DB row, so a non-null row guarantees the file is present and complete).
     /// </summary>
-    public async Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsAsync(
+    public Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsAsync(
         Guid projectId,
+        CancellationToken cancellationToken)
+        => TryReadSpeechRegionsCoreAsync(projectId, null, cancellationToken);
+
+    public Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsAsync(
+        ProjectArtifact expectedInputAudioArtifact,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expectedInputAudioArtifact);
+
+        return TryReadSpeechRegionsCoreAsync(expectedInputAudioArtifact.ProjectId, expectedInputAudioArtifact, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsCoreAsync(
+        Guid projectId,
+        ProjectArtifact? expectedInputAudioArtifact,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<ProjectArtifact> projectArtifacts = await mediaAssetRepository
             .GetArtifactsAsync(projectId, cancellationToken)
             .ConfigureAwait(false);
+        string? expectedProvenance = expectedInputAudioArtifact is not null
+            ? GetSpeechRegionsProvenance(expectedInputAudioArtifact)
+            : null;
         ProjectArtifact? artifact = projectArtifacts
             .Where(a => a.Kind == ArtifactKind.SpeechRegions)
+            .Where(a => expectedProvenance is null || string.Equals(a.Provenance, expectedProvenance, StringComparison.Ordinal))
             .OrderByDescending(a => a.CreatedAtUtc)
             .FirstOrDefault();
         if (artifact is null || !artifactStore.Exists(artifact.RelativePath))
