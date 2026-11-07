@@ -99,6 +99,97 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             });
     }
 
+    [Fact]
+    public async Task ExecuteAsync_reruns_vad_and_dependent_stages_when_vad_audio_source_changes()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        TranscriptGenerationContext result = await fixture.Pipeline.ExecuteAsync(
+            fixture.Context,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fixture.Detector.DetectCallCount);
+        Assert.Equal(3.0d, Assert.Single(result.SpeechRegions).StartSeconds);
+        Assert.NotEqual(fixture.OldVadRun.Id, result.VadStageRunId);
+        Assert.Equal(1, fixture.AsrStage.ExecutionCount);
+        ProjectArtifact latestRegions = fixture.MediaRepository.Artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.SpeechRegions)
+            .MaxBy(artifact => artifact.CreatedAtUtc)!;
+        Assert.Equal(
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(fixture.ProcessedAudio),
+            latestRegions.Provenance);
+    }
+
+    private async Task<VadSourceChangeFixture> CreateVadSourceChangeFixtureAsync()
+    {
+        var artifactStore = new FakeArtifactStore(tempRoot);
+        var mediaRepository = new FakeMediaAssetRepository();
+        var stageRunStore = new FakeProjectStageRunStore();
+        var transcriptRepository = new FakeTranscriptRepository();
+        var artifactWriter = new TranscriptArtifactWriter(
+            artifactStore,
+            new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
+            mediaRepository);
+        ResumeProject resume = CreateResumeProject();
+        ProjectArtifact normalizedAudio = CreateNormalizedAudio(resume);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var processedAudio = new ProjectArtifact(
+            Guid.NewGuid(),
+            resume.Project.Id,
+            resume.MediaAsset.Id,
+            ArtifactKind.SpeechProcessedAudio,
+            "artifacts/audio/speech-processing/vad.wav",
+            "processed-hash",
+            100,
+            10.0d,
+            16000,
+            1,
+            now);
+        StageRunRecord oldVadRun = StageRunRecord
+            .Start(resume.Project.Id, StageNames.Vad, now.AddSeconds(-1))
+            .Complete(now.AddSeconds(-1));
+        artifactStore.Seed(normalizedAudio.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        artifactStore.Seed(processedAudio.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        mediaRepository.Seed(resume.MediaAsset);
+        await mediaRepository.SaveArtifactAsync(normalizedAudio, CancellationToken.None);
+        await mediaRepository.SaveArtifactAsync(processedAudio, CancellationToken.None);
+        await WriteCachedVadAsync(artifactWriter, resume, oldVadRun, normalizedAudio);
+
+        FakeSpeechRegionDetector detector = CreateVadDetector(VadDetectorMode.Succeed);
+        var asrStage = new CountingStage(StageNames.Asr);
+        var pipeline = new TranscriptGenerationPipeline(
+            [
+                new NoOpEnhancementStage(),
+                new VadGenerationStage(new VadStageHandler(detector, stageRunStore), artifactWriter, artifactStore),
+                asrStage,
+            ],
+            artifactStore,
+            artifactWriter,
+            transcriptRepository,
+            stageRunStore: stageRunStore);
+        TranscriptProjectState resumeState = CreateResumeState(
+            new ResumeStateSeed(resume.Project, resume.MediaAsset, mediaRepository.Artifacts, [oldVadRun]));
+        TranscriptGenerationContext context = CreateContext(new ContextSeed
+        {
+            Project = resume.Project,
+            MediaAsset = resume.MediaAsset,
+            AudioArtifact = normalizedAudio,
+            ProjectState = resumeState,
+            ProjectRootPath = artifactStore.GetPath("."),
+        }) with
+        {
+            AudioRoutingPlan = TranscriptAudioRoutingPlan.Raw(processedAudio, SpeechAudioSourceKind.FullMix),
+        };
+
+        return new VadSourceChangeFixture(
+            pipeline,
+            context,
+            detector,
+            asrStage,
+            oldVadRun,
+            processedAudio,
+            mediaRepository);
+    }
+
     private static async Task<VadTestInputs> SeedVadInputsAsync(
         FakeArtifactStore artifactStore,
         FakeMediaAssetRepository mediaRepository,
@@ -115,7 +206,7 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         await mediaRepository.SaveArtifactAsync(audioArtifact, CancellationToken.None);
         if (cachedVad == CachedVadMode.Present)
         {
-            await WriteCachedVadAsync(artifactWriter, resume, vadRun);
+            await WriteCachedVadAsync(artifactWriter, resume, vadRun, audioArtifact);
         }
 
         return new VadTestInputs(resume, audioArtifact, vadRun);
@@ -136,12 +227,15 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
     private static Task WriteCachedVadAsync(
         TranscriptArtifactWriter artifactWriter,
         ResumeProject resume,
-        StageRunRecord vadRun) =>
+        StageRunRecord vadRun,
+        ProjectArtifact inputAudioArtifact) =>
         artifactWriter.WriteSpeechRegionsArtifactAsync(
-            resume.Project.Id,
-            resume.MediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            vadRun.Id,
+            new SpeechRegionsArtifactWriteRequest(
+                resume.Project,
+                resume.MediaAsset,
+                [new SpeechRegion(0, 0.0, 2.0)],
+                vadRun,
+                inputAudioArtifact),
             CancellationToken.None);
 
     private static IReadOnlyDictionary<string, string> CreateExecutionSnapshot(ModelSnapshotMode mode) =>
@@ -197,6 +291,15 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         ResumeProject Resume,
         ProjectArtifact AudioArtifact,
         StageRunRecord VadRun);
+
+    private sealed record VadSourceChangeFixture(
+        TranscriptGenerationPipeline Pipeline,
+        TranscriptGenerationContext Context,
+        FakeSpeechRegionDetector Detector,
+        CountingStage AsrStage,
+        StageRunRecord OldVadRun,
+        ProjectArtifact ProcessedAudio,
+        FakeMediaAssetRepository MediaRepository);
 
     private sealed record VadFailureContext
     {
@@ -433,5 +536,21 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             CancellationToken cancellationToken,
             IProgress<PipelineProgressEvent>? progress = null) =>
             Task.FromResult(context);
+    }
+
+    private sealed class CountingStage(string stageName) : ITranscriptGenerationStage
+    {
+        public string StageName => stageName;
+
+        public int ExecutionCount { get; private set; }
+
+        public Task<TranscriptGenerationContext> ExecuteAsync(
+            TranscriptGenerationContext context,
+            CancellationToken cancellationToken,
+            IProgress<PipelineProgressEvent>? progress = null)
+        {
+            ExecutionCount++;
+            return Task.FromResult(context);
+        }
     }
 }

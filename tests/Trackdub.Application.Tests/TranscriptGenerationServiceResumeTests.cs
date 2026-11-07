@@ -28,8 +28,8 @@ public sealed class TranscriptGenerationServiceResumeTests
         await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
 
         await harness.Service.GenerateTranscriptAsync(
             project,
@@ -60,8 +60,8 @@ public sealed class TranscriptGenerationServiceResumeTests
         await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
         await harness.SeedAsrResumeStateAsync(
             project,
             mediaAsset,
@@ -100,8 +100,8 @@ public sealed class TranscriptGenerationServiceResumeTests
         await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
         StageRunRecord asrRun = await harness.SeedAsrResumeStateAsync(
             project,
             mediaAsset,
@@ -146,8 +146,8 @@ public sealed class TranscriptGenerationServiceResumeTests
         await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
 
         await harness.Service.GenerateTranscriptAsync(
             project,
@@ -355,18 +355,20 @@ public sealed class TranscriptGenerationServiceResumeTests
         public async Task<StageRunRecord> SeedVadResumeStateAsync(
             TrackdubProject project,
             MediaAsset mediaAsset,
-            IReadOnlyList<SpeechRegion> regions,
-            CancellationToken cancellationToken)
+            ProjectArtifact inputAudioArtifact,
+            IReadOnlyList<SpeechRegion> regions)
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             StageRunRecord vadRun = StageRunRecord.Start(project.Id, StageNames.Vad, now).Complete(now);
-            await StageRunStore.CreateAsync(vadRun, cancellationToken).ConfigureAwait(false);
+            await StageRunStore.CreateAsync(vadRun, CancellationToken.None).ConfigureAwait(false);
             await artifactWriter.WriteSpeechRegionsArtifactAsync(
-                project.Id,
-                mediaAsset,
-                regions,
-                vadRun.Id,
-                cancellationToken).ConfigureAwait(false);
+                new SpeechRegionsArtifactWriteRequest(
+                    project,
+                    mediaAsset,
+                    regions,
+                    vadRun,
+                    inputAudioArtifact),
+                CancellationToken.None).ConfigureAwait(false);
             return vadRun;
         }
 

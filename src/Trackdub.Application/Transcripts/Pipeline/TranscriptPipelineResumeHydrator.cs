@@ -116,9 +116,11 @@ internal static class TranscriptPipelineResumeHydrator
         CancellationToken cancellationToken)
     {
         IReadOnlyList<SpeechRegion>? speechRegions = await artifactWriter
-            .TryReadSpeechRegionsAsync(context.Project.Id, cancellationToken)
+            .TryReadSpeechRegionsAsync(
+                context.AudioRoutingPlan.VadAudioArtifact,
+                cancellationToken)
             .ConfigureAwait(false);
-        if (speechRegions is null || speechRegions.Count == 0)
+        if (speechRegions is null)
         {
             return context;
         }

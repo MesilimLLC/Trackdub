@@ -178,49 +178,101 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
             return false;
         }
 
-        if (string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase) &&
-            !context.EnableSpeakerDiarization)
+        if (!HasCurrentVadInputsForResume(context, stageName) ||
+            !StageConfigurationAllowsResume(context, stageName))
         {
             return false;
-        }
-
-        if (string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) &&
-            !context.ModelPreferences.EnableAsrTextRefinement)
-        {
-            return false;
-        }
-
-        if (string.Equals(stageName, StageNames.SpeakerAssignment, StringComparison.OrdinalIgnoreCase))
-        {
-            if (!StageArtifactResumeEvaluator.CanResumeStage(
-                    context.ProjectState,
-                    artifactStore,
-                    StageNames.Asr,
-                    context.ExecutionSnapshot,
-                    context.ProjectRootPath))
-            {
-                return false;
-            }
-
-            if (context.ModelPreferences.EnableAsrTextRefinement &&
-                !StageArtifactResumeEvaluator.CanResumeStage(
-                    context.ProjectState,
-                    artifactStore,
-                    StageNames.TextRefinementAsr,
-                    context.ExecutionSnapshot,
-                    context.ProjectRootPath))
-            {
-                return false;
-            }
         }
 
         return StageArtifactResumeEvaluator.CanResumeStage(
-            context.ProjectState,
-            artifactStore,
+            context.ProjectState!,
+            artifactStore!,
             stageName,
             context.ExecutionSnapshot,
-            context.ProjectRootPath);
+            context.ProjectRootPath!);
     }
+
+    private bool StageConfigurationAllowsResume(TranscriptGenerationContext context, string stageName) =>
+        (!string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase) ||
+         context.EnableSpeakerDiarization) &&
+        (!string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) ||
+         context.ModelPreferences.EnableAsrTextRefinement) &&
+        (!string.Equals(stageName, StageNames.SpeakerAssignment, StringComparison.OrdinalIgnoreCase) ||
+         SpeakerAssignmentInputsCanResume(context));
+
+    private bool SpeakerAssignmentInputsCanResume(TranscriptGenerationContext context)
+    {
+        if (!StageArtifactResumeEvaluator.CanResumeStage(
+                context.ProjectState!,
+                artifactStore!,
+                StageNames.Asr,
+                context.ExecutionSnapshot,
+                context.ProjectRootPath!))
+        {
+            return false;
+        }
+
+        return !context.ModelPreferences.EnableAsrTextRefinement ||
+               StageArtifactResumeEvaluator.CanResumeStage(
+                   context.ProjectState!,
+                   artifactStore!,
+                   StageNames.TextRefinementAsr,
+                   context.ExecutionSnapshot,
+                   context.ProjectRootPath!);
+    }
+
+    private static bool HasCurrentVadInputsForResume(TranscriptGenerationContext context, string stageName)
+    {
+        if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
+        {
+            return SpeechRegionsMatchCurrentAudio(context);
+        }
+
+        return !IsVadDependentStage(stageName) || HasCurrentVadRunForResume(context);
+    }
+
+    private static bool SpeechRegionsMatchCurrentAudio(TranscriptGenerationContext context)
+    {
+        if (context.ProjectState is null)
+        {
+            return false;
+        }
+
+        ProjectArtifact? latestRegions = context.ProjectState.ProjectState.Artifacts
+            .Where(static artifact => artifact.Kind == ArtifactKind.SpeechRegions)
+            .OrderByDescending(static artifact => artifact.CreatedAtUtc)
+            .FirstOrDefault();
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            context.ProjectState.StageRuns,
+            StageNames.Vad);
+
+        return latestVadRun is not null &&
+               latestRegions?.StageRunId == latestVadRun.Id &&
+               string.Equals(
+                   latestRegions.Provenance,
+                   TranscriptArtifactWriter.GetSpeechRegionsProvenance(context.AudioRoutingPlan.VadAudioArtifact),
+                   StringComparison.Ordinal);
+    }
+
+    internal static bool HasCurrentVadRunForResume(TranscriptGenerationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.ProjectState is null || context.VadStageRunId is not Guid currentVadRunId)
+        {
+            return false;
+        }
+
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            context.ProjectState.StageRuns,
+            StageNames.Vad);
+        return latestVadRun?.Id == currentVadRunId;
+    }
+
+    private static bool IsVadDependentStage(string stageName) =>
+        string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(stageName, StageNames.Asr, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(stageName, StageNames.SpeakerAssignment, StringComparison.OrdinalIgnoreCase);
 
     private async Task WriteUnhandledStageDegradationAsync(
         ITranscriptGenerationStage stage,

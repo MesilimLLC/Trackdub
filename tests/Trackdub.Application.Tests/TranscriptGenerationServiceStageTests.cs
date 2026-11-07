@@ -14,8 +14,10 @@ using Trackdub.TestDoubles;
 
 namespace Trackdub.Application.Tests;
 
-public sealed class TranscriptGenerationServiceStageTests
+public sealed class TranscriptGenerationServiceStageTests : IDisposable
 {
+    private readonly string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-stage-tests-{Guid.NewGuid():N}");
+
     [Theory]
     [InlineData("unknown-stage")]
     [InlineData(StageNames.Translation)]
@@ -37,23 +39,64 @@ public sealed class TranscriptGenerationServiceStageTests
     }
 
     [Fact]
-    public async Task GenerateTranscriptStageAsync_asr_without_vad_artifact_throws()
+    public async Task GenerateTranscriptStageAsync_asr_generates_vad_when_artifact_is_missing()
     {
-        (TranscriptGenerationService service, _) = CreateMinimalService();
+        var vadDetector = new FakeSpeechRegionDetector();
+        vadDetector.SetRegions(new SpeechRegion(0, 0.0d, 1.0d));
+        var transcriptionEngine = new CapturingTranscriptionEngine();
+        (TranscriptGenerationService service, _) = CreateMinimalService(
+            transcriptionEngine,
+            vadDetector: vadDetector,
+            artifactStore: CreateArtifactStoreWithAudio());
         TranscriptGenerationContext context = CreateContext();
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.GenerateTranscriptStageAsync(
+        await service.GenerateTranscriptStageAsync(
+            context.Project,
+            context.MediaAsset,
+            context.NormalizedAudioArtifact,
+            context.AudioRoutingPlan,
+            StageNames.Asr,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, vadDetector.DetectCallCount);
+        Assert.Equal(0d, Assert.Single(transcriptionEngine.ReceivedRegions).StartSeconds);
+    }
+
+    [Fact]
+    public async Task GenerateTranscriptStageAsync_asr_regenerates_vad_regions_from_another_audio_source()
+    {
+        var vadDetector = new FakeSpeechRegionDetector();
+        vadDetector.SetRegions(new SpeechRegion(0, 0.0d, 1.0d));
+        var transcriptionEngine = new CapturingTranscriptionEngine();
+        (TranscriptGenerationService service, TranscriptArtifactWriter artifactWriter) = CreateMinimalService(
+            transcriptionEngine,
+            vadDetector: vadDetector,
+            artifactStore: CreateArtifactStoreWithAudio());
+        TranscriptGenerationContext context = CreateContext();
+        await artifactWriter.WriteSpeechRegionsArtifactAsync(
+            new SpeechRegionsArtifactWriteRequest(
                 context.Project,
                 context.MediaAsset,
-                context.NormalizedAudioArtifact,
-                context.AudioRoutingPlan,
-                StageNames.Asr,
-                enableSpeakerDiarization: false,
-                InferenceModelPreferences.Empty,
-                TestContext.Current.CancellationToken));
+                [new SpeechRegion(0, 0.25d, 0.75d)],
+                StageRunRecord.Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
+                    .Complete(DateTimeOffset.UtcNow),
+                context.AudioRoutingPlan.VadAudioArtifact with { Id = Guid.NewGuid() }),
+            TestContext.Current.CancellationToken);
 
-        Assert.Contains("Speech regions", ex.Message, StringComparison.OrdinalIgnoreCase);
+        await service.GenerateTranscriptStageAsync(
+            context.Project,
+            context.MediaAsset,
+            context.NormalizedAudioArtifact,
+            context.AudioRoutingPlan,
+            StageNames.Asr,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, vadDetector.DetectCallCount);
+        Assert.Equal(0d, Assert.Single(transcriptionEngine.ReceivedRegions).StartSeconds);
     }
 
     [Fact]
@@ -64,10 +107,13 @@ public sealed class TranscriptGenerationServiceStageTests
         TranscriptGenerationContext context = CreateContext();
 
         await artifactWriter.WriteSpeechRegionsArtifactAsync(
-            context.Project.Id,
-            context.MediaAsset,
-            [],
-            Guid.NewGuid(),
+            new SpeechRegionsArtifactWriteRequest(
+                context.Project,
+                context.MediaAsset,
+                [],
+                StageRunRecord.Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
+                    .Complete(DateTimeOffset.UtcNow),
+                context.AudioRoutingPlan.VadAudioArtifact),
             TestContext.Current.CancellationToken);
         ProjectSpeaker speaker = ProjectSpeaker.Create(
             context.Project.Id,
@@ -114,10 +160,13 @@ public sealed class TranscriptGenerationServiceStageTests
         TranscriptGenerationContext context = CreateContext();
 
         await localArtifactWriter.WriteSpeechRegionsArtifactAsync(
-            context.Project.Id,
-            context.MediaAsset,
-            [new SpeechRegion(0, 0.0d, 1.0d)],
-            Guid.NewGuid(),
+            new SpeechRegionsArtifactWriteRequest(
+                context.Project,
+                context.MediaAsset,
+                [new SpeechRegion(0, 0.0d, 1.0d)],
+                StageRunRecord.Start(context.Project.Id, StageNames.Vad, DateTimeOffset.UtcNow)
+                    .Complete(DateTimeOffset.UtcNow),
+                context.AudioRoutingPlan.VadAudioArtifact),
             TestContext.Current.CancellationToken);
 
         await service.GenerateTranscriptStageAsync(
@@ -143,11 +192,13 @@ public sealed class TranscriptGenerationServiceStageTests
         }
     }
 
-    private static (TranscriptGenerationService Service, TranscriptArtifactWriter ArtifactWriter) CreateMinimalService(
+    private (TranscriptGenerationService Service, TranscriptArtifactWriter ArtifactWriter) CreateMinimalService(
         IAudioTranscriptionEngine? transcriptionEngine = null,
-        FakeProjectStageRunStore? stageRunStore = null)
+        FakeProjectStageRunStore? stageRunStore = null,
+        FakeSpeechRegionDetector? vadDetector = null,
+        FakeArtifactStore? artifactStore = null)
     {
-        var artifactStore = new FakeArtifactStore();
+        artifactStore ??= new FakeArtifactStore();
         var mediaRepository = new FakeMediaAssetRepository();
         stageRunStore ??= new FakeProjectStageRunStore();
         var artifactWriter = new TranscriptArtifactWriter(
@@ -156,6 +207,26 @@ public sealed class TranscriptGenerationServiceStageTests
             mediaRepository);
         var transcriptRepository = new FakeTranscriptRepository();
         var asrHandler = new AsrStageHandler(transcriptionEngine ?? new StubAudioTranscriptionEngine(), stageRunStore);
+        var speakerAssignmentService = new SpeakerAssignmentService(
+            new FakeSpeakerRepository(),
+            transcriptRepository,
+            new SegmentEditingService(transcriptRepository, new FakeTtsTakeRepository(), artifactWriter),
+            artifactStore,
+            stageRunStore,
+            new FakeDiarizationEngine(),
+            new SpeakerReferenceClipService(
+                artifactStore,
+                new StubAudioClipExtractor(),
+                new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
+                mediaRepository,
+                new FakeVoiceAssignmentRepository(),
+                new FakeTtsTakeRepository(),
+                new FakeReferenceClipAnalyzer(),
+                new FakeReferenceClipTrimmer()),
+            artifactWriter,
+            new DiarizationStageHandler(
+                new FakeDiarizationEngine(),
+                new StubModelDownloader()));
 
         return (new TranscriptGenerationService(
             transcriptRepository,
@@ -163,31 +234,12 @@ public sealed class TranscriptGenerationServiceStageTests
             asrHandler,
             artifactWriter,
             new VadGenerationStage(
-                new VadStageHandler(new FakeSpeechRegionDetector(), stageRunStore),
+                new VadStageHandler(vadDetector ?? new FakeSpeechRegionDetector(), stageRunStore),
                 artifactWriter,
                 artifactStore),
             new FakeEnhancementStage(),
             new SpeakerDiarizationStage(
-                new SpeakerAssignmentService(
-                    new FakeSpeakerRepository(),
-                    transcriptRepository,
-                    new SegmentEditingService(transcriptRepository, new FakeTtsTakeRepository(), artifactWriter),
-                    artifactStore,
-                    stageRunStore,
-                    new FakeDiarizationEngine(),
-                    new SpeakerReferenceClipService(
-                        artifactStore,
-                        new StubAudioClipExtractor(),
-                        new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
-                        mediaRepository,
-                        new FakeVoiceAssignmentRepository(),
-                        new FakeTtsTakeRepository(),
-                        new FakeReferenceClipAnalyzer(),
-                        new FakeReferenceClipTrimmer()),
-                    artifactWriter,
-                    new DiarizationStageHandler(
-                        new FakeDiarizationEngine(),
-                        new StubModelDownloader())),
+                speakerAssignmentService,
                 artifactWriter,
                 artifactStore,
                 stageRunStore),
@@ -196,26 +248,7 @@ public sealed class TranscriptGenerationServiceStageTests
                 new TextRefinementStageHandler(new FakeTextRefinementEngine(), stageRunStore),
                 stageRunStore),
             new SpeakerAssignmentAndPersistenceStage(
-                new SpeakerAssignmentService(
-                    new FakeSpeakerRepository(),
-                    transcriptRepository,
-                    new SegmentEditingService(transcriptRepository, new FakeTtsTakeRepository(), artifactWriter),
-                    artifactStore,
-                    stageRunStore,
-                    new FakeDiarizationEngine(),
-                    new SpeakerReferenceClipService(
-                        artifactStore,
-                        new StubAudioClipExtractor(),
-                        new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
-                        mediaRepository,
-                        new FakeVoiceAssignmentRepository(),
-                        new FakeTtsTakeRepository(),
-                        new FakeReferenceClipAnalyzer(),
-                        new FakeReferenceClipTrimmer()),
-                    artifactWriter,
-                    new DiarizationStageHandler(
-                        new FakeDiarizationEngine(),
-                        new StubModelDownloader())),
+                speakerAssignmentService,
                 transcriptRepository,
                 artifactWriter,
                 artifactStore,
@@ -224,6 +257,21 @@ public sealed class TranscriptGenerationServiceStageTests
             stageRunStore,
             mediaRepository,
             new FakeSpeakerRepository()), artifactWriter);
+    }
+
+    private FakeArtifactStore CreateArtifactStoreWithAudio()
+    {
+        var artifactStore = new FakeArtifactStore(tempRoot);
+        artifactStore.Seed("artifacts/audio.wav", FakeWavHelper.MinimalPcm16(durationSeconds: 1.0));
+        return artifactStore;
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
     }
 
     private static TranscriptGenerationContext CreateContext()
