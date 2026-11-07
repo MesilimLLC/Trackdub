@@ -902,11 +902,14 @@ public sealed class TranscriptGenerationService(
         CurrentVadResumeState currentVad)
     {
         TranscriptAudioRoutingPlan currentRoutingPlan = GetCurrentRoutingPlan(request, resumableStages);
+        bool vadCanBeResumed = !TranscriptResumeLineageEvaluator.IsVadDependentStage(stageName) ||
+            resumableStages.Contains(StageNames.Vad);
         return IsStageEligibleForResume(
                    stageName,
                    request.EnableSpeakerDiarization,
                    request.EnableAsrTextRefinement,
                    resumableStages) &&
+               vadCanBeResumed &&
                CanSkipStagePreflight(stageName, request, currentVad, currentRoutingPlan) &&
                StageArtifactResumeEvaluator.CanResumeStage(
                    request.ResumeState!,

@@ -184,9 +184,10 @@ public sealed class TranscriptArtifactWriter(
     {
         try
         {
-            return await artifactStore
+            SpeechRegionsArtifactDocument? document = await artifactStore
                 .ReadJsonAsync<SpeechRegionsArtifactDocument>(artifact.RelativePath, cancellationToken)
                 .ConfigureAwait(false);
+            return document?.Regions is null ? null : document;
         }
         catch (InvalidDataException)
         {

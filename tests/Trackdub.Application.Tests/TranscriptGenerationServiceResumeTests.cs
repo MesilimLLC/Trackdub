@@ -209,6 +209,76 @@ public sealed class TranscriptGenerationServiceResumeTests
     }
 
     [Fact]
+    public async Task GenerateTranscriptAsync_preflights_asr_when_vad_model_change_invalidates_vad_resume()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        ProjectArtifact enhancedArtifact = await harness.SeedSpeechEnhancementResumeStateAsync(
+            project,
+            mediaAsset,
+            TestContext.Current.CancellationToken);
+        StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            enhancedArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+        await harness.SeedAsrResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            new AsrResumeSeedRequest
+            {
+                VadStageRunId = vadRun.Id,
+                VadAudioArtifact = enhancedArtifact,
+                Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "cached transcript", "en")],
+                CancellationToken = TestContext.Current.CancellationToken
+            });
+
+        await harness.Service.GenerateTranscriptAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            routingPlan,
+            enableSpeakerDiarization: false,
+            new InferenceModelPreferences(VadModelAlias: "replacement-vad"),
+            TestContext.Current.CancellationToken,
+            sourceLanguage: "en");
+
+        Assert.Contains(StageNames.Vad, harness.PreFlightChecker.CheckedStageNames);
+        Assert.Contains(StageNames.Asr, harness.PreFlightChecker.CheckedStageNames);
+    }
+
+    [Fact]
+    public async Task TranscriptArtifactWriter_treats_null_speech_regions_as_missing_snapshot()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, _) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+        ProjectArtifact regionsArtifact = harness.MediaRepository.Artifacts
+            .Single(artifact => artifact.Kind == ArtifactKind.SpeechRegions);
+        byte[] nullRegionsDocument = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            StageRunId = vadRun.Id,
+            Regions = (IReadOnlyList<SpeechRegion>?)null,
+            GeneratedAtUtc = DateTimeOffset.UtcNow
+        });
+        harness.ArtifactStore.Seed(regionsArtifact.RelativePath, nullRegionsDocument);
+
+        SpeechRegionsArtifactSnapshot? snapshot = await harness.TryReadSpeechRegionsSnapshotAsync(
+            project.Id,
+            audioArtifact,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(snapshot);
+    }
+
+    [Fact]
     public async Task GenerateTranscriptAsync_reruns_asr_after_resumed_vad_with_no_regions()
     {
         ServiceHarness harness = CreateHarness();
@@ -475,6 +545,12 @@ public sealed class TranscriptGenerationServiceResumeTests
         public FakeSpeechRegionDetector VadDetector { get; } = vadDetector;
         public CountingAsrEngine AsrEngine { get; } = asrEngine;
         public FakePipelinePreFlightChecker PreFlightChecker { get; } = preFlightChecker;
+
+        public Task<SpeechRegionsArtifactSnapshot?> TryReadSpeechRegionsSnapshotAsync(
+            Guid projectId,
+            ProjectArtifact? expectedInputAudioArtifact,
+            CancellationToken cancellationToken) =>
+            artifactWriter.TryReadSpeechRegionsSnapshotAsync(projectId, expectedInputAudioArtifact, cancellationToken);
 
         public async Task<(TrackdubProject Project, MediaAsset MediaAsset, ProjectArtifact AudioArtifact, TranscriptAudioRoutingPlan RoutingPlan)> SeedProjectAsync(
             CancellationToken cancellationToken)
