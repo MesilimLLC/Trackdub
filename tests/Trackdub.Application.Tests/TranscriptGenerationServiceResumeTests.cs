@@ -41,14 +41,88 @@ public sealed class TranscriptGenerationServiceResumeTests
             TestContext.Current.CancellationToken,
             sourceLanguage: "en");
 
-        Assert.Equal(0, harness.VadDetector.DetectCallCount);
-        Assert.Equal(1, harness.AsrEngine.TranscribeCallCount);
+        AssertAsrWasPreflightedAndExecuted(harness);
         Assert.DoesNotContain(StageNames.Vad, harness.PreFlightChecker.CheckedStageNames);
-        Assert.Contains(StageNames.Asr, harness.PreFlightChecker.CheckedStageNames);
         Assert.Contains(
             harness.StageRunStore.All,
             run => run.StageName == StageNames.Vad && run.Status == StageRunStatus.Skipped);
         Assert.Single(harness.TranscriptRepository.Revisions);
+    }
+
+    [Fact]
+    public async Task GenerateTranscriptAsync_preflights_and_reruns_vad_when_audio_content_changes_with_same_artifact_id()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, _) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+        ProjectArtifact changedAudioArtifact = audioArtifact with { Sha256 = "updated-audio-content" };
+        TranscriptAudioRoutingPlan changedRoutingPlan = TranscriptAudioRoutingPlan.Raw(
+            changedAudioArtifact,
+            SpeechAudioSourceKind.FullMix);
+
+        await harness.Service.GenerateTranscriptAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            changedRoutingPlan,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken,
+            sourceLanguage: "en");
+
+        Assert.Equal(1, harness.VadDetector.DetectCallCount);
+        Assert.Contains(StageNames.Vad, harness.PreFlightChecker.CheckedStageNames);
+        ProjectArtifact latestRegions = harness.MediaRepository.Artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.SpeechRegions)
+            .MaxBy(artifact => artifact.CreatedAtUtc)!;
+        Assert.Equal(
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(changedAudioArtifact),
+            latestRegions.Provenance);
+    }
+
+    [Fact]
+    public async Task GenerateTranscriptAsync_preflights_asr_when_latest_vad_is_newer_than_cached_asr()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        StageRunRecord oldVadRun = await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+        await harness.SeedAsrResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            new AsrResumeSeedRequest
+            {
+                VadStageRunId = oldVadRun.Id,
+                Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "cached transcript", "en")],
+                CancellationToken = TestContext.Current.CancellationToken
+            });
+        await harness.SeedVadResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            [new SpeechRegion(0, 0.0, 2.0)]);
+
+        await harness.Service.GenerateTranscriptAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            routingPlan,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken,
+            sourceLanguage: "en");
+
+        AssertAsrWasPreflightedAndExecuted(harness);
     }
 
     [Fact]
@@ -57,7 +131,7 @@ public sealed class TranscriptGenerationServiceResumeTests
         ServiceHarness harness = CreateHarness();
         (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
             await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
-        await harness.SeedVadResumeStateAsync(
+        StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
             audioArtifact,
@@ -65,8 +139,13 @@ public sealed class TranscriptGenerationServiceResumeTests
         await harness.SeedAsrResumeStateAsync(
             project,
             mediaAsset,
-            [new RecognizedTranscriptSegment(0, 0.0, 2.0, "hello", "en")],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            new AsrResumeSeedRequest
+            {
+                VadStageRunId = vadRun.Id,
+                Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "hello", "en")],
+                CancellationToken = TestContext.Current.CancellationToken
+            });
 
         await harness.Service.GenerateTranscriptAsync(
             project,
@@ -92,12 +171,47 @@ public sealed class TranscriptGenerationServiceResumeTests
     }
 
     [Fact]
+    public async Task GenerateTranscriptAsync_reruns_asr_after_resumed_vad_with_no_regions()
+    {
+        ServiceHarness harness = CreateHarness();
+        (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
+            await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
+        StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(project, mediaAsset, audioArtifact, []);
+        await harness.SeedAsrResumeStateAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            new AsrResumeSeedRequest
+            {
+                VadStageRunId = vadRun.Id,
+                Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "old fallback transcript", "en")],
+                CancellationToken = TestContext.Current.CancellationToken
+            });
+
+        await harness.Service.GenerateTranscriptAsync(
+            project,
+            mediaAsset,
+            audioArtifact,
+            routingPlan,
+            enableSpeakerDiarization: false,
+            InferenceModelPreferences.Empty,
+            TestContext.Current.CancellationToken,
+            sourceLanguage: "en");
+
+        Assert.Equal(1, harness.AsrEngine.TranscribeCallCount);
+        Assert.Contains(StageNames.Asr, harness.PreFlightChecker.CheckedStageNames);
+        Assert.Contains(
+            harness.StageRunStore.All,
+            run => run.StageName == StageNames.Asr && run.Status == StageRunStatus.Completed);
+    }
+
+    [Fact]
     public async Task GenerateTranscriptAsync_skips_resumable_speaker_assignment_without_repersisting()
     {
         ServiceHarness harness = CreateHarness();
         (TrackdubProject project, MediaAsset mediaAsset, ProjectArtifact audioArtifact, TranscriptAudioRoutingPlan routingPlan) =
             await harness.SeedProjectAsync(TestContext.Current.CancellationToken);
-        await harness.SeedVadResumeStateAsync(
+        StageRunRecord vadRun = await harness.SeedVadResumeStateAsync(
             project,
             mediaAsset,
             audioArtifact,
@@ -105,8 +219,13 @@ public sealed class TranscriptGenerationServiceResumeTests
         StageRunRecord asrRun = await harness.SeedAsrResumeStateAsync(
             project,
             mediaAsset,
-            [new RecognizedTranscriptSegment(0, 0.0, 2.0, "hello", "en")],
-            TestContext.Current.CancellationToken);
+            audioArtifact,
+            new AsrResumeSeedRequest
+            {
+                VadStageRunId = vadRun.Id,
+                Segments = [new RecognizedTranscriptSegment(0, 0.0, 2.0, "hello", "en")],
+                CancellationToken = TestContext.Current.CancellationToken
+            });
         await harness.SeedSpeakerAssignmentResumeStateAsync(
             project,
             mediaAsset,
@@ -165,6 +284,13 @@ public sealed class TranscriptGenerationServiceResumeTests
         Assert.DoesNotContain(
             harness.StageRunStore.All,
             run => run.StageName == StageNames.Vad && run.Status == StageRunStatus.Skipped);
+    }
+
+    private static void AssertAsrWasPreflightedAndExecuted(ServiceHarness harness)
+    {
+        Assert.Equal(0, harness.VadDetector.DetectCallCount);
+        Assert.Equal(1, harness.AsrEngine.TranscribeCallCount);
+        Assert.Contains(StageNames.Asr, harness.PreFlightChecker.CheckedStageNames);
     }
 
     private static byte[] BuildMinimalWav(int sampleRate, int durationSamples)
@@ -284,6 +410,13 @@ public sealed class TranscriptGenerationServiceResumeTests
             preFlightChecker);
     }
 
+    private sealed record AsrResumeSeedRequest
+    {
+        public required Guid VadStageRunId { get; init; }
+        public required IReadOnlyList<RecognizedTranscriptSegment> Segments { get; init; }
+        public required CancellationToken CancellationToken { get; init; }
+    }
+
     private sealed class ServiceHarness(
         TranscriptGenerationService service,
         FakeArtifactStore artifactStore,
@@ -375,21 +508,29 @@ public sealed class TranscriptGenerationServiceResumeTests
         public async Task<StageRunRecord> SeedAsrResumeStateAsync(
             TrackdubProject project,
             MediaAsset mediaAsset,
-            IReadOnlyList<RecognizedTranscriptSegment> segments,
-            CancellationToken cancellationToken)
+            ProjectArtifact audioArtifact,
+            AsrResumeSeedRequest request)
         {
+            CancellationToken cancellationToken = request.CancellationToken;
             DateTimeOffset now = DateTimeOffset.UtcNow;
             StageRunRecord asrRun = StageRunRecord.Start(project.Id, StageNames.Asr, now).Complete(now);
             await StageRunStore.CreateAsync(asrRun, cancellationToken).ConfigureAwait(false);
             await artifactWriter.WriteRawAsrTranscriptArtifactAsync(
-                project.Id,
-                mediaAsset,
-                segments,
-                asrRun.Id,
+                new RawAsrTranscriptArtifactWriteRequest
+                {
+                    ProjectId = project.Id,
+                    MediaAsset = mediaAsset,
+                    Segments = request.Segments,
+                    StageRunId = asrRun.Id,
+                    Lineage = RawAsrTranscriptArtifactLineage.Create(
+                        audioArtifact,
+                        audioArtifact,
+                        request.VadStageRunId)
+                },
                 cancellationToken).ConfigureAwait(false);
 
             TranscriptRevision revision = TranscriptRevision.Create(project.Id, asrRun.Id, 1, now);
-            TranscriptSegment[] domainSegments = segments
+            TranscriptSegment[] domainSegments = request.Segments
                 .OrderBy(static segment => segment.Index)
                 .Select(segment => TranscriptSegment.Create(
                     revision.Id,

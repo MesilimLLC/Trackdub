@@ -18,6 +18,59 @@ public sealed record SpeechRegionsArtifactWriteRequest(
     StageRunRecord StageRun,
     ProjectArtifact InputAudioArtifact);
 
+public sealed record SpeechRegionsArtifactSnapshot(
+    IReadOnlyList<SpeechRegion> Regions,
+    Guid StageRunId)
+{
+    public bool HasRegions => Regions.Count > 0;
+}
+
+public sealed record DiarizationArtifactWriteRequest
+{
+    public required Guid ProjectId { get; init; }
+    public required MediaAsset MediaAsset { get; init; }
+    public required IReadOnlyList<ProjectSpeaker> Speakers { get; init; }
+    public required IReadOnlyList<SpeakerTurn> Turns { get; init; }
+    public required Guid StageRunId { get; init; }
+    public Guid? VadStageRunId { get; init; }
+}
+
+public sealed record RawAsrTranscriptArtifactLineage
+{
+    public required Guid AsrAudioArtifactId { get; init; }
+    public required string AsrAudioSha256 { get; init; }
+    public required Guid VadAudioArtifactId { get; init; }
+    public required string VadAudioSha256 { get; init; }
+    public Guid? VadStageRunId { get; init; }
+
+    public static RawAsrTranscriptArtifactLineage Create(
+        ProjectArtifact asrAudioArtifact,
+        ProjectArtifact vadAudioArtifact,
+        Guid? vadStageRunId) => new()
+        {
+            AsrAudioArtifactId = asrAudioArtifact.Id,
+            AsrAudioSha256 = asrAudioArtifact.Sha256,
+            VadAudioArtifactId = vadAudioArtifact.Id,
+            VadAudioSha256 = vadAudioArtifact.Sha256,
+            VadStageRunId = vadStageRunId
+        };
+}
+
+public sealed record RawAsrTranscriptArtifactWriteRequest
+{
+    public required Guid ProjectId { get; init; }
+    public required MediaAsset MediaAsset { get; init; }
+    public required IReadOnlyList<RecognizedTranscriptSegment> Segments { get; init; }
+    public required Guid StageRunId { get; init; }
+    public required RawAsrTranscriptArtifactLineage Lineage { get; init; }
+}
+
+public sealed record RawAsrTranscriptArtifactReadRequest
+{
+    public required Guid ProjectId { get; init; }
+    public required RawAsrTranscriptArtifactLineage Lineage { get; init; }
+}
+
 public sealed class TranscriptArtifactWriter(
     IArtifactStore artifactStore,
     IFileFingerprintService fileFingerprintService,
@@ -75,29 +128,19 @@ public sealed class TranscriptArtifactWriter(
             throw new ArgumentException("Input audio artifact ID is required.", nameof(inputAudioArtifact));
         }
 
-        return $"generated-vad:source-audio={inputAudioArtifact.Id:D}";
+        return $"generated-vad:source-audio={inputAudioArtifact.Id:D}:source-sha256={inputAudioArtifact.Sha256}";
+    }
+
+    internal static string GetRawAsrProvenance(RawAsrTranscriptArtifactLineage lineage)
+    {
+        ArgumentNullException.ThrowIfNull(lineage);
+        return $"generated-asr-raw:asr-audio={lineage.AsrAudioArtifactId:D}:asr-sha256={lineage.AsrAudioSha256}:vad-audio={lineage.VadAudioArtifactId:D}:vad-sha256={lineage.VadAudioSha256}:vad-run={lineage.VadStageRunId?.ToString("D") ?? "none"}";
     }
 
     /// <summary>
-    /// Returns the most recent committed speech-regions artifact for the project, resolved via
-    /// the artifact repository so callers always see a fully-written file (file is committed
-    /// before its DB row, so a non-null row guarantees the file is present and complete).
+    /// Resolves the most recent committed speech-regions artifact, optionally matching its input audio.
     /// </summary>
-    public Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsAsync(
-        Guid projectId,
-        CancellationToken cancellationToken)
-        => TryReadSpeechRegionsCoreAsync(projectId, null, cancellationToken);
-
-    public Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsAsync(
-        ProjectArtifact expectedInputAudioArtifact,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(expectedInputAudioArtifact);
-
-        return TryReadSpeechRegionsCoreAsync(expectedInputAudioArtifact.ProjectId, expectedInputAudioArtifact, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<SpeechRegion>?> TryReadSpeechRegionsCoreAsync(
+    public async Task<SpeechRegionsArtifactSnapshot?> TryReadSpeechRegionsSnapshotAsync(
         Guid projectId,
         ProjectArtifact? expectedInputAudioArtifact,
         CancellationToken cancellationToken)
@@ -121,11 +164,22 @@ public sealed class TranscriptArtifactWriter(
         SpeechRegionsArtifactDocument? document = await artifactStore
             .ReadJsonAsync<SpeechRegionsArtifactDocument>(artifact.RelativePath, cancellationToken)
             .ConfigureAwait(false);
-        return document?.Regions;
+        if (document is null)
+        {
+            return null;
+        }
+
+        if (artifact.StageRunId is Guid artifactStageRunId && artifactStageRunId != document.StageRunId)
+        {
+            return null;
+        }
+
+        return new SpeechRegionsArtifactSnapshot(document.Regions, document.StageRunId);
     }
 
     public async Task<DiarizationResult?> TryReadDiarizationResultAsync(
         Guid projectId,
+        Guid? expectedVadStageRunId,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<ProjectArtifact> projectArtifacts = await mediaAssetRepository
@@ -148,22 +202,31 @@ public sealed class TranscriptArtifactWriter(
             return null;
         }
 
+        if (expectedVadStageRunId is Guid expectedRunId && document.VadStageRunId != expectedRunId)
+        {
+            return null;
+        }
+
         return new DiarizationResult(document.Speakers, document.Turns);
     }
 
     public async Task WriteDiarizationArtifactAsync(
-        Guid projectId,
-        MediaAsset mediaAsset,
-        IReadOnlyList<ProjectSpeaker> speakers,
-        IReadOnlyList<SpeakerTurn> turns,
-        Guid stageRunId,
+        DiarizationArtifactWriteRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         // Run-scoped path; see WriteSpeechRegionsArtifactAsync for the atomic-swap rationale.
-        string relativePath = ProjectArtifactPaths.GetDiarizationResultRelativePath(stageRunId);
+        string relativePath = ProjectArtifactPaths.GetDiarizationResultRelativePath(request.StageRunId);
         await artifactStore.WriteJsonAsync(
             relativePath,
-            new DiarizationResultArtifactDocument(stageRunId, speakers, turns, DateTimeOffset.UtcNow),
+            new DiarizationResultArtifactDocument(
+                request.StageRunId,
+                request.Speakers,
+                request.Turns,
+                DateTimeOffset.UtcNow)
+            {
+                VadStageRunId = request.VadStageRunId
+            },
             cancellationToken).ConfigureAwait(false);
 
         FileFingerprint fingerprint = await fileFingerprintService.ComputeAsync(
@@ -172,8 +235,8 @@ public sealed class TranscriptArtifactWriter(
 
         var artifact = new ProjectArtifact(
             Guid.NewGuid(),
-            projectId,
-            mediaAsset.Id,
+            request.ProjectId,
+            request.MediaAsset.Id,
             ArtifactKind.DiarizationResult,
             relativePath,
             fingerprint.Sha256,
@@ -182,23 +245,24 @@ public sealed class TranscriptArtifactWriter(
             SampleRate: null,
             ChannelCount: null,
             DateTimeOffset.UtcNow,
-            StageRunId: stageRunId,
+            StageRunId: request.StageRunId,
             Provenance: "generated-diarization");
 
         await mediaAssetRepository.SaveArtifactAsync(artifact, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task WriteRawAsrTranscriptArtifactAsync(
-        Guid projectId,
-        MediaAsset mediaAsset,
-        IReadOnlyList<RecognizedTranscriptSegment> segments,
-        Guid stageRunId,
+        RawAsrTranscriptArtifactWriteRequest request,
         CancellationToken cancellationToken)
     {
-        string relativePath = ProjectArtifactPaths.GetRawAsrTranscriptRelativePath(stageRunId);
+        ArgumentNullException.ThrowIfNull(request);
+        string relativePath = ProjectArtifactPaths.GetRawAsrTranscriptRelativePath(request.StageRunId);
         await artifactStore.WriteJsonAsync(
             relativePath,
-            RawAsrTranscriptArtifactDocument.From(stageRunId, segments),
+            RawAsrTranscriptArtifactDocument.From(
+                request.StageRunId,
+                request.Segments,
+                request.Lineage),
             cancellationToken).ConfigureAwait(false);
 
         FileFingerprint fingerprint = await fileFingerprintService.ComputeAsync(
@@ -207,8 +271,8 @@ public sealed class TranscriptArtifactWriter(
 
         var artifact = new ProjectArtifact(
             Guid.NewGuid(),
-            projectId,
-            mediaAsset.Id,
+            request.ProjectId,
+            request.MediaAsset.Id,
             ArtifactKind.TranscriptRevision,
             relativePath,
             fingerprint.Sha256,
@@ -217,22 +281,23 @@ public sealed class TranscriptArtifactWriter(
             SampleRate: null,
             ChannelCount: null,
             DateTimeOffset.UtcNow,
-            StageRunId: stageRunId,
-            Provenance: "generated-asr-raw");
+            StageRunId: request.StageRunId,
+            Provenance: GetRawAsrProvenance(request.Lineage));
 
         await mediaAssetRepository.SaveArtifactAsync(artifact, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<RawAsrTranscriptArtifact?> TryReadRawAsrTranscriptAsync(
-        Guid projectId,
+        RawAsrTranscriptArtifactReadRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         IReadOnlyList<ProjectArtifact> projectArtifacts = await mediaAssetRepository
-            .GetArtifactsAsync(projectId, cancellationToken)
+            .GetArtifactsAsync(request.ProjectId, cancellationToken)
             .ConfigureAwait(false);
         ProjectArtifact? artifact = projectArtifacts
             .Where(a => a.Kind == ArtifactKind.TranscriptRevision &&
-                        string.Equals(a.Provenance, "generated-asr-raw", StringComparison.OrdinalIgnoreCase))
+                        a.Provenance?.StartsWith("generated-asr-raw", StringComparison.OrdinalIgnoreCase) == true)
             .OrderByDescending(a => a.CreatedAtUtc)
             .FirstOrDefault();
         if (artifact is null || !artifactStore.Exists(artifact.RelativePath))
@@ -244,6 +309,11 @@ public sealed class TranscriptArtifactWriter(
             .ReadJsonAsync<RawAsrTranscriptArtifactDocument>(artifact.RelativePath, cancellationToken)
             .ConfigureAwait(false);
         if (document is null || document.Segments.Count == 0)
+        {
+            return null;
+        }
+
+        if (document.Lineage != request.Lineage)
         {
             return null;
         }
@@ -414,27 +484,32 @@ public sealed class TranscriptArtifactWriter(
         Guid StageRunId,
         IReadOnlyList<ProjectSpeaker> Speakers,
         IReadOnlyList<SpeakerTurn> Turns,
-        DateTimeOffset CreatedAtUtc);
-
-    private sealed record TranscriptRevisionArtifactDocument(
-        Guid RevisionId,
-        Guid? StageRunId,
-        int RevisionNumber,
-        string Provenance,
-        DateTimeOffset CreatedAtUtc,
-        IReadOnlyList<TranscriptSegmentArtifactDocument> Segments)
+        DateTimeOffset CreatedAtUtc)
     {
+        public Guid? VadStageRunId { get; init; }
+    }
+
+    private sealed record TranscriptRevisionArtifactDocument
+    {
+        public required Guid RevisionId { get; init; }
+        public Guid? StageRunId { get; init; }
+        public required int RevisionNumber { get; init; }
+        public required string Provenance { get; init; }
+        public required DateTimeOffset CreatedAtUtc { get; init; }
+        public required IReadOnlyList<TranscriptSegmentArtifactDocument> Segments { get; init; }
+
         public static TranscriptRevisionArtifactDocument From(
             TranscriptRevision revision,
             IReadOnlyList<TranscriptSegment> segments,
             string provenance) =>
-            new(
-                revision.Id,
-                revision.StageRunId,
-                revision.RevisionNumber,
-                provenance,
-                revision.CreatedAtUtc,
-                segments
+            new()
+            {
+                RevisionId = revision.Id,
+                StageRunId = revision.StageRunId,
+                RevisionNumber = revision.RevisionNumber,
+                Provenance = provenance,
+                CreatedAtUtc = revision.CreatedAtUtc,
+                Segments = segments
                     .OrderBy(segment => segment.SegmentIndex)
                     .Select(segment => new TranscriptSegmentArtifactDocument(
                         segment.SegmentIndex,
@@ -453,7 +528,8 @@ public sealed class TranscriptArtifactWriter(
                                 word.Confidence))
                             .ToArray(),
                         segment.SpeakerAssignmentOrigin))
-                    .ToArray());
+                    .ToArray()
+            };
     }
 
     private sealed record TranslationRevisionArtifactDocument(
@@ -540,11 +616,13 @@ public sealed class TranscriptArtifactWriter(
 
     private sealed record RawAsrTranscriptArtifactDocument(
         Guid StageRunId,
-        IReadOnlyList<RawAsrTranscriptSegmentArtifactDocument> Segments)
+        IReadOnlyList<RawAsrTranscriptSegmentArtifactDocument> Segments,
+        RawAsrTranscriptArtifactLineage? Lineage = null)
     {
         public static RawAsrTranscriptArtifactDocument From(
             Guid stageRunId,
-            IReadOnlyList<RecognizedTranscriptSegment> segments) =>
+            IReadOnlyList<RecognizedTranscriptSegment> segments,
+            RawAsrTranscriptArtifactLineage lineage) =>
             new(
                 stageRunId,
                 segments
@@ -564,7 +642,8 @@ public sealed class TranscriptArtifactWriter(
                                 word.Text,
                                 word.Confidence))
                             .ToArray()))
-                    .ToArray());
+                    .ToArray(),
+                lineage);
     }
 
     private sealed record RawAsrTranscriptSegmentArtifactDocument(

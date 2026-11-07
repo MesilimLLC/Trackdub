@@ -119,6 +119,53 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             latestRegions.Provenance);
     }
 
+    [Fact]
+    public async Task HasCurrentVadRunForResume_rejects_dependent_stage_runs_older_than_vad()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        DateTimeOffset vadCompletedAt = fixture.OldVadRun.CompletedAtUtc!.Value;
+        StageRunRecord staleAsrRun = StageRunRecord
+            .Start(fixture.Context.Project.Id, StageNames.Asr, vadCompletedAt.AddSeconds(-2))
+            .Complete(vadCompletedAt.AddSeconds(-1));
+        TranscriptProjectState staleState = fixture.Context.ProjectState! with
+        {
+            StageRuns = [fixture.OldVadRun, staleAsrRun]
+        };
+        TranscriptGenerationContext staleContext = fixture.Context with
+        {
+            ProjectState = staleState,
+            SpeechRegions = [new SpeechRegion(0, 0.0d, 1.0d)],
+            VadStageRunId = fixture.OldVadRun.Id
+        };
+
+        Assert.False(TranscriptGenerationPipeline.HasCurrentVadRunForResume(staleContext, StageNames.Asr));
+
+        StageRunRecord freshAsrRun = StageRunRecord
+            .Start(fixture.Context.Project.Id, StageNames.Asr, vadCompletedAt.AddSeconds(1))
+            .Complete(vadCompletedAt.AddSeconds(2));
+        TranscriptGenerationContext freshContext = staleContext with
+        {
+            ProjectState = staleState with { StageRuns = [fixture.OldVadRun, freshAsrRun] }
+        };
+
+        Assert.True(TranscriptGenerationPipeline.HasCurrentVadRunForResume(freshContext, StageNames.Asr));
+        Assert.False(TranscriptGenerationPipeline.HasCurrentVadRunForResume(
+            freshContext with { SpeechRegions = [] },
+            StageNames.Asr));
+    }
+
+    [Fact]
+    public async Task SpeechRegionsProvenance_changes_when_audio_content_changes_without_artifact_id_change()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        ProjectArtifact updatedAudio = fixture.ProcessedAudio with { Sha256 = "repacked-audio-content" };
+
+        Assert.Equal(fixture.ProcessedAudio.Id, updatedAudio.Id);
+        Assert.NotEqual(
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(fixture.ProcessedAudio),
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(updatedAudio));
+    }
+
     private async Task<VadSourceChangeFixture> CreateVadSourceChangeFixtureAsync()
     {
         var artifactStore = new FakeArtifactStore(tempRoot);
@@ -249,8 +296,10 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             context.Pipeline.ExecuteAsync(context.Context, TestContext.Current.CancellationToken));
         Assert.Equal("VAD unavailable", error.Message);
         Assert.Equal(StageRunStatus.Failed, Assert.Single(context.StageRunStore.All).Status);
-        IReadOnlyList<SpeechRegion>? preserved = await context.ArtifactWriter.TryReadSpeechRegionsAsync(
-            context.ProjectId, TestContext.Current.CancellationToken);
+        IReadOnlyList<SpeechRegion>? preserved = (await context.ArtifactWriter.TryReadSpeechRegionsSnapshotAsync(
+            context.ProjectId,
+            null,
+            TestContext.Current.CancellationToken))?.Regions;
         Assert.Equal(0.0, Assert.Single(preserved!).StartSeconds);
     }
 

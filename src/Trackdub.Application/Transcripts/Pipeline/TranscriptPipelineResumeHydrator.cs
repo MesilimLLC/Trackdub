@@ -115,28 +115,25 @@ internal static class TranscriptPipelineResumeHydrator
         TranscriptArtifactWriter artifactWriter,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<SpeechRegion>? speechRegions = await artifactWriter
-            .TryReadSpeechRegionsAsync(
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                context.Project.Id,
                 context.AudioRoutingPlan.VadAudioArtifact,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (speechRegions is null)
+        if (snapshot is not { HasRegions: true })
         {
+            // Empty VAD output is valid, but downstream ASR must run again so its
+            // short-audio fallback can be applied instead of resuming stale transcript artifacts.
             return context;
         }
 
-        SpeechRegion[] regions = speechRegions.OrderBy(static region => region.Index).ToArray();
-        Guid? vadStageRunId = context.ProjectState?.StageRuns
-            .Where(run => string.Equals(run.StageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
-            .Where(run => run.Status is StageRunStatus.Completed or StageRunStatus.PartiallyCompleted)
-            .OrderByDescending(static run => run.CompletedAtUtc ?? run.StartedAtUtc)
-            .Select(static run => (Guid?)run.Id)
-            .FirstOrDefault();
+        SpeechRegion[] regions = snapshot.Regions.OrderBy(static region => region.Index).ToArray();
 
         return context with
         {
             SpeechRegions = regions,
-            VadStageRunId = vadStageRunId
+            VadStageRunId = snapshot.StageRunId
         };
     }
 
@@ -148,7 +145,7 @@ internal static class TranscriptPipelineResumeHydrator
         context = await EnsureSpeechRegionsAsync(context, artifactWriter, cancellationToken).ConfigureAwait(false);
 
         DiarizationResult? diarizationResult = await artifactWriter
-            .TryReadDiarizationResultAsync(context.Project.Id, cancellationToken)
+            .TryReadDiarizationResultAsync(context.Project.Id, context.VadStageRunId ?? Guid.Empty, cancellationToken)
             .ConfigureAwait(false);
         double durationSeconds = context.AudioRoutingPlan.DiarizationAudioArtifact.DurationSeconds
                                  ?? context.NormalizedAudioArtifact.DurationSeconds
@@ -173,7 +170,16 @@ internal static class TranscriptPipelineResumeHydrator
         context = await HydrateDiarizationAsync(context, artifactWriter, cancellationToken).ConfigureAwait(false);
 
         RawAsrTranscriptArtifact? rawAsr = await artifactWriter
-            .TryReadRawAsrTranscriptAsync(context.Project.Id, cancellationToken)
+            .TryReadRawAsrTranscriptAsync(
+                new RawAsrTranscriptArtifactReadRequest
+                {
+                    ProjectId = context.Project.Id,
+                    Lineage = RawAsrTranscriptArtifactLineage.Create(
+                        context.AudioRoutingPlan.AsrAudioArtifact,
+                        context.AudioRoutingPlan.VadAudioArtifact,
+                        context.VadStageRunId)
+                },
+                cancellationToken)
             .ConfigureAwait(false);
         if (rawAsr is null || rawAsr.Segments.Count == 0)
         {
