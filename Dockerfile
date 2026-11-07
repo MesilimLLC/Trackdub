@@ -85,6 +85,7 @@ WORKDIR /app
 # (NVIDIA TensorRT 10.13.2 release notes). Network-repo install is NVIDIA's
 # documented method for containers. Do not install TensorRT 11: wrong soname.
 RUN apt-get update \
+    && apt-get install --no-install-recommends --only-upgrade --yes apt libapt-pkg6.0t64 \
     && apt-get install --no-install-recommends --yes ca-certificates wget \
     && wget --quiet https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
     && dpkg --install cuda-keyring_1.1-1_all.deb \

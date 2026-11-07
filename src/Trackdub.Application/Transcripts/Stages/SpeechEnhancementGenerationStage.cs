@@ -52,13 +52,18 @@ public sealed class SpeechEnhancementGenerationStage(
 
         PipelineProgressReporter.Phase(progress, StageName, "Updating routing", "Updating audio routing with enhanced audio.");
 
-        // VAD and diarization use the enhanced audio; ASR keeps its unprocessed source
-        // (see TranscriptAudioRoutingPlan.WithUnprocessedAsrSource).
+        // VAD and diarization use the enhanced audio. ASR uses Studio Voice only when the native
+        // AFX effect actually produced it; all fallback paths retain the unprocessed ASR source.
         TranscriptAudioRoutingPlan enhancedRoutingPlan = context.AudioRoutingPlan with
         {
             VadAudioArtifact = result.EnhancedAudioArtifact,
             DiarizationAudioArtifact = result.EnhancedAudioArtifact
         };
+
+        enhancedRoutingPlan = enhancedRoutingPlan.WithSpeechEnhancementAsrSource(
+            result.EnhancedAudioArtifact,
+            result.Backend,
+            result.BackendProfile);
 
         return context with
         {

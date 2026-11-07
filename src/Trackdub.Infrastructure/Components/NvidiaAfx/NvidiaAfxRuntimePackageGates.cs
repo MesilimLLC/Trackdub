@@ -71,6 +71,7 @@ public static class NvidiaAfxRuntimePackageGates
         return !IsPlaceholderDownloadUrl(package.DownloadUrl)
             && !IsPlaceholderSha256(package.Sha256)
             && package.SizeBytes > 0
+            && package.PartCount is >= 1 and <= 1000
             && !string.IsNullOrWhiteSpace(package.RuntimeVersion)
             && !string.IsNullOrWhiteSpace(package.LicenseUrl);
     }
@@ -92,6 +93,11 @@ public static class NvidiaAfxRuntimePackageGates
         if (package.SizeBytes <= 0)
         {
             return "AFX package SizeBytes must be a positive verified archive size.";
+        }
+
+        if (package.PartCount is < 1 or > 1000)
+        {
+            return "AFX package PartCount must be between 1 and 1000.";
         }
 
         if (string.IsNullOrWhiteSpace(package.LicenseUrl))

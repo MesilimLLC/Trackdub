@@ -26,4 +26,7 @@ public enum NvidiaAfxProfile
     /// NVIDIA Early Access effect, shipped under NVIDIA's evaluation license.
     /// </summary>
     SpeakerFocus = 5,
+
+    /// <summary>Studio Voice high-quality offline speech restoration.</summary>
+    StudioVoice = 6,
 }

@@ -1,78 +1,63 @@
 {
   "manifestVersion": "1.0.0",
-  "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/",
+  "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
   "developerResourcesUrl": "https://www.nvidia.com/broadcast-sdk-resources",
-  "notes": "Packages remain placeholders until Trackdub hosts Maxine AFX 3.x redistributables (core NVAudioEffects.dll + features/nvafx*/bin + rate-specific models from NGC download_features.ps1) with verified SHA-256/size. Ready requires both 16k and 48k models for dual-rate profiles plus feature bin DLLs. Layout: see docs/reference/nvidia-afx-wiring.md. Local installs via NvidiaAfxRuntimeDirectory or TRACKDUB_NVIDIA_AFX_RUNTIME_ROOT are supported for probing after IsStubbed() flips. Do not treat this manifest as downloadable.",
+  "notes": "Trackdub-hosted Windows x86 NVIDIA Maxine AFX 3.0.0 Studio Voice High Quality runtime. Each architecture archive includes the SDK core DLL and dependencies, the Studio Voice feature DLL, both 16 kHz and 48 kHz models, and NVIDIA license documents. Archives are split into 256 MiB parts for hosting and are reassembled and SHA-256 verified by the installer. Turing covers SM75; Ampere covers SM80/86; Ada covers SM89; Blackwell covers SM100/120. Layout: see docs/reference/nvidia-afx-wiring.md.",
   "effects": [
-    { "selector": "speaker_focus", "terms": "evaluation" }
+    { "selector": "speaker_focus", "terms": "evaluation" },
+    { "selector": "studio_voice_high_quality", "terms": "commercial" }
   ],
   "packages": [
     {
       "architecture": "turing",
-      "downloadUrl": "https://example.invalid/trackdub/nvidia-afx/turing/runtime.zip",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "sizeBytes": 0,
-      "runtimeVersion": "0.0.0",
-      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/",
+      "downloadUrl": "https://downloads.trackdub.com/afx/3.0.0/turing.zip",
+      "sha256": "d3562a804fc81bd7e6067a58ca1cabd4abbe39ba6da70fe454a7cfb8562f31a2",
+      "sizeBytes": 2649543566,
+      "runtimeVersion": "3.0.0",
+      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+      "partCount": 10,
       "modelRelativePaths": [
-        "features/nvafxdenoiser/models/turing/denoiser_16k.trtpkg",
-        "features/nvafxdenoiser/models/turing/denoiser_48k.trtpkg",
-        "features/nvafxdereverb/models/turing/dereverb_16k.trtpkg",
-        "features/nvafxdereverb/models/turing/dereverb_48k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/turing/dereverb_denoiser_16k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/turing/dereverb_denoiser_48k.trtpkg",
-        "features/nvafxsuperres/models/turing/superres_8kto16k.trtpkg"
+        "features/nvafxstudiovoicehighquality/models/turing/studio_voice_high_quality_16k.trtpkg",
+        "features/nvafxstudiovoicehighquality/models/turing/studio_voice_high_quality_48k.trtpkg"
       ]
     },
     {
       "architecture": "ampere",
-      "downloadUrl": "https://example.invalid/trackdub/nvidia-afx/ampere/runtime.zip",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "sizeBytes": 0,
-      "runtimeVersion": "0.0.0",
-      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/",
+      "downloadUrl": "https://downloads.trackdub.com/afx/3.0.0/ampere.zip",
+      "sha256": "9e730782537b1da3eab1c46f4f86edaeaf61b1ec43fe4fa1a5ecb1e8c19a41dc",
+      "sizeBytes": 2656368958,
+      "runtimeVersion": "3.0.0",
+      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+      "partCount": 10,
       "modelRelativePaths": [
-        "features/nvafxdenoiser/models/ampere/denoiser_16k.trtpkg",
-        "features/nvafxdenoiser/models/ampere/denoiser_48k.trtpkg",
-        "features/nvafxdereverb/models/ampere/dereverb_16k.trtpkg",
-        "features/nvafxdereverb/models/ampere/dereverb_48k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/ampere/dereverb_denoiser_16k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/ampere/dereverb_denoiser_48k.trtpkg",
-        "features/nvafxsuperres/models/ampere/superres_8kto16k.trtpkg"
+        "features/nvafxstudiovoicehighquality/models/ampere/studio_voice_high_quality_16k.trtpkg",
+        "features/nvafxstudiovoicehighquality/models/ampere/studio_voice_high_quality_48k.trtpkg"
       ]
     },
     {
       "architecture": "ada",
-      "downloadUrl": "https://example.invalid/trackdub/nvidia-afx/ada/runtime.zip",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "sizeBytes": 0,
-      "runtimeVersion": "0.0.0",
-      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/",
+      "downloadUrl": "https://downloads.trackdub.com/afx/3.0.0/ada.zip",
+      "sha256": "d11c9fad7ed1f9e42c3b9b1829d5928fc5c11a6d05dc70eb34d1582727b61b99",
+      "sizeBytes": 2658682035,
+      "runtimeVersion": "3.0.0",
+      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+      "partCount": 10,
       "modelRelativePaths": [
-        "features/nvafxdenoiser/models/ada/denoiser_16k.trtpkg",
-        "features/nvafxdenoiser/models/ada/denoiser_48k.trtpkg",
-        "features/nvafxdereverb/models/ada/dereverb_16k.trtpkg",
-        "features/nvafxdereverb/models/ada/dereverb_48k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/ada/dereverb_denoiser_16k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/ada/dereverb_denoiser_48k.trtpkg",
-        "features/nvafxsuperres/models/ada/superres_8kto16k.trtpkg"
+        "features/nvafxstudiovoicehighquality/models/ada/studio_voice_high_quality_16k.trtpkg",
+        "features/nvafxstudiovoicehighquality/models/ada/studio_voice_high_quality_48k.trtpkg"
       ]
     },
     {
       "architecture": "blackwell",
-      "downloadUrl": "https://example.invalid/trackdub/nvidia-afx/blackwell/runtime.zip",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "sizeBytes": 0,
-      "runtimeVersion": "0.0.0",
-      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/",
+      "downloadUrl": "https://downloads.trackdub.com/afx/3.0.0/blackwell.zip",
+      "sha256": "84bead3d315ee42a832ccfb50396e3388a0cd47bd8621deade8024d6bf5d7d1f",
+      "sizeBytes": 2663393003,
+      "runtimeVersion": "3.0.0",
+      "licenseUrl": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+      "partCount": 10,
       "modelRelativePaths": [
-        "features/nvafxdenoiser/models/blackwell/denoiser_16k.trtpkg",
-        "features/nvafxdenoiser/models/blackwell/denoiser_48k.trtpkg",
-        "features/nvafxdereverb/models/blackwell/dereverb_16k.trtpkg",
-        "features/nvafxdereverb/models/blackwell/dereverb_48k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/blackwell/dereverb_denoiser_16k.trtpkg",
-        "features/nvafxdereverbdenoiser/models/blackwell/dereverb_denoiser_48k.trtpkg",
-        "features/nvafxsuperres/models/blackwell/superres_8kto16k.trtpkg"
+        "features/nvafxstudiovoicehighquality/models/blackwell/studio_voice_high_quality_16k.trtpkg",
+        "features/nvafxstudiovoicehighquality/models/blackwell/studio_voice_high_quality_48k.trtpkg"
       ]
     }
   ]

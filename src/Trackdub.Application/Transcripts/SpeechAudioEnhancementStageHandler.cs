@@ -70,7 +70,7 @@ public sealed class SpeechAudioEnhancementStageHandler(
                 .CompleteAsync(stageRunStore, stageRun, null, cancellationToken, null)
                 .ConfigureAwait(false);
 
-            return new SpeechAudioEnhancementStageResult(stageRun, artifact);
+            return new(stageRun, artifact, result.Backend, result.BackendProfile);
         }
         catch (RequiredModelNotAvailableException ex)
         {
@@ -218,4 +218,6 @@ public sealed record SpeechAudioEnhancementStageRequest(
 
 public sealed record SpeechAudioEnhancementStageResult(
     StageRunRecord StageRun,
-    ProjectArtifact EnhancedAudioArtifact);
+    ProjectArtifact EnhancedAudioArtifact,
+    SpeechAudioEnhancementBackend? Backend = null,
+    string? BackendProfile = null);

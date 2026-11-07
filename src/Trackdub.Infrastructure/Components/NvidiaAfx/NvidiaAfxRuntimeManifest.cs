@@ -7,7 +7,8 @@ public sealed record NvidiaAfxRuntimePackage(
     long SizeBytes,
     string RuntimeVersion,
     string LicenseUrl,
-    string[] ModelRelativePaths);
+    string[] ModelRelativePaths,
+    int PartCount = 1);
 
 /// <summary>
 /// Licence terms the manifest records for one effect. <see cref="Terms"/> is

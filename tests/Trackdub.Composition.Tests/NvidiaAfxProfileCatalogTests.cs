@@ -15,7 +15,8 @@ public sealed class NvidiaAfxProfileCatalogTests
             NvidiaAfxProfile.NoiseAndReverb,
             NvidiaAfxProfile.TelephonyUpscale,
             NvidiaAfxProfile.AcousticEchoCancellation,
-            NvidiaAfxProfile.SpeakerFocus
+            NvidiaAfxProfile.SpeakerFocus,
+            NvidiaAfxProfile.StudioVoice
         };
 
         foreach (NvidiaAfxProfile profile in expected)
@@ -137,6 +138,7 @@ public sealed class NvidiaAfxProfileCatalogTests
         Assert.Equal(3, (int)NvidiaAfxProfile.TelephonyUpscale);
         Assert.Equal(4, (int)NvidiaAfxProfile.AcousticEchoCancellation);
         Assert.Equal(5, (int)NvidiaAfxProfile.SpeakerFocus);
+        Assert.Equal(6, (int)NvidiaAfxProfile.StudioVoice);
     }
 
     [Fact]
