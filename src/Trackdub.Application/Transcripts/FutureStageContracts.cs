@@ -12,7 +12,8 @@ public sealed record PreviewMixStageRequest(
     double DubbedSpeechGainDb = 0d,
     double? DuckingGainDb = null,
     bool RestoreOriginalPan = false,
-    bool ApplyTimbrePolish = true);
+    bool ApplyTimbrePolish = true,
+    double BackgroundMediaGainDb = 0d);
 
 public sealed record PreviewMixStageResult(
     StageRunRecord StageRun,
@@ -58,7 +59,8 @@ public sealed record ExportStageRequest(
     bool RestoreOriginalPan = false,
     bool ApplyTimbrePolish = true,
     VideoEncoderPreference VideoEncoder = VideoEncoderPreference.Auto,
-    IReadOnlyList<string>? RawSubtitleFormats = null);
+    IReadOnlyList<string>? RawSubtitleFormats = null,
+    double BackgroundMediaGainDb = 0d);
 
 public sealed record ExportStageResult(
     StageRunRecord StageRun,

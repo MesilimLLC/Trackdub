@@ -36,7 +36,10 @@ public sealed class ProjectUiSettingsMapperTests
             DubbedSpeechGainDb: 1d,
             DuckingGainDb: -10d,
             DuckingGainExplicit: true,
-            RestoreOriginalPan: true);
+            RestoreOriginalPan: true)
+        {
+            BackgroundMediaGainDb = -4.5d
+        };
         var export = new ProjectExportSettings(
             [ExportSubtitleFormat.Vtt],
             ExportSubtitleSource.Bilingual,
@@ -51,6 +54,7 @@ public sealed class ProjectUiSettingsMapperTests
 
         Assert.Equal(-2d, readMix.SourceGainDb);
         Assert.True(readMix.RestoreOriginalPan);
+        Assert.Equal(-4.5d, readMix.BackgroundMediaGainDb);
         Assert.NotNull(readExport);
         Assert.Contains(ExportSubtitleFormat.Vtt, readExport!.SubtitleFormats!);
         Assert.Equal(ExportSubtitleSource.Bilingual, readExport.SubtitleSource);
@@ -86,7 +90,10 @@ public sealed class ProjectUiSettingsMapperTests
             DubbedSpeechGainDb: 3d,
             DuckingGainDb: -8d,
             DuckingGainExplicit: true,
-            RestoreOriginalPan: true);
+            RestoreOriginalPan: true)
+        {
+            BackgroundMediaGainDb = -6d
+        };
 
         PreviewMixStageRequest? request = ProjectUiSettingsMapper.TryBuildPreviewMixRequest(
             new PreviewMixBuildInputs(projectId, 0d, 12d, mix));
@@ -95,6 +102,7 @@ public sealed class ProjectUiSettingsMapperTests
         Assert.Equal(projectId, request.ProjectId);
         Assert.Equal(-8d, request.DuckingGainDb);
         Assert.True(request.RestoreOriginalPan);
+        Assert.Equal(-6d, request.BackgroundMediaGainDb);
     }
 
     [Fact]
