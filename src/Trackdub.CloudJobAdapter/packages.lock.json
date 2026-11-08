@@ -22,7 +22,7 @@
       "trackdub.cloud.aws": {
         "type": "Project",
         "dependencies": {
-          "AWSSDK.DynamoDBv2": "[4.0.109.3, )",
+          "AWSSDK.DynamoDBv2": "[4.0.110.2, )",
           "AWSSDK.S3": "[4.0.104.11, )",
           "Trackdub.Cloud": "[1.0.0, )"
         }
@@ -38,11 +38,11 @@
       },
       "AWSSDK.DynamoDBv2": {
         "type": "CentralTransitive",
-        "requested": "[4.0.109.3, )",
-        "resolved": "4.0.109.3",
-        "contentHash": "xPZSBd65Qpxi2pXJOkTHxa1cb6cQKC0ociQ0NGzmxYHvgJtQ18aVfbYpoEh4zmYQ1LQq2U1Ch/kfV+aR3rjJWg==",
+        "requested": "[4.0.110.2, )",
+        "resolved": "4.0.110.2",
+        "contentHash": "7iX/ajll26r4C5RaJFrGavg7NTER6b4JMK8gZCx2qHfWVpokrphFL5D7llAz9PuTeqZDbNzzyIIZB2Clyi1PqQ==",
         "dependencies": {
-          "AWSSDK.Core": "[4.0.102.14, 5.0.0)"
+          "AWSSDK.Core": "[4.0.102.19, 5.0.0)"
         }
       },
       "AWSSDK.S3": {

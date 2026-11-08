@@ -114,7 +114,7 @@
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.13.0" />
     <PackageVersion Include="Stripe.net" Version="47.2.0" />
     <PackageVersion Include="AWSSDK.CloudWatch" Version="4.0.102.2" />
-    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.109.3" />
+    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.110.2" />
     <PackageVersion Include="AWSSDK.ECS" Version="4.0.6.1" />
     <PackageVersion Include="AWSSDK.SimpleNotificationService" Version="4.0.100.5" />
     <PackageVersion Include="AWSSDK.SQS" Version="4.0.2.33" />
