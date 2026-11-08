@@ -223,19 +223,23 @@ public sealed class ExportResumeGatingTests
     }
 
     [Theory]
-    [InlineData(ExportResumeGating.ApplyTimbrePolishKey, "False")]
-    [InlineData(ExportResumeGating.RestoreOriginalPanKey, "True")]
-    [InlineData(ExportResumeGating.MatchOriginalLoudnessKey, "True")]
-    [InlineData(ExportResumeGating.BurnInSubtitlesKey, "True")]
-    [InlineData(ExportResumeGating.VideoEncoderKey, "nvenc")]
-    [InlineData(ExportResumeGating.SubtitleSourceKey, "Transcript")]
-    [InlineData(ExportResumeGating.SubtitleFormatsKey, "Vtt")]
-    [InlineData(ExportResumeGating.ExportFormatKey, "mkv")]
-    [InlineData(ExportResumeGating.TargetLufsKey, "-23")]
-    [InlineData(ExportResumeGating.SourceGainDbKey, "-3")]
-    [InlineData(ExportResumeGating.DubbedSpeechGainDbKey, "2")]
-    [InlineData(ExportResumeGating.DuckingGainDbKey, "-6")]
-    public async Task CanResumeStageAsync_returns_false_when_a_gating_flag_changes(string key, string changedValue)
+    [InlineData(ExportResumeGating.ApplyTimbrePolishKey, "False", false)]
+    [InlineData(ExportResumeGating.RestoreOriginalPanKey, "True", false)]
+    [InlineData(ExportResumeGating.MatchOriginalLoudnessKey, "True", false)]
+    [InlineData(ExportResumeGating.BurnInSubtitlesKey, "True", false)]
+    [InlineData(ExportResumeGating.VideoEncoderKey, "nvenc", false)]
+    [InlineData(ExportResumeGating.SubtitleSourceKey, "Transcript", false)]
+    [InlineData(ExportResumeGating.SubtitleFormatsKey, "Vtt", false)]
+    [InlineData(ExportResumeGating.ExportFormatKey, "mkv", false)]
+    [InlineData(ExportResumeGating.TargetLufsKey, "-23", false)]
+    [InlineData(ExportResumeGating.SourceGainDbKey, "-3", false)]
+    [InlineData(ExportResumeGating.DubbedSpeechGainDbKey, "2", false)]
+    [InlineData(ExportResumeGating.DuckingGainDbKey, "-6", false)]
+    [InlineData(ExportResumeGating.BackgroundMediaGainDbKey, "-6", true)]
+    public async Task CanResumeStageAsync_returns_expected_result_when_a_flag_changes(
+        string key,
+        string changedValue,
+        bool expectedCanResume)
     {
         using var temp = new TempDir();
         ExportResumeFixture fixture = await ExportResumeFixture.CreateAsync(temp.Path, BaselineGating());
@@ -252,7 +256,30 @@ public sealed class ExportResumeGatingTests
             exportPath: fixture.ExportRelativePath,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.False(canResume);
+        Assert.Equal(expectedCanResume, canResume);
+    }
+
+    [Theory]
+    [InlineData(ArtifactKind.NormalizedAudio, "-13")]
+    [InlineData(ArtifactKind.Ambiance, "0")]
+    public void Build_uses_effective_default_for_non_finite_explicit_ducking_gain(
+        ArtifactKind sourceAudioKind,
+        string expectedDuckingGain)
+    {
+        IReadOnlyDictionary<string, string> flags = ExportResumeGating.Build(
+            ExportOutputContainer.Mp4,
+            sourceAudioKind,
+            applyTimbrePolish: true,
+            restoreOriginalPan: false,
+            matchOriginalLoudness: false,
+            burnInSubtitles: false,
+            subtitleSource: ExportSubtitleSource.Translated,
+            subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(["srt"]),
+            videoEncoder: VideoEncoderPreference.Auto,
+            targetLufs: ExportLoudnessTargets.OnlineLufs,
+            mix: new MixGainSettings(DuckingGainDb: double.NaN, DuckingGainExplicit: true));
+
+        Assert.Equal(expectedDuckingGain, flags[ExportResumeGating.DuckingGainDbKey]);
     }
 
     [Fact]
@@ -275,9 +302,7 @@ public sealed class ExportResumeGatingTests
             subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(["SRT"]),
             videoEncoder: VideoEncoderPreference.Auto,
             targetLufs: ExportLoudnessTargets.OnlineLufs,
-            sourceGainDb: 0d,
-            dubbedSpeechGainDb: 0d,
-            duckingGainDb: null), StringComparer.OrdinalIgnoreCase);
+            mix: new MixGainSettings()), StringComparer.OrdinalIgnoreCase);
 
         bool canResume = await StageArtifactResumeEvaluator.CanResumeStageAsync(
             fixture.State,
@@ -491,9 +516,7 @@ public sealed class ExportResumeGatingTests
             subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(["srt"]),
             videoEncoder: VideoEncoderPreference.Auto,
             targetLufs: ExportLoudnessTargets.OnlineLufs,
-            sourceGainDb: 0d,
-            dubbedSpeechGainDb: 0d,
-            duckingGainDb: null));
+            mix: new MixGainSettings()));
 
     // The DEFAULT path: a prior run whose raw options were null (no subtitle formats specified).
     // The manifest records the "default" token, so a later default run's snapshot must match and
@@ -510,9 +533,7 @@ public sealed class ExportResumeGatingTests
             subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(null),
             videoEncoder: VideoEncoderPreference.Auto,
             targetLufs: ExportLoudnessTargets.OnlineLufs,
-            sourceGainDb: 0d,
-            dubbedSpeechGainDb: 0d,
-            duckingGainDb: null));
+            mix: new MixGainSettings()));
 
     private static Dictionary<string, string> DefaultSubtitleSnapshot() =>
         new(ExportResumeGating.Build(
@@ -526,9 +547,7 @@ public sealed class ExportResumeGatingTests
             subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(null),
             videoEncoder: VideoEncoderPreference.Auto,
             targetLufs: ExportLoudnessTargets.OnlineLufs,
-            sourceGainDb: 0d,
-            dubbedSpeechGainDb: 0d,
-            duckingGainDb: null), StringComparer.OrdinalIgnoreCase);
+            mix: new MixGainSettings()), StringComparer.OrdinalIgnoreCase);
 
     private static Dictionary<string, string> BaselineSnapshot() =>
         new(ExportResumeGating.Build(
@@ -542,9 +561,7 @@ public sealed class ExportResumeGatingTests
             subtitleFormatsToken: ExportResumeGating.SubtitleFormatsTokenFromRawOptions(["srt"]),
             videoEncoder: VideoEncoderPreference.Auto,
             targetLufs: ExportLoudnessTargets.OnlineLufs,
-            sourceGainDb: 0d,
-            dubbedSpeechGainDb: 0d,
-            duckingGainDb: null), StringComparer.OrdinalIgnoreCase);
+            mix: new MixGainSettings()), StringComparer.OrdinalIgnoreCase);
 
     private sealed record ExportResumeFixture(
         TranscriptProjectState State,
