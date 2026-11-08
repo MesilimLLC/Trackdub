@@ -124,7 +124,7 @@ public sealed record MixPlan
 }
 
 /// <summary>Project-owned audio placed independently of generated dialogue.</summary>
-public sealed record MixMediaClip(string AudioRelativePath, double StartSeconds, double DurationSeconds);
+public sealed record MixMediaClip(string AudioRelativePath, double StartSeconds, double DurationSeconds, double GainDb = 0d);
 
 public sealed record MixSpeechClip(
     int SegmentIndex,

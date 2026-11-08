@@ -130,7 +130,8 @@ public static class ProjectUiSettingsMapper
             mix.DubbedSpeechGainDb,
             mix.DuckingGainExplicit ? mix.DuckingGainDb : null,
             mix.RestoreOriginalPan,
-            mix.ApplyTimbrePolish);
+            mix.ApplyTimbrePolish,
+            mix.BackgroundMediaGainDb);
     }
 }
 

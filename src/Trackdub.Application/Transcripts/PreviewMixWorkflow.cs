@@ -68,8 +68,8 @@ public sealed class PreviewMixWorkflow(
                 request.DuckingGainDb,
                 RestoreOriginalPan: request.RestoreOriginalPan,
                 ApplyTimbrePolish: request.ApplyTimbrePolish,
-                CandidateGroups: candidateGroups,
-                MediaDurationSeconds: mediaAsset.DurationSeconds,
+                CandidateGroups: candidateGroups, MediaDurationSeconds: mediaAsset.DurationSeconds,
+                BackgroundMediaGainDb: request.BackgroundMediaGainDb,
                 MediaClips: await TimelineMediaMixPreparer.PrepareAsync(
                     timelineMediaMixPreparer, currentState, cancellationToken).ConfigureAwait(false)));
             await mixPlanStore.SaveAsync(mixPlan, cancellationToken).ConfigureAwait(false);

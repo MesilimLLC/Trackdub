@@ -277,15 +277,14 @@ public sealed class ExportStageHandler(
             currentState.TranslatedSegments,
             currentState.TtsTakes,
             currentState.StageRuns,
-            request.SourceGainDb,
-            request.DubbedSpeechGainDb,
-            request.DuckingGainDb,
+            request.SourceGainDb, request.DubbedSpeechGainDb, request.DuckingGainDb,
             RestoreOriginalPan: request.RestoreOriginalPan,
             ApplyTimbrePolish: request.ApplyTimbrePolish,
             CandidateGroups: candidateGroups,
             MediaDurationSeconds: mediaAsset.DurationSeconds,
             MediaClips: await TimelineMediaMixPreparer.PrepareAsync(
-                timelineMediaMixPreparer, currentState, cancellationToken).ConfigureAwait(false));
+                timelineMediaMixPreparer, currentState, cancellationToken).ConfigureAwait(false),
+            BackgroundMediaGainDb: request.BackgroundMediaGainDb);
         MixPlan mixPlan = mixPlanBuilder.Build(buildRequest);
         if (mixPlan.Warnings.Count == 0)
         {
@@ -994,9 +993,7 @@ public sealed class ExportStageHandler(
             ExportResumeGating.SubtitleFormatsTokenFromRawOptions(request.RawSubtitleFormats),
             request.VideoEncoder,
             request.TargetLufs,
-            request.SourceGainDb,
-            request.DubbedSpeechGainDb,
-            request.DuckingGainDb));
+            ExportStageRequestBuilder.ToMixGainSettings(request)));
 
     private static StageRunRecord[] GetContributingStageRuns(TranscriptProjectState currentState, MixPlan? mixPlan)
     {
