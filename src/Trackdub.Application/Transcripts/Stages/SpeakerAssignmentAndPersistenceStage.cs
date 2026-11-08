@@ -117,12 +117,7 @@ public sealed class SpeakerAssignmentAndPersistenceStage(
 
         PipelineProgressReporter.Phase(progress, StageName, "Persisting transcript", $"Saving {segments.Length} transcript segment(s).");
         await transcriptRepository.SaveRevisionAsync(revision, segments, cancellationToken).ConfigureAwait(false);
-        await artifactWriter.WriteRawAsrTranscriptArtifactAsync(
-            projectId,
-            context.MediaAsset,
-            asrResult.Segments,
-            asrResult.StageRun.Id,
-            cancellationToken).ConfigureAwait(false);
+        await PersistRawAsrArtifactAsync(context, asrResult, cancellationToken).ConfigureAwait(false);
         await artifactWriter.WriteTranscriptArtifactAsync(
             projectId,
             context.MediaAsset,
@@ -170,6 +165,25 @@ public sealed class SpeakerAssignmentAndPersistenceStage(
         await SeedAsrSegmentStageRunsAsync(context, segments, cancellationToken).ConfigureAwait(false);
 
         return speakerAssignment;
+    }
+
+    private Task PersistRawAsrArtifactAsync(
+        TranscriptGenerationContext context,
+        AsrStageResult asrResult,
+        CancellationToken cancellationToken)
+    {
+        RawAsrTranscriptArtifactWriteRequest request = new()
+        {
+            ProjectId = context.Project.Id,
+            MediaAsset = context.MediaAsset,
+            Segments = asrResult.Segments,
+            StageRunId = asrResult.StageRun.Id,
+            Lineage = RawAsrTranscriptArtifactLineage.Create(
+                context.AudioRoutingPlan.AsrAudioArtifact,
+                context.AudioRoutingPlan.VadAudioArtifact,
+                context.SpeechRegions.Count > 0 ? context.VadStageRunId : null)
+        };
+        return artifactWriter.WriteRawAsrTranscriptArtifactAsync(request, cancellationToken);
     }
 
     private static string? ResolveTranscriptLanguage(

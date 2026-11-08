@@ -47,10 +47,12 @@ public sealed class VadGenerationStage(
 
         PipelineProgressReporter.Phase(progress, StageName, "Persisting regions", $"Saving {regions.Count} speech region(s).");
         await artifactWriter.WriteSpeechRegionsArtifactAsync(
-            context.Project.Id,
-            context.MediaAsset,
-            regions,
-            vadResult.StageRun.Id,
+            new SpeechRegionsArtifactWriteRequest(
+                context.Project,
+                context.MediaAsset,
+                regions,
+                vadResult.StageRun,
+                context.AudioRoutingPlan.VadAudioArtifact),
             cancellationToken).ConfigureAwait(false);
 
         return context with { SpeechRegions = regions, VadStageRunId = vadResult.StageRun.Id };
