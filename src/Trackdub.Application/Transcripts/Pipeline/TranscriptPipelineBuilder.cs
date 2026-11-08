@@ -75,7 +75,7 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
     {
         foreach ((ITranscriptGenerationStage stage, StageOptions options) in stages)
         {
-            if (ShouldResumeSkipStage(context, stage.StageName))
+            if (await ShouldResumeSkipStageAsync(context, stage.StageName, cancellationToken).ConfigureAwait(false))
             {
                 DateTimeOffset resumedStageStart = DateTimeOffset.UtcNow;
                 PipelineProgressReporter.Started(progress, stage.StageName);
@@ -168,58 +168,140 @@ public sealed class TranscriptGenerationPipeline : ITranscriptGenerationPipeline
         return context;
     }
 
-    private bool ShouldResumeSkipStage(TranscriptGenerationContext context, string stageName)
+    private async Task<bool> ShouldResumeSkipStageAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken)
     {
-        if (artifactStore is null ||
-            context.ForceRerun ||
-            context.ProjectState is null ||
-            string.IsNullOrWhiteSpace(context.ProjectRootPath))
+        if (artifactStore is null)
         {
             return false;
         }
 
-        if (string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase) &&
-            !context.EnableSpeakerDiarization)
+        if (context.ForceRerun)
         {
             return false;
         }
 
-        if (string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) &&
-            !context.ModelPreferences.EnableAsrTextRefinement)
+        if (context.ProjectState is null)
         {
             return false;
         }
 
-        if (string.Equals(stageName, StageNames.SpeakerAssignment, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(context.ProjectRootPath))
         {
-            if (!StageArtifactResumeEvaluator.CanResumeStage(
-                    context.ProjectState,
-                    artifactStore,
-                    StageNames.Asr,
-                    context.ExecutionSnapshot,
-                    context.ProjectRootPath))
-            {
-                return false;
-            }
+            return false;
+        }
 
-            if (context.ModelPreferences.EnableAsrTextRefinement &&
-                !StageArtifactResumeEvaluator.CanResumeStage(
-                    context.ProjectState,
-                    artifactStore,
-                    StageNames.TextRefinementAsr,
-                    context.ExecutionSnapshot,
-                    context.ProjectRootPath))
-            {
-                return false;
-            }
+        if (await VadSnapshotIsNotResumableAsync(context, stageName, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (!HasCurrentVadInputsForResume(context, stageName) ||
+            !StageConfigurationAllowsResume(context, stageName))
+        {
+            return false;
         }
 
         return StageArtifactResumeEvaluator.CanResumeStage(
-            context.ProjectState,
-            artifactStore,
+            context.ProjectState!,
+            artifactStore!,
             stageName,
             context.ExecutionSnapshot,
-            context.ProjectRootPath);
+            context.ProjectRootPath!);
+    }
+
+    private async Task<bool> VadSnapshotIsNotResumableAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !await HasCurrentVadSnapshotForResumeAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> HasCurrentVadSnapshotForResumeAsync(
+        TranscriptGenerationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (artifactWriter is null)
+        {
+            return false;
+        }
+
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                context.Project.Id,
+                context.AudioRoutingPlan.VadAudioArtifact,
+                cancellationToken)
+            .ConfigureAwait(false);
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            context.ProjectState!.StageRuns,
+            StageNames.Vad);
+        return SnapshotMatchesLatestVadRun(snapshot, latestVadRun);
+    }
+
+    private static bool SnapshotMatchesLatestVadRun(
+        SpeechRegionsArtifactSnapshot? snapshot,
+        StageRunRecord? latestVadRun)
+    {
+        if (snapshot is null || latestVadRun is null)
+        {
+            return false;
+        }
+
+        return snapshot.StageRunId == latestVadRun.Id;
+    }
+
+    private bool StageConfigurationAllowsResume(TranscriptGenerationContext context, string stageName) =>
+        (!string.Equals(stageName, StageNames.Diarization, StringComparison.OrdinalIgnoreCase) ||
+         context.EnableSpeakerDiarization) &&
+        (!string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) ||
+         context.ModelPreferences.EnableAsrTextRefinement) &&
+        (!string.Equals(stageName, StageNames.SpeakerAssignment, StringComparison.OrdinalIgnoreCase) ||
+         SpeakerAssignmentInputsCanResume(context));
+
+    private bool SpeakerAssignmentInputsCanResume(TranscriptGenerationContext context)
+    {
+        if (!TranscriptResumeLineageEvaluator.HasCurrentRawAsrArtifact(
+                context.ProjectState,
+                context.AudioRoutingPlan,
+                context.VadStageRunId) ||
+            !StageArtifactResumeEvaluator.CanResumeStage(
+                context.ProjectState!,
+                artifactStore!,
+                StageNames.Asr,
+                context.ExecutionSnapshot,
+                context.ProjectRootPath!))
+        {
+            return false;
+        }
+
+        return !context.ModelPreferences.EnableAsrTextRefinement ||
+               StageArtifactResumeEvaluator.CanResumeStage(
+                   context.ProjectState!,
+                   artifactStore!,
+                   StageNames.TextRefinementAsr,
+                   context.ExecutionSnapshot,
+                   context.ProjectRootPath!);
+    }
+
+    private static bool HasCurrentVadInputsForResume(TranscriptGenerationContext context, string stageName) =>
+        TranscriptResumeLineageEvaluator.HasCurrentVadInputsForResume(context, stageName);
+
+    internal static bool HasCurrentVadRunForResume(TranscriptGenerationContext context, string stageName)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return TranscriptResumeLineageEvaluator.HasCurrentVadRunForStage(
+            context.ProjectState,
+            context.VadStageRunId,
+            context.SpeechRegions,
+            stageName);
     }
 
     private async Task WriteUnhandledStageDegradationAsync(

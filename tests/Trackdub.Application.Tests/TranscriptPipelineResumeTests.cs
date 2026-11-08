@@ -20,14 +20,52 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
 {
     private readonly string tempRoot = Path.Join(Path.GetTempPath(), $"trackdub-resume-{Guid.NewGuid():N}");
 
+    public static TheoryData<VadResumeCase> VadResumeCases => new()
+    {
+        new(new(false, true, false, false, false)),
+        new(new(true, true, false, false, false)),
+        new(new(false, false, false, false, false)),
+        new(new(false, true, true, false, false)),
+        new(new(true, true, false, true, false)),
+        new(new(false, true, false, false, true))
+    };
+
     [Theory]
-    [InlineData(false, true, false, false)]
-    [InlineData(true, true, false, false)]
-    [InlineData(false, false, false, false)]
-    [InlineData(false, true, true, false)]
-    [InlineData(true, true, false, true)]
-    public async Task ExecuteAsync_reuses_vad_only_when_artifacts_and_runtime_are_valid(
-        bool forceRerun, bool hasCachedOutput, bool modelChanged, bool detectorFails)
+    [MemberData(nameof(VadResumeCases))]
+    public async Task ExecuteAsync_reuses_vad_only_when_artifacts_and_runtime_are_valid(VadResumeCase testCase)
+    {
+        VadResumeFixture fixture = await CreateVadResumeFixtureAsync(testCase);
+
+        if (testCase.DetectorFails)
+        {
+            await AssertVadFailureAsync(
+                new VadFailureContext
+                {
+                    Pipeline = fixture.Pipeline,
+                    Context = fixture.Context,
+                    ArtifactWriter = fixture.ArtifactWriter,
+                    StageRunStore = fixture.StageRunStore,
+                    ProjectId = fixture.ProjectId,
+                });
+            return;
+        }
+
+        await AssertVadResumeAsync(
+            new VadResumeExpectation
+            {
+                Pipeline = fixture.Pipeline,
+                Context = fixture.Context,
+                Detector = fixture.Detector,
+                StageRunStore = fixture.StageRunStore,
+                VadRun = fixture.VadRun,
+                ForceRerun = testCase.ForceRerun,
+                HasCachedOutput = testCase.HasCachedOutput,
+                ModelChanged = testCase.ModelChanged,
+                CorruptCachedOutput = testCase.CorruptCachedOutput,
+            });
+    }
+
+    private async Task<VadResumeFixture> CreateVadResumeFixtureAsync(VadResumeCase testCase)
     {
         var artifactStore = new FakeArtifactStore(tempRoot);
         var mediaRepository = new FakeMediaAssetRepository();
@@ -40,12 +78,17 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
 
         VadTestInputs inputs = await SeedVadInputsAsync(
             artifactStore, mediaRepository, artifactWriter,
-            hasCachedOutput ? CachedVadMode.Present : CachedVadMode.Absent);
+            testCase.HasCachedOutput ? CachedVadMode.Present : CachedVadMode.Absent);
         ResumeProject resume = inputs.Resume;
         ProjectArtifact audioArtifact = inputs.AudioArtifact;
         StageRunRecord vadRun = inputs.VadRun;
+        if (testCase.CorruptCachedOutput)
+        {
+            artifactStore.Seed(ProjectArtifactPaths.GetSpeechRegionsRelativePath(vadRun.Id), [0xFF, 0x00]);
+        }
 
-        FakeSpeechRegionDetector vadDetector = CreateVadDetector(detectorFails ? VadDetectorMode.Fail : VadDetectorMode.Succeed);
+        FakeSpeechRegionDetector vadDetector = CreateVadDetector(
+            testCase.DetectorFails ? VadDetectorMode.Fail : VadDetectorMode.Succeed);
         var vadStage = new VadGenerationStage(
             new VadStageHandler(vadDetector, stageRunStore),
             artifactWriter,
@@ -67,36 +110,157 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
                 AudioArtifact = audioArtifact,
                 ProjectState = resumeState,
                 ProjectRootPath = artifactStore.GetPath("."),
-                ForceRerun = forceRerun,
-                ExecutionSnapshot = CreateExecutionSnapshot(modelChanged ? ModelSnapshotMode.Changed : ModelSnapshotMode.Unchanged),
+                ForceRerun = testCase.ForceRerun,
+                ExecutionSnapshot = CreateExecutionSnapshot(
+                    testCase.ModelChanged ? ModelSnapshotMode.Changed : ModelSnapshotMode.Unchanged),
             });
 
-        if (detectorFails)
+        return new VadResumeFixture(
+            pipeline,
+            context,
+            vadDetector,
+            stageRunStore,
+            artifactWriter,
+            vadRun,
+            resume.Project.Id);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_reruns_vad_and_dependent_stages_when_vad_audio_source_changes()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        TranscriptGenerationContext result = await fixture.Pipeline.ExecuteAsync(
+            fixture.Context,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fixture.Detector.DetectCallCount);
+        Assert.Equal(3.0d, Assert.Single(result.SpeechRegions).StartSeconds);
+        Assert.NotEqual(fixture.OldVadRun.Id, result.VadStageRunId);
+        Assert.Equal(1, fixture.AsrStage.ExecutionCount);
+        ProjectArtifact latestRegions = fixture.MediaRepository.Artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.SpeechRegions)
+            .MaxBy(artifact => artifact.CreatedAtUtc)!;
+        Assert.Equal(
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(fixture.ProcessedAudio),
+            latestRegions.Provenance);
+    }
+
+    [Fact]
+    public async Task HasCurrentVadRunForResume_rejects_dependent_stage_runs_older_than_vad()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        DateTimeOffset vadCompletedAt = fixture.OldVadRun.CompletedAtUtc!.Value;
+        StageRunRecord staleAsrRun = StageRunRecord
+            .Start(fixture.Context.Project.Id, StageNames.Asr, vadCompletedAt.AddSeconds(-2))
+            .Complete(vadCompletedAt.AddSeconds(-1));
+        TranscriptProjectState staleState = fixture.Context.ProjectState! with
         {
-            await AssertVadFailureAsync(
-                new VadFailureContext
-                {
-                    Pipeline = pipeline,
-                    Context = context,
-                    ArtifactWriter = artifactWriter,
-                    StageRunStore = stageRunStore,
-                    ProjectId = resume.Project.Id,
-                });
-            return;
-        }
+            StageRuns = [fixture.OldVadRun, staleAsrRun]
+        };
+        TranscriptGenerationContext staleContext = fixture.Context with
+        {
+            ProjectState = staleState,
+            SpeechRegions = [new SpeechRegion(0, 0.0d, 1.0d)],
+            VadStageRunId = fixture.OldVadRun.Id
+        };
 
-        await AssertVadResumeAsync(
-            new VadResumeExpectation
-            {
-                Pipeline = pipeline,
-                Context = context,
-                Detector = vadDetector,
-                StageRunStore = stageRunStore,
-                VadRun = vadRun,
-                ForceRerun = forceRerun,
-                HasCachedOutput = hasCachedOutput,
-                ModelChanged = modelChanged,
-            });
+        Assert.False(TranscriptGenerationPipeline.HasCurrentVadRunForResume(staleContext, StageNames.Asr));
+
+        StageRunRecord freshAsrRun = StageRunRecord
+            .Start(fixture.Context.Project.Id, StageNames.Asr, vadCompletedAt.AddSeconds(1))
+            .Complete(vadCompletedAt.AddSeconds(2));
+        TranscriptGenerationContext freshContext = staleContext with
+        {
+            ProjectState = staleState with { StageRuns = [fixture.OldVadRun, freshAsrRun] }
+        };
+
+        Assert.True(TranscriptGenerationPipeline.HasCurrentVadRunForResume(freshContext, StageNames.Asr));
+        Assert.False(TranscriptGenerationPipeline.HasCurrentVadRunForResume(
+            freshContext with { SpeechRegions = [] },
+            StageNames.Asr));
+    }
+
+    [Fact]
+    public async Task SpeechRegionsProvenance_changes_when_audio_content_changes_without_artifact_id_change()
+    {
+        VadSourceChangeFixture fixture = await CreateVadSourceChangeFixtureAsync();
+        ProjectArtifact updatedAudio = fixture.ProcessedAudio with { Sha256 = "repacked-audio-content" };
+
+        Assert.Equal(fixture.ProcessedAudio.Id, updatedAudio.Id);
+        Assert.NotEqual(
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(fixture.ProcessedAudio),
+            TranscriptArtifactWriter.GetSpeechRegionsProvenance(updatedAudio));
+    }
+
+    private async Task<VadSourceChangeFixture> CreateVadSourceChangeFixtureAsync()
+    {
+        var artifactStore = new FakeArtifactStore(tempRoot);
+        var mediaRepository = new FakeMediaAssetRepository();
+        var stageRunStore = new FakeProjectStageRunStore();
+        var transcriptRepository = new FakeTranscriptRepository();
+        var artifactWriter = new TranscriptArtifactWriter(
+            artifactStore,
+            new FakeFileFingerprintService(new FileFingerprint("hash", 1, DateTimeOffset.UtcNow)),
+            mediaRepository);
+        ResumeProject resume = CreateResumeProject();
+        ProjectArtifact normalizedAudio = CreateNormalizedAudio(resume);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var processedAudio = new ProjectArtifact(
+            Guid.NewGuid(),
+            resume.Project.Id,
+            resume.MediaAsset.Id,
+            ArtifactKind.SpeechProcessedAudio,
+            "artifacts/audio/speech-processing/vad.wav",
+            "processed-hash",
+            100,
+            10.0d,
+            16000,
+            1,
+            now);
+        StageRunRecord oldVadRun = StageRunRecord
+            .Start(resume.Project.Id, StageNames.Vad, now.AddSeconds(-1))
+            .Complete(now.AddSeconds(-1));
+        artifactStore.Seed(normalizedAudio.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        artifactStore.Seed(processedAudio.RelativePath, FakeWavHelper.MinimalPcm16(durationSeconds: 10.0));
+        mediaRepository.Seed(resume.MediaAsset);
+        await mediaRepository.SaveArtifactAsync(normalizedAudio, CancellationToken.None);
+        await mediaRepository.SaveArtifactAsync(processedAudio, CancellationToken.None);
+        await WriteCachedVadAsync(artifactWriter, resume, oldVadRun, normalizedAudio);
+
+        FakeSpeechRegionDetector detector = CreateVadDetector(VadDetectorMode.Succeed);
+        var asrStage = new CountingStage(StageNames.Asr);
+        var pipeline = new TranscriptGenerationPipeline(
+            [
+                new NoOpEnhancementStage(),
+                new VadGenerationStage(new VadStageHandler(detector, stageRunStore), artifactWriter, artifactStore),
+                asrStage,
+            ],
+            artifactStore,
+            artifactWriter,
+            transcriptRepository,
+            stageRunStore: stageRunStore);
+        TranscriptProjectState resumeState = CreateResumeState(
+            new ResumeStateSeed(resume.Project, resume.MediaAsset, mediaRepository.Artifacts, [oldVadRun]));
+        TranscriptGenerationContext context = CreateContext(new ContextSeed
+        {
+            Project = resume.Project,
+            MediaAsset = resume.MediaAsset,
+            AudioArtifact = normalizedAudio,
+            ProjectState = resumeState,
+            ProjectRootPath = artifactStore.GetPath("."),
+        }) with
+        {
+            AudioRoutingPlan = TranscriptAudioRoutingPlan.Raw(processedAudio, SpeechAudioSourceKind.FullMix),
+        };
+
+        return new VadSourceChangeFixture(
+            pipeline,
+            context,
+            detector,
+            asrStage,
+            oldVadRun,
+            processedAudio,
+            mediaRepository);
     }
 
     private static async Task<VadTestInputs> SeedVadInputsAsync(
@@ -115,7 +279,7 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         await mediaRepository.SaveArtifactAsync(audioArtifact, CancellationToken.None);
         if (cachedVad == CachedVadMode.Present)
         {
-            await WriteCachedVadAsync(artifactWriter, resume, vadRun);
+            await WriteCachedVadAsync(artifactWriter, resume, vadRun, audioArtifact);
         }
 
         return new VadTestInputs(resume, audioArtifact, vadRun);
@@ -136,12 +300,15 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
     private static Task WriteCachedVadAsync(
         TranscriptArtifactWriter artifactWriter,
         ResumeProject resume,
-        StageRunRecord vadRun) =>
+        StageRunRecord vadRun,
+        ProjectArtifact inputAudioArtifact) =>
         artifactWriter.WriteSpeechRegionsArtifactAsync(
-            resume.Project.Id,
-            resume.MediaAsset,
-            [new SpeechRegion(0, 0.0, 2.0)],
-            vadRun.Id,
+            new SpeechRegionsArtifactWriteRequest(
+                resume.Project,
+                resume.MediaAsset,
+                [new SpeechRegion(0, 0.0, 2.0)],
+                vadRun,
+                inputAudioArtifact),
             CancellationToken.None);
 
     private static IReadOnlyDictionary<string, string> CreateExecutionSnapshot(ModelSnapshotMode mode) =>
@@ -155,8 +322,10 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             context.Pipeline.ExecuteAsync(context.Context, TestContext.Current.CancellationToken));
         Assert.Equal("VAD unavailable", error.Message);
         Assert.Equal(StageRunStatus.Failed, Assert.Single(context.StageRunStore.All).Status);
-        IReadOnlyList<SpeechRegion>? preserved = await context.ArtifactWriter.TryReadSpeechRegionsAsync(
-            context.ProjectId, TestContext.Current.CancellationToken);
+        IReadOnlyList<SpeechRegion>? preserved = (await context.ArtifactWriter.TryReadSpeechRegionsSnapshotAsync(
+            context.ProjectId,
+            null,
+            TestContext.Current.CancellationToken))?.Regions;
         Assert.Equal(0.0, Assert.Single(preserved!).StartSeconds);
     }
 
@@ -166,7 +335,8 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             expectation.Context,
             TestContext.Current.CancellationToken);
 
-        bool shouldResume = !expectation.ForceRerun && expectation.HasCachedOutput && !expectation.ModelChanged;
+        bool shouldResume = !expectation.ForceRerun && expectation.HasCachedOutput &&
+                            !expectation.ModelChanged && !expectation.CorruptCachedOutput;
         Assert.Equal(shouldResume ? 0 : 1, expectation.Detector.DetectCallCount);
         Assert.Equal(shouldResume ? 0.0 : 3.0, Assert.Single(result.SpeechRegions).StartSeconds);
         StageRunRecord recordedRun = Assert.Single(expectation.StageRunStore.All);
@@ -198,6 +368,31 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         ProjectArtifact AudioArtifact,
         StageRunRecord VadRun);
 
+    public sealed record VadResumeCase(
+        bool ForceRerun,
+        bool HasCachedOutput,
+        bool ModelChanged,
+        bool DetectorFails,
+        bool CorruptCachedOutput);
+
+    private sealed record VadResumeFixture(
+        TranscriptGenerationPipeline Pipeline,
+        TranscriptGenerationContext Context,
+        FakeSpeechRegionDetector Detector,
+        FakeProjectStageRunStore StageRunStore,
+        TranscriptArtifactWriter ArtifactWriter,
+        StageRunRecord VadRun,
+        Guid ProjectId);
+
+    private sealed record VadSourceChangeFixture(
+        TranscriptGenerationPipeline Pipeline,
+        TranscriptGenerationContext Context,
+        FakeSpeechRegionDetector Detector,
+        CountingStage AsrStage,
+        StageRunRecord OldVadRun,
+        ProjectArtifact ProcessedAudio,
+        FakeMediaAssetRepository MediaRepository);
+
     private sealed record VadFailureContext
     {
         public required TranscriptGenerationPipeline Pipeline { get; init; }
@@ -228,6 +423,8 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
         public required bool HasCachedOutput { get; init; }
 
         public required bool ModelChanged { get; init; }
+
+        public required bool CorruptCachedOutput { get; init; }
     }
 
     [Theory]
@@ -433,5 +630,21 @@ public sealed class TranscriptPipelineResumeTests : IDisposable
             CancellationToken cancellationToken,
             IProgress<PipelineProgressEvent>? progress = null) =>
             Task.FromResult(context);
+    }
+
+    private sealed class CountingStage(string stageName) : ITranscriptGenerationStage
+    {
+        public string StageName => stageName;
+
+        public int ExecutionCount { get; private set; }
+
+        public Task<TranscriptGenerationContext> ExecuteAsync(
+            TranscriptGenerationContext context,
+            CancellationToken cancellationToken,
+            IProgress<PipelineProgressEvent>? progress = null)
+        {
+            ExecutionCount++;
+            return Task.FromResult(context);
+        }
     }
 }

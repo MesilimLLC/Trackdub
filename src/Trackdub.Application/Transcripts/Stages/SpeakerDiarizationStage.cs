@@ -82,17 +82,8 @@ public sealed class SpeakerDiarizationStage(
                 StageName,
                 "Persisting speaker turns",
                 $"Saving {diarizationResult.Turns.Count} speaker turn(s).");
-            Guid stageRunId = diarizationResult.Turns
-                .FirstOrDefault(static t => t.StageRunId.HasValue)
-                ?.StageRunId ?? Guid.Empty; // Guid.Empty signals "no stage-run id available" — avoids fabricating an orphan id that exists in no stage_runs row.
-
-            await artifactWriter.WriteDiarizationArtifactAsync(
-                context.Project.Id,
-                context.MediaAsset,
-                diarizationResult.Speakers,
-                diarizationResult.Turns,
-                stageRunId,
-                cancellationToken).ConfigureAwait(false);
+            await PersistDiarizationArtifactAsync(context, diarizationResult, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         PipelineProgressReporter.Phase(progress, StageName, "Planning regions", "Building transcript region plan.");
@@ -102,5 +93,25 @@ public sealed class SpeakerDiarizationStage(
             durationSeconds);
 
         return context with { DiarizationResult = diarizationResult, RegionPlan = regionPlan };
+    }
+
+    private Task PersistDiarizationArtifactAsync(
+        TranscriptGenerationContext context,
+        DiarizationResult diarizationResult,
+        CancellationToken cancellationToken)
+    {
+        Guid stageRunId = diarizationResult.Turns
+            .FirstOrDefault(static turn => turn.StageRunId.HasValue)
+            ?.StageRunId ?? Guid.Empty;
+        DiarizationArtifactWriteRequest request = new()
+        {
+            ProjectId = context.Project.Id,
+            MediaAsset = context.MediaAsset,
+            Speakers = diarizationResult.Speakers,
+            Turns = diarizationResult.Turns,
+            StageRunId = stageRunId,
+            VadStageRunId = context.VadStageRunId
+        };
+        return artifactWriter.WriteDiarizationArtifactAsync(request, cancellationToken);
     }
 }
