@@ -480,7 +480,7 @@
           "Microsoft.ML.OnnxRuntime": "[1.31.0, )",
           "Microsoft.ML.OnnxRuntime.Gpu": "[1.31.0, )",
           "Microsoft.ML.OnnxRuntimeGenAI": "[0.19.0, )",
-          "Microsoft.ML.OnnxRuntimeGenAI.Cuda": "[0.18.0, )",
+          "Microsoft.ML.OnnxRuntimeGenAI.Cuda": "[0.19.0, )",
           "Microsoft.ML.Tokenizers": "[3.0.0-preview.26502.1, )",
           "System.Numerics.Tensors": "[11.0.0-rc.3.26522.148, )",
           "Trackdub.Contracts": "[1.0.0, )",
@@ -759,12 +759,12 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Cuda": {
         "type": "CentralTransitive",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "oUe7UAJPywvfrLxYFaLRTsx2VufSI1LLRuEnpIvIHPNXAUu/zM4FiXZ8bWcG/8AuNjim634Lx1lePnpqNZO4DQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "+G/dyC1ol48yHkGtKDZXwfnWcE5cg55ZAel+xAbuuYq6ux/hST6wLfMmWG6o3UMws2W3EmuatCCYfNTzTJ4BRg==",
         "dependencies": {
           "Microsoft.ML.OnnxRuntime.Gpu": "1.31.0",
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0"
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0"
         }
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
