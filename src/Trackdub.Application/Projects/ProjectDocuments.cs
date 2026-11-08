@@ -143,11 +143,14 @@ public sealed record ProjectMixSettings(
     bool RestoreOriginalPan = false,
     bool ApplyTimbrePolish = true)
 {
+    public double BackgroundMediaGainDb { get; init; }
+
     public ProjectMixSettings Normalize() =>
         this with
         {
             SourceGainDb = NormalizeGainDb(SourceGainDb, 0d),
             DubbedSpeechGainDb = NormalizeGainDb(DubbedSpeechGainDb, 0d),
+            BackgroundMediaGainDb = NormalizeGainDb(BackgroundMediaGainDb, 0d),
             DuckingGainDb = DuckingGainExplicit && DuckingGainDb is double duckingGainDb
                 ? NormalizeGainDb(duckingGainDb, 0d)
                 : null,

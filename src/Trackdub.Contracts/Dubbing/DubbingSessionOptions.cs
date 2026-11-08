@@ -93,6 +93,11 @@ public sealed record DubbingSessionOptions
     public double? ExportDuckingGainDb { get; init; }
 
     /// <summary>
+    /// Gain applied to independently placed background media in the exported mix (dB).
+    /// </summary>
+    public double? ExportBackgroundMediaGainDb { get; init; }
+
+    /// <summary>
     /// Optional voice assignment overrides per speaker.
     /// Keys are speaker identifiers, values are voice identifiers.
     /// </summary>
