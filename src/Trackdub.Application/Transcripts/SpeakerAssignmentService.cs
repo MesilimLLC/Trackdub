@@ -295,18 +295,36 @@ public sealed class SpeakerAssignmentService(
             "rerun-diarization",
             cancellationToken).ConfigureAwait(false);
 
-        // Use Guid.Empty when no turn carries a StageRunId — avoids fabricating an orphan id
-        // that exists in no stage_runs row (same convention as SpeakerDiarizationStage).
-        Guid stageRunId = diarizationResult.Turns
-            .FirstOrDefault(static turn => turn.StageRunId.HasValue)
-            ?.StageRunId ?? Guid.Empty;
+        Guid stageRunId = GetDiarizationStageRunId(diarizationResult);
         await transcriptArtifactWriter.WriteDiarizationArtifactAsync(
-            projectId,
-            mediaAsset,
-            diarizationResult.Speakers,
-            diarizationResult.Turns,
-            stageRunId,
+            CreateDiarizationArtifactWriteRequest(currentState, mediaAsset, diarizationResult, stageRunId),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Guid GetDiarizationStageRunId(DiarizationResult result)
+    {
+        // Guid.Empty means no turn has a persisted stage run; do not invent an orphan id.
+        return result.Turns.FirstOrDefault(static turn => turn.StageRunId.HasValue)?.StageRunId ?? Guid.Empty;
+    }
+
+    private static DiarizationArtifactWriteRequest CreateDiarizationArtifactWriteRequest(
+        TranscriptProjectState currentState,
+        MediaAsset mediaAsset,
+        DiarizationResult result,
+        Guid stageRunId)
+    {
+        Guid? vadStageRunId = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            currentState.StageRuns,
+            StageNames.Vad)?.Id;
+        return new DiarizationArtifactWriteRequest
+        {
+            ProjectId = currentState.ProjectState.Project.Id,
+            MediaAsset = mediaAsset,
+            Speakers = result.Speakers,
+            Turns = result.Turns,
+            StageRunId = stageRunId,
+            VadStageRunId = vadStageRunId
+        };
     }
 
     public async Task<DiarizationResult?> CreateDiarizationAsync(
@@ -545,12 +563,12 @@ public sealed class SpeakerAssignmentService(
         IReadOnlyList<TranscriptSegment> segments,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<SpeechRegion>? artifactRegions = await transcriptArtifactWriter
-            .TryReadSpeechRegionsAsync(projectId, cancellationToken)
+        SpeechRegionsArtifactSnapshot? artifact = await transcriptArtifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(projectId, null, cancellationToken)
             .ConfigureAwait(false);
-        if (artifactRegions is { Count: > 0 })
+        if (artifact?.Regions is { Count: > 0 })
         {
-            return artifactRegions;
+            return artifact.Regions;
         }
 
         return segments

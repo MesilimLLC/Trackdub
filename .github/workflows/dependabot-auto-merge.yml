@@ -9,7 +9,6 @@ permissions:
   pull-requests: write
   checks: read
   statuses: read
-  workflows: write
 
 jobs:
   dependabot:

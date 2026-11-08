@@ -895,7 +895,7 @@ public static class StageArtifactResumeEvaluator
             .FirstOrDefault(artifact =>
                 artifact.StageRunId == latestRun.Id &&
                 artifact.Kind == ArtifactKind.TranscriptRevision &&
-                string.Equals(artifact.Provenance, "generated-asr-raw", StringComparison.OrdinalIgnoreCase));
+                artifact.Provenance?.StartsWith("generated-asr-raw", StringComparison.OrdinalIgnoreCase) == true);
 
         return ArtifactExists(artifactStore, rawArtifact);
     }

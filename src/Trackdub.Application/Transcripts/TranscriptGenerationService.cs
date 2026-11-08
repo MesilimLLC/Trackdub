@@ -101,40 +101,19 @@ public sealed class TranscriptGenerationService(
 
         PipelineProgressReporter.Phase(progress, StageNames.Asr, "Checking models", "Checking transcript model readiness.");
 
-        // Run preflight checks — each may trigger RuntimePlanner hardware enumeration.
-        var stagesToCheck = new List<string>(4) { StageNames.Vad };
-        if (enableSpeakerDiarization)
+        await CheckTranscriptModelsAsync(new TranscriptPreflightRequest
         {
-            stagesToCheck.Add(StageNames.Diarization);
-        }
-
-        stagesToCheck.Add(StageNames.Asr);
-
-        if (preferences.EnableAsrTextRefinement)
-        {
-            stagesToCheck.Add(StageNames.TextRefinementAsr);
-        }
-
-        HashSet<string> skipPreflightStages = BuildResumableStageSet(
-            resumeState,
-            projectRootPath,
-            executionSnapshot,
-            enableSpeakerDiarization,
-            preferences.EnableAsrTextRefinement,
-            forceRerun);
-
-        // Check model readiness for each stage. VAD/ASR/Diarization have handler-level auto-download,
-        // so defer DownloadRequired exceptions for those stages to allow handlers to provision models.
-        foreach (string stage in stagesToCheck)
-        {
-            if (skipPreflightStages.Contains(stage))
-            {
-                continue;
-            }
-
-            await EnsureStageModelsReadyAsync(stage, sourceLanguage, cancellationToken)
-                .ConfigureAwait(false);
-        }
+            ResumeState = resumeState,
+            ProjectRootPath = projectRootPath,
+            ExecutionSnapshot = executionSnapshot,
+            AudioRoutingPlan = audioRoutingPlan,
+            NormalizedAudioArtifact = normalizedAudioArtifact,
+            EnableSpeakerDiarization = enableSpeakerDiarization,
+            EnableAsrTextRefinement = preferences.EnableAsrTextRefinement,
+            ForceRerun = forceRerun,
+            SourceLanguage = sourceLanguage,
+            CancellationToken = cancellationToken
+        }).ConfigureAwait(false);
 
         var context = new Trackdub.Application.Transcripts.Pipeline.TranscriptGenerationContext(
             project,
@@ -180,44 +159,87 @@ public sealed class TranscriptGenerationService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stageName);
 
+        InferenceModelPreferences preferences = modelPreferences ?? InferenceModelPreferences.Empty;
+        if (string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase) &&
+            !preferences.EnableAsrTextRefinement)
+        {
+            return;
+        }
+
         await ReconcileStaleStageRunsAsync(project.Id, cancellationToken)
             .ConfigureAwait(false);
 
         IReadOnlyList<ITranscriptGenerationStage> stages = ResolveTranscriptStages(stageName);
 
         PipelineProgressReporter.Phase(progress, stageName, "Checking models", "Checking transcript model readiness.");
-        // Skip preflight for isolated TextRefinementAsr when polish is disabled so it remains a true no-op.
-        InferenceModelPreferences preferences = modelPreferences ?? InferenceModelPreferences.Empty;
-        bool shouldSkipPreflight = string.Equals(stageName, StageNames.TextRefinementAsr, StringComparison.OrdinalIgnoreCase)
-                                   && !preferences.EnableAsrTextRefinement;
-        if (!shouldSkipPreflight)
-        {
-            await EnsureStageModelsReadyAsync(stageName, sourceLanguage, cancellationToken)
-                .ConfigureAwait(false);
-        }
+        await EnsureStageModelsReadyAsync(stageName, sourceLanguage, cancellationToken)
+            .ConfigureAwait(false);
 
-        TranscriptGenerationContext context = await PrepareStageContextAsync(
+        var context = new TranscriptGenerationContext(
             project,
             mediaAsset,
             normalizedAudioArtifact,
             audioRoutingPlan,
             enableSpeakerDiarization,
             sourceLanguage,
-            modelPreferences,
-            stageName,
-            cancellationToken).ConfigureAwait(false);
+            modelPreferences);
 
         TranscriptGenerationPipeline singleStagePipeline = CreateSingleStagePipeline(stages);
 
         pipelineRunLifecycle?.BeginRun();
         try
         {
+            context = await PrepareStageContextAsync(context, stageName, cancellationToken, progress)
+                .ConfigureAwait(false);
             await singleStagePipeline.ExecuteAsync(context, cancellationToken, progress).ConfigureAwait(false);
         }
         finally
         {
             pipelineRunLifecycle?.EndRun();
         }
+    }
+
+    private async Task<TranscriptGenerationContext> PrepareStageContextAsync(
+        TranscriptGenerationContext context,
+        string stageName,
+        CancellationToken cancellationToken,
+        IProgress<PipelineProgressEvent>? progress)
+    {
+        if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
+        {
+            return context;
+        }
+
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                context.Project.Id,
+                context.AudioRoutingPlan.VadAudioArtifact,
+                cancellationToken)
+            .ConfigureAwait(false);
+        IReadOnlyList<StageRunRecord> projectRuns = await stageRunStore
+            .ListByProjectAsync(context.Project.Id, cancellationToken)
+            .ConfigureAwait(false);
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            projectRuns,
+            StageNames.Vad);
+        if (snapshot is null || snapshot.StageRunId != latestVadRun?.Id)
+        {
+            await EnsureStageModelsReadyAsync(StageNames.Vad, context.SourceLanguage, cancellationToken)
+                .ConfigureAwait(false);
+            context = await vadGenerationStage.ExecuteAsync(context, cancellationToken, progress)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            context = context with
+            {
+                SpeechRegions = snapshot.Regions,
+                VadStageRunId = snapshot.StageRunId
+            };
+        }
+
+        return await HydrateContextForSingleStageAsync(context, stageName, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private IReadOnlyList<ITranscriptGenerationStage> ResolveTranscriptStages(string stageName) =>
@@ -254,7 +276,7 @@ public sealed class TranscriptGenerationService(
         }
 
         IReadOnlyList<SpeechRegion> speechRegions = await RequireSpeechRegionsArtifactAsync(
-            context.Project.Id,
+            context.AudioRoutingPlan.VadAudioArtifact,
             cancellationToken)
             .ConfigureAwait(false);
 
@@ -279,6 +301,7 @@ public sealed class TranscriptGenerationService(
         {
             return context with
             {
+                VadStageRunId = null,
                 DiarizationResult = null,
                 RegionPlan = new TranscriptRegionPlan(regions, new Dictionary<int, Guid>())
             };
@@ -344,30 +367,6 @@ public sealed class TranscriptGenerationService(
         }
     }
 
-    private async Task<TranscriptGenerationContext> PrepareStageContextAsync(
-        TrackdubProject project,
-        MediaAsset mediaAsset,
-        ProjectArtifact normalizedAudioArtifact,
-        TranscriptAudioRoutingPlan audioRoutingPlan,
-        bool enableSpeakerDiarization,
-        string? sourceLanguage,
-        InferenceModelPreferences? modelPreferences,
-        string stageName,
-        CancellationToken cancellationToken)
-    {
-        var context = new TranscriptGenerationContext(
-            project,
-            mediaAsset,
-            normalizedAudioArtifact,
-            audioRoutingPlan,
-            enableSpeakerDiarization,
-            sourceLanguage,
-            modelPreferences);
-
-        return await HydrateContextForSingleStageAsync(context, stageName, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
     private TranscriptGenerationPipeline CreateSingleStagePipeline(
         IReadOnlyList<ITranscriptGenerationStage> stages)
     {
@@ -385,12 +384,12 @@ public sealed class TranscriptGenerationService(
         CancellationToken cancellationToken)
     {
         RawAsrTranscriptArtifact rawAsr = await RequireRawAsrTranscriptAsync(
-            context.Project.Id,
+            context,
             cancellationToken)
             .ConfigureAwait(false);
 
         IReadOnlyList<SpeechRegion> speechRegions = await RequireSpeechRegionsArtifactAsync(
-            context.Project.Id,
+            context.AudioRoutingPlan.VadAudioArtifact,
             cancellationToken)
             .ConfigureAwait(false);
 
@@ -416,11 +415,21 @@ public sealed class TranscriptGenerationService(
     }
 
     private async Task<RawAsrTranscriptArtifact> RequireRawAsrTranscriptAsync(
-        Guid projectId,
+        TranscriptGenerationContext context,
         CancellationToken cancellationToken)
     {
+        RawAsrTranscriptArtifactLineage lineage = RawAsrTranscriptArtifactLineage.Create(
+            context.AudioRoutingPlan.AsrAudioArtifact,
+            context.AudioRoutingPlan.VadAudioArtifact,
+            context.SpeechRegions.Count > 0 ? context.VadStageRunId : null);
         RawAsrTranscriptArtifact? rawAsr = await artifactWriter
-            .TryReadRawAsrTranscriptAsync(projectId, cancellationToken)
+            .TryReadRawAsrTranscriptAsync(
+                new RawAsrTranscriptArtifactReadRequest
+                {
+                    ProjectId = context.Project.Id,
+                    Lineage = lineage
+                },
+                cancellationToken)
             .ConfigureAwait(false);
 
         if (rawAsr is null or { Segments.Count: 0 })
@@ -433,12 +442,16 @@ public sealed class TranscriptGenerationService(
     }
 
     private async Task<IReadOnlyList<SpeechRegion>> RequireSpeechRegionsArtifactAsync(
-        Guid projectId,
+        ProjectArtifact expectedInputAudioArtifact,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<SpeechRegion>? speechRegions = await artifactWriter
-            .TryReadSpeechRegionsAsync(projectId, cancellationToken)
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                expectedInputAudioArtifact.ProjectId,
+                expectedInputAudioArtifact,
+                cancellationToken)
             .ConfigureAwait(false);
+        IReadOnlyList<SpeechRegion>? speechRegions = snapshot?.Regions;
 
         if (speechRegions is null)
         {
@@ -517,9 +530,11 @@ public sealed class TranscriptGenerationService(
     {
         SpeechRegion[] regions = speechRegions.OrderBy(static region => region.Index).ToArray();
 
-        DiarizationResult? diarizationResult = await artifactWriter
-            .TryReadDiarizationResultAsync(context.Project.Id, cancellationToken)
-            .ConfigureAwait(false);
+        DiarizationResult? diarizationResult = context.VadStageRunId is Guid vadStageRunId
+            ? await artifactWriter
+                .TryReadDiarizationResultAsync(context.Project.Id, vadStageRunId, cancellationToken)
+                .ConfigureAwait(false)
+            : null;
 
         double durationSeconds = context.AudioRoutingPlan.DiarizationAudioArtifact.DurationSeconds
                                  ?? context.NormalizedAudioArtifact.DurationSeconds
@@ -827,40 +842,167 @@ public sealed class TranscriptGenerationService(
         StageNames.SpeakerAssignment
     ];
 
-    private HashSet<string> BuildResumableStageSet(
-        TranscriptProjectState? resumeState,
-        string projectRootPath,
-        IReadOnlyDictionary<string, string> executionSnapshot,
-        bool enableSpeakerDiarization,
-        bool enableAsrTextRefinement,
-        bool forceRerun)
+    private async Task CheckTranscriptModelsAsync(TranscriptPreflightRequest request)
+    {
+        // Run preflight checks — each may trigger RuntimePlanner hardware enumeration.
+        var stagesToCheck = new List<string>(4) { StageNames.Vad };
+        if (request.EnableSpeakerDiarization)
+        {
+            stagesToCheck.Add(StageNames.Diarization);
+        }
+
+        stagesToCheck.Add(StageNames.Asr);
+        if (request.EnableAsrTextRefinement)
+        {
+            stagesToCheck.Add(StageNames.TextRefinementAsr);
+        }
+
+        HashSet<string> skipPreflightStages = await BuildResumableStageSetAsync(request).ConfigureAwait(false);
+        foreach (string stageName in stagesToCheck)
+        {
+            if (!skipPreflightStages.Contains(stageName))
+            {
+                await EnsureStageModelsReadyAsync(stageName, request.SourceLanguage, request.CancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<HashSet<string>> BuildResumableStageSetAsync(TranscriptPreflightRequest request)
     {
         var resumableStages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        if (forceRerun || resumeState is null)
+        if (request.ForceRerun || request.ResumeState is null)
         {
             return resumableStages;
         }
 
+        CurrentVadResumeState currentVad = new(null, null);
+
         foreach (string stageName in ResumableStageNames)
         {
-            if (!IsStageEligibleForResume(stageName, enableSpeakerDiarization, enableAsrTextRefinement, resumableStages))
+            if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                currentVad = await GetCurrentVadResumeStateAsync(request, resumableStages)
+                    .ConfigureAwait(false);
             }
 
-            if (StageArtifactResumeEvaluator.CanResumeStage(
-                    resumeState,
-                    artifactStore,
-                    stageName,
-                    executionSnapshot,
-                    projectRootPath))
+            if (CanResumeStageForPreflight(stageName, request, resumableStages, currentVad))
             {
                 resumableStages.Add(stageName);
             }
         }
 
         return resumableStages;
+    }
+
+    private bool CanResumeStageForPreflight(
+        string stageName,
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages,
+        CurrentVadResumeState currentVad)
+    {
+        TranscriptAudioRoutingPlan currentRoutingPlan = GetCurrentRoutingPlan(request, resumableStages);
+        bool vadCanBeResumed = !TranscriptResumeLineageEvaluator.IsVadDependentStage(stageName) ||
+            resumableStages.Contains(StageNames.Vad);
+        return IsStageEligibleForResume(
+                   stageName,
+                   request.EnableSpeakerDiarization,
+                   request.EnableAsrTextRefinement,
+                   resumableStages) &&
+               vadCanBeResumed &&
+               CanSkipStagePreflight(stageName, request, currentVad, currentRoutingPlan) &&
+               StageArtifactResumeEvaluator.CanResumeStage(
+                   request.ResumeState!,
+                   artifactStore,
+                   stageName,
+                   request.ExecutionSnapshot,
+                   request.ProjectRootPath);
+    }
+
+    private async Task<CurrentVadResumeState> GetCurrentVadResumeStateAsync(
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages)
+    {
+        if (!resumableStages.Contains(StageNames.SpeechEnhancement))
+        {
+            // An enhancement run can change the detector input, so the current VAD
+            // snapshot cannot safely suppress model preflight until that route is known.
+            return new CurrentVadResumeState(null, null);
+        }
+
+        TranscriptAudioRoutingPlan currentRoutingPlan = GetCurrentRoutingPlan(request, resumableStages);
+        StageRunRecord? latestVadRun = StageArtifactResumeEvaluator.GetLatestSuccessfulRun(
+            request.ResumeState!.StageRuns,
+            StageNames.Vad);
+        SpeechRegionsArtifactSnapshot? snapshot = latestVadRun is null
+            ? null
+            : await artifactWriter.TryReadSpeechRegionsSnapshotAsync(
+                currentRoutingPlan.VadAudioArtifact.ProjectId,
+                currentRoutingPlan.VadAudioArtifact,
+                request.CancellationToken).ConfigureAwait(false);
+
+        return new CurrentVadResumeState(latestVadRun, snapshot);
+    }
+
+    private static TranscriptAudioRoutingPlan GetCurrentRoutingPlan(
+        TranscriptPreflightRequest request,
+        HashSet<string> resumableStages)
+    {
+        if (!resumableStages.Contains(StageNames.SpeechEnhancement))
+        {
+            return request.AudioRoutingPlan;
+        }
+
+        return TranscriptPipelineResumeHydrator.GetSpeechEnhancementResumeRoute(
+            request.NormalizedAudioArtifact,
+            request.AudioRoutingPlan,
+            request.ResumeState!.ProjectState.Artifacts,
+            request.ResumeState.StageRuns).AudioRoutingPlan;
+    }
+
+    private static bool CanSkipStagePreflight(
+        string stageName,
+        TranscriptPreflightRequest request,
+        CurrentVadResumeState currentVad,
+        TranscriptAudioRoutingPlan currentRoutingPlan)
+    {
+        if (string.Equals(stageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
+        {
+            return currentVad.MatchesLatestRun;
+        }
+
+        if (!TranscriptResumeLineageEvaluator.IsVadDependentStage(stageName))
+        {
+            return true;
+        }
+
+        if (!currentVad.HasRegions)
+        {
+            return false;
+        }
+
+        if (!TranscriptResumeLineageEvaluator.DependentStageStartedAfterVad(
+                request.ResumeState!,
+                stageName,
+                currentVad.LatestVadRun))
+        {
+            return false;
+        }
+
+        if (!TranscriptResumeLineageEvaluator.RequiresRawAsrLineage(stageName))
+        {
+            return true;
+        }
+
+        if (currentVad.Snapshot is null)
+        {
+            return false;
+        }
+
+        return TranscriptResumeLineageEvaluator.HasCurrentRawAsrArtifact(
+            request.ResumeState,
+            currentRoutingPlan,
+            currentVad.Snapshot.StageRunId);
     }
 
     private static bool IsStageEligibleForResume(
@@ -883,6 +1025,28 @@ public sealed class TranscriptGenerationService(
 
             _ => true
         };
+    }
+
+    private sealed record TranscriptPreflightRequest
+    {
+        public required TranscriptProjectState? ResumeState { get; init; }
+        public required string ProjectRootPath { get; init; }
+        public required IReadOnlyDictionary<string, string> ExecutionSnapshot { get; init; }
+        public required TranscriptAudioRoutingPlan AudioRoutingPlan { get; init; }
+        public required ProjectArtifact NormalizedAudioArtifact { get; init; }
+        public required bool EnableSpeakerDiarization { get; init; }
+        public required bool EnableAsrTextRefinement { get; init; }
+        public required bool ForceRerun { get; init; }
+        public required string? SourceLanguage { get; init; }
+        public required CancellationToken CancellationToken { get; init; }
+    }
+
+    private sealed record CurrentVadResumeState(
+        StageRunRecord? LatestVadRun,
+        SpeechRegionsArtifactSnapshot? Snapshot)
+    {
+        public bool MatchesLatestRun => LatestVadRun is not null && Snapshot?.StageRunId == LatestVadRun.Id;
+        public bool HasRegions => MatchesLatestRun && Snapshot!.Regions.Count > 0;
     }
 
     private static RecognizedTranscriptSegment? ResolveRecognition(

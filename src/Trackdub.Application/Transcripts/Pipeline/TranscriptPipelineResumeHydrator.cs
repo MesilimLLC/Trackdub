@@ -65,16 +65,19 @@ internal static class TranscriptPipelineResumeHydrator
         return context;
     }
 
-    private static TranscriptGenerationContext HydrateSpeechEnhancement(
-        TranscriptGenerationContext context,
-        IReadOnlyList<ProjectArtifact> artifacts)
+    internal static (TranscriptAudioRoutingPlan AudioRoutingPlan, ProjectArtifact? EnhancedAudioArtifact)
+        GetSpeechEnhancementResumeRoute(
+        ProjectArtifact normalizedAudioArtifact,
+        TranscriptAudioRoutingPlan audioRoutingPlan,
+        IReadOnlyList<ProjectArtifact> artifacts,
+        IReadOnlyList<StageRunRecord>? stageRuns)
     {
-        ProjectArtifact? enhancedArtifact = TranscriptWorkflowUtilities.GetLatestArtifactByKind(
+        ProjectArtifact? enhancedArtifact = TranscriptWorkflowUtilities.GetAcceptedSpeechEnhancedAudio(
             artifacts,
-            ArtifactKind.SpeechEnhancedAudio);
+            stageRuns);
         if (enhancedArtifact is null)
         {
-            return context;
+            return (audioRoutingPlan, null);
         }
 
         // Accept the normalized audio and the pre-enhancement VAD source as valid lineage; the
@@ -82,8 +85,8 @@ internal static class TranscriptPipelineResumeHydrator
         // must not reach ASR.
         Guid[] sourceArtifactIds =
         [
-            context.NormalizedAudioArtifact.Id,
-            context.AudioRoutingPlan.VadAudioArtifact.Id
+            normalizedAudioArtifact.Id,
+            audioRoutingPlan.VadAudioArtifact.Id
         ];
 
         // A Studio Voice artifact whose persisted source no longer matches the current source
@@ -91,10 +94,10 @@ internal static class TranscriptPipelineResumeHydrator
         if (TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact)
             && !TranscriptAudioRoutingPlan.IsStudioVoiceEnhancementArtifact(enhancedArtifact, sourceArtifactIds))
         {
-            return context;
+            return (audioRoutingPlan, null);
         }
 
-        TranscriptAudioRoutingPlan enhancedRoutingPlan = context.AudioRoutingPlan with
+        TranscriptAudioRoutingPlan enhancedRoutingPlan = audioRoutingPlan with
         {
             VadAudioArtifact = enhancedArtifact,
             DiarizationAudioArtifact = enhancedArtifact
@@ -103,11 +106,24 @@ internal static class TranscriptPipelineResumeHydrator
             enhancedArtifact,
             sourceArtifactIds);
 
-        return context with
+        return (enhancedRoutingPlan, enhancedArtifact);
+    }
+
+    private static TranscriptGenerationContext HydrateSpeechEnhancement(
+        TranscriptGenerationContext context,
+        IReadOnlyList<ProjectArtifact> artifacts)
+    {
+        (TranscriptAudioRoutingPlan enhancedRoutingPlan, ProjectArtifact? enhancedArtifact) = GetSpeechEnhancementResumeRoute(
+            context.NormalizedAudioArtifact,
+            context.AudioRoutingPlan,
+            artifacts,
+            context.ProjectState?.StageRuns);
+        if (enhancedArtifact is null)
         {
-            AudioRoutingPlan = enhancedRoutingPlan,
-            EnhancedAudioArtifact = enhancedArtifact
-        };
+            return context;
+        }
+
+        return context with { AudioRoutingPlan = enhancedRoutingPlan, EnhancedAudioArtifact = enhancedArtifact };
     }
 
     private static async Task<TranscriptGenerationContext> HydrateVadAsync(
@@ -115,26 +131,25 @@ internal static class TranscriptPipelineResumeHydrator
         TranscriptArtifactWriter artifactWriter,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<SpeechRegion>? speechRegions = await artifactWriter
-            .TryReadSpeechRegionsAsync(context.Project.Id, cancellationToken)
+        SpeechRegionsArtifactSnapshot? snapshot = await artifactWriter
+            .TryReadSpeechRegionsSnapshotAsync(
+                context.Project.Id,
+                context.AudioRoutingPlan.VadAudioArtifact,
+                cancellationToken)
             .ConfigureAwait(false);
-        if (speechRegions is null || speechRegions.Count == 0)
+        if (snapshot is not { HasRegions: true })
         {
+            // Empty VAD output is valid, but downstream ASR must run again so its
+            // short-audio fallback can be applied instead of resuming stale transcript artifacts.
             return context;
         }
 
-        SpeechRegion[] regions = speechRegions.OrderBy(static region => region.Index).ToArray();
-        Guid? vadStageRunId = context.ProjectState?.StageRuns
-            .Where(run => string.Equals(run.StageName, StageNames.Vad, StringComparison.OrdinalIgnoreCase))
-            .Where(run => run.Status is StageRunStatus.Completed or StageRunStatus.PartiallyCompleted)
-            .OrderByDescending(static run => run.CompletedAtUtc ?? run.StartedAtUtc)
-            .Select(static run => (Guid?)run.Id)
-            .FirstOrDefault();
+        SpeechRegion[] regions = snapshot.Regions.OrderBy(static region => region.Index).ToArray();
 
         return context with
         {
             SpeechRegions = regions,
-            VadStageRunId = vadStageRunId
+            VadStageRunId = snapshot.StageRunId
         };
     }
 
@@ -146,7 +161,7 @@ internal static class TranscriptPipelineResumeHydrator
         context = await EnsureSpeechRegionsAsync(context, artifactWriter, cancellationToken).ConfigureAwait(false);
 
         DiarizationResult? diarizationResult = await artifactWriter
-            .TryReadDiarizationResultAsync(context.Project.Id, cancellationToken)
+            .TryReadDiarizationResultAsync(context.Project.Id, context.VadStageRunId ?? Guid.Empty, cancellationToken)
             .ConfigureAwait(false);
         double durationSeconds = context.AudioRoutingPlan.DiarizationAudioArtifact.DurationSeconds
                                  ?? context.NormalizedAudioArtifact.DurationSeconds
@@ -171,7 +186,16 @@ internal static class TranscriptPipelineResumeHydrator
         context = await HydrateDiarizationAsync(context, artifactWriter, cancellationToken).ConfigureAwait(false);
 
         RawAsrTranscriptArtifact? rawAsr = await artifactWriter
-            .TryReadRawAsrTranscriptAsync(context.Project.Id, cancellationToken)
+            .TryReadRawAsrTranscriptAsync(
+                new RawAsrTranscriptArtifactReadRequest
+                {
+                    ProjectId = context.Project.Id,
+                    Lineage = RawAsrTranscriptArtifactLineage.Create(
+                        context.AudioRoutingPlan.AsrAudioArtifact,
+                        context.AudioRoutingPlan.VadAudioArtifact,
+                        context.VadStageRunId)
+                },
+                cancellationToken)
             .ConfigureAwait(false);
         if (rawAsr is null || rawAsr.Segments.Count == 0)
         {

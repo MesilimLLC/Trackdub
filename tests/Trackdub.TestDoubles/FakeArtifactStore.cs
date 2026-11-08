@@ -126,8 +126,15 @@ public sealed class FakeArtifactStore(string? rootDirectory = null) : IArtifactS
             return Task.FromResult<T?>(default);
         }
 
-        T? result = JsonSerializer.Deserialize<T>(bytes);
-        return Task.FromResult(result);
+        try
+        {
+            T? result = JsonSerializer.Deserialize<T>(bytes);
+            return Task.FromResult(result);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("The seeded JSON artifact is corrupt.", exception);
+        }
     }
 
     /// <summary>Returns a seeded full path, a rooted test path, or the relative path for in-memory tests.</summary>
