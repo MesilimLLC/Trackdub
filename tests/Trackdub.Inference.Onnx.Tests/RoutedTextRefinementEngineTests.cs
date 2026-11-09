@@ -16,8 +16,10 @@ public sealed class RoutedTextRefinementEngineTests
         var gemini = new RecordingEngine(GeminiFamily);
         var router = new RoutedTextRefinementEngine([gemini, qwen]);
 
-        await router.RefineAsync(new TextRefinementRequest(Segments), CancellationToken.None);
+        IReadOnlyList<RefinedTextSegment> result =
+            await router.RefineAsync(new TextRefinementRequest(Segments), CancellationToken.None);
 
+        Assert.Equal(QwenTextRefinementEngine.EngineFamilyName, Assert.Single(result).RefinedText);
         Assert.Equal(1, qwen.Calls);
         Assert.Equal(0, gemini.Calls);
         Assert.Equal(QwenTextRefinementEngine.EngineFamilyName, router.EngineFamily);
@@ -33,10 +35,12 @@ public sealed class RoutedTextRefinementEngineTests
         var gemini = new RecordingEngine(GeminiFamily);
         var router = new RoutedTextRefinementEngine([qwen, gemini]);
 
-        await router.RefineAsync(
+        IReadOnlyList<RefinedTextSegment> result = await router.RefineAsync(
             new TextRefinementRequest(Segments, PreferredModelAlias: alias),
             CancellationToken.None);
 
+        Assert.Equal(GeminiFamily, Assert.Single(result).RefinedText);
+        Assert.Equal(alias, gemini.LastAlias);
         Assert.Equal(0, qwen.Calls);
         Assert.Equal(1, gemini.Calls);
         Assert.Equal(gemini.LastExecutionSummary, router.LastExecutionSummary);
@@ -49,10 +53,11 @@ public sealed class RoutedTextRefinementEngineTests
         var gemini = new RecordingEngine(GeminiFamily);
         var router = new RoutedTextRefinementEngine([qwen, gemini]);
 
-        await router.RefineAsync(
+        IReadOnlyList<RefinedTextSegment> result = await router.RefineAsync(
             new TextRefinementRequest(Segments, PreferredModelAlias: "something-else"),
             CancellationToken.None);
 
+        Assert.Equal(QwenTextRefinementEngine.EngineFamilyName, Assert.Single(result).RefinedText);
         Assert.Equal(1, qwen.Calls);
         Assert.Equal(0, gemini.Calls);
     }
@@ -60,6 +65,8 @@ public sealed class RoutedTextRefinementEngineTests
     private sealed class RecordingEngine(string family) : ITextRefinementEngine, IStageRuntimeExecutionReporter
     {
         public int Calls { get; private set; }
+
+        public string? LastAlias { get; private set; }
 
         public string EngineFamily => family;
 
@@ -71,7 +78,12 @@ public sealed class RoutedTextRefinementEngineTests
             CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult<IReadOnlyList<RefinedTextSegment>>([]);
+            LastAlias = request.PreferredModelAlias;
+            return Task.FromResult<IReadOnlyList<RefinedTextSegment>>(
+            [
+                new RefinedTextSegment(
+                    0, 0, 1, "hello", family, family, true, TextRefinementGuardStatus.Accepted, [])
+            ]);
         }
     }
 }
