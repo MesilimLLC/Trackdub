@@ -18,6 +18,12 @@ public sealed class FfmpegMediaProbe : IMediaProbe
         PropertyNameCaseInsensitive = true
     };
 
+    private const int MaxCachedSnapshots = 128;
+    private static readonly object SnapshotCacheLock = new();
+    private static readonly Dictionary<string, CachedSnapshot> SnapshotCache = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record CachedSnapshot(long Length, long WriteTicks, MediaProbeSnapshot Snapshot, long AccessSequence);
+    private static long snapshotAccessSequence;
+
     private readonly IProcessRunner processRunner;
     private readonly FfmpegToolResolver toolResolver;
 
@@ -40,25 +46,68 @@ public sealed class FfmpegMediaProbe : IMediaProbe
             throw new FileNotFoundException("Source media file was not found.", fullSourcePath);
         }
 
-        string ffprobePath = toolResolver.ResolveFfprobePath();
-        ProcessResult result = await processRunner.RunAsync(
-            ffprobePath,
-            [
-                "-v", "quiet",
-                "-print_format", "json",
-                "-show_format",
-                "-show_streams",
-                fullSourcePath
-            ],
-            cancellationToken,
-            ProbeProcessOptions).ConfigureAwait(false);
-
-        if (result.ExitCode != 0)
+        var sourceInfo = new FileInfo(fullSourcePath);
+        long length = sourceInfo.Length;
+        long writeTicks = sourceInfo.LastWriteTimeUtc.Ticks;
+        lock (SnapshotCacheLock)
         {
-            throw new InvalidOperationException(
-                $"ffprobe failed with exit code {result.ExitCode}: {result.StandardError}".Trim());
+            if (SnapshotCache.TryGetValue(fullSourcePath, out CachedSnapshot? cached) &&
+                cached.Length == length)
+            {
+                if (cached.WriteTicks == writeTicks)
+                {
+                    SnapshotCache[fullSourcePath] = cached with { AccessSequence = ++snapshotAccessSequence };
+                    return cached.Snapshot;
+                }
+            }
         }
 
+        string ffprobePath = toolResolver.ResolveFfprobePath();
+        ProcessResult result;
+        try
+        {
+            result = await processRunner.RunAsync(
+                ffprobePath,
+                [
+                    "-v", "quiet",
+                    "-print_format", "json",
+                    "-show_format",
+                    "-show_streams",
+                    fullSourcePath
+                ],
+                cancellationToken,
+                ProbeProcessOptions).ConfigureAwait(false);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"ffprobe failed with exit code {result.ExitCode}: {result.StandardError}".Trim());
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException or DirectoryNotFoundException)
+        {
+            toolResolver.InvalidateResolvedPaths();
+            throw;
+        }
+
+        FfprobePayload payload = ParsePayload(result);
+        var snapshot = CreateSnapshot(payload);
+        lock (SnapshotCacheLock)
+        {
+            if (SnapshotCache.Count >= MaxCachedSnapshots && !SnapshotCache.ContainsKey(fullSourcePath))
+            {
+                string oldest = SnapshotCache.OrderBy(static pair => pair.Value.AccessSequence).First().Key;
+                SnapshotCache.Remove(oldest);
+            }
+
+            SnapshotCache[fullSourcePath] = new CachedSnapshot(length, writeTicks, snapshot, ++snapshotAccessSequence);
+        }
+
+        return snapshot;
+    }
+
+    private static FfprobePayload ParsePayload(ProcessResult result)
+    {
         FfprobePayload? payload = JsonSerializer.Deserialize<FfprobePayload>(
             result.StandardOutput,
             JsonOptions);
@@ -68,6 +117,11 @@ public sealed class FfmpegMediaProbe : IMediaProbe
             throw new InvalidOperationException("ffprobe did not return format metadata.");
         }
 
+        return payload;
+    }
+
+    private static MediaProbeSnapshot CreateSnapshot(FfprobePayload payload)
+    {
         IReadOnlyList<MediaAudioStream> audioStreams = payload.Streams
             .Where(static stream => string.Equals(stream.CodecType, "audio", StringComparison.OrdinalIgnoreCase))
             .Select(static stream => new MediaAudioStream(
@@ -102,7 +156,7 @@ public sealed class FfmpegMediaProbe : IMediaProbe
             .ToArray();
 
         return new MediaProbeSnapshot(
-            payload.Format.FormatName ?? "unknown",
+            payload.Format!.FormatName ?? "unknown",
             payload.Format.FormatLongName,
             ParseDouble(payload.Format.Duration),
             ParseNullableLong(payload.Format.BitRate),
