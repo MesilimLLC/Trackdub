@@ -334,11 +334,11 @@ internal sealed record SessionPoolKey
                 return null;
             }
 
-            if (attempt == 0 &&
-                ModelContentHashCache.TryGetValue(cacheKey, out var cached) &&
-                cached.Length == length && cached.WriteTicks == writeTicks)
+            (ContentHashLookup lookup, string? resolved) = attempt == 0
+                ? TryResolveContentHash(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks)) : default;
+            if (lookup != ContentHashLookup.NotFound)
             {
-                return cached.Hash;
+                return resolved;
             }
 
             string hash;
@@ -392,6 +392,176 @@ internal sealed record SessionPoolKey
 
         ModelContentHashCache.TryRemove(cacheKey, out _);
         ModelContentHashGenerations.AddOrUpdate(cacheKey, 1, static (_, generation) => generation + 1);
+    }
+
+    /// <summary>Outcome of resolving a model content digest from the cache or a shared provider.</summary>
+    private enum ContentHashLookup
+    {
+        /// <summary>No digest is available; the caller must hash the model file itself.</summary>
+        NotFound,
+
+        /// <summary>A digest was resolved and is safe to use and to cache.</summary>
+        Found,
+
+        /// <summary>The model file's metadata could not be re-read, so no digest can be trusted.</summary>
+        Unreadable,
+    }
+
+    /// <summary>
+    /// The model file metadata a content digest is resolved against: the file handle used to
+    /// revalidate the file, the length and write time observed before hashing, and the cache
+    /// generation the digest must belong to. The synchronous path does not track generations
+    /// — invalidation removes the cached entry outright, so it can never reuse one — and
+    /// therefore leaves <see cref="Generation"/> at its default.
+    /// </summary>
+    private readonly struct ModelFileSnapshot(FileInfo info, long length, long writeTicks, long generation = 0)
+    {
+        public FileInfo Info { get; } = info;
+        public long Length { get; } = length;
+        public long WriteTicks { get; } = writeTicks;
+        public long Generation { get; } = generation;
+    }
+
+    /// <summary>
+    /// Resolves the model content digest from the in-memory cache or — when a shared
+    /// fingerprint provider is configured — from that provider, so a multi-GB model is not
+    /// re-hashed from disk on every pool-key construction. A shared digest is accepted only
+    /// while the file's length and write time still match the metadata the caller observed,
+    /// so a same-path replacement never reuses a stale digest.
+    /// </summary>
+    private static (ContentHashLookup Lookup, string? Hash) TryResolveContentHash(
+        string modelPath,
+        string cacheKey,
+        ModelFileSnapshot snapshot)
+    {
+        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash))
+        {
+            return (ContentHashLookup.Found, cachedHash);
+        }
+
+        if (SessionPoolContentHashProvider.Current is not { } sharedHasher)
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        string? sharedHash;
+        try
+        {
+            sharedHash = sharedHasher(modelPath, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Shared model fingerprint failed for '{modelPath}': {ex.Message}");
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(sharedHash))
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
+        {
+            return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
+        }
+
+        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);
+        return (ContentHashLookup.Found, sharedHash);
+    }
+
+    /// <summary>
+    /// Asynchronous counterpart of <see cref="TryResolveContentHash"/>. The cached digest is
+    /// only reused while the cache generation is unchanged, so an invalidation racing the
+    /// lookup can never resurrect a stale digest.
+    /// </summary>
+    private static async Task<(ContentHashLookup Lookup, string? Hash)> TryResolveContentHashAsync(
+        string modelPath,
+        string cacheKey,
+        ModelFileSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash) &&
+            ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == snapshot.Generation)
+        {
+            return (ContentHashLookup.Found, cachedHash);
+        }
+
+        if (SessionPoolContentHashProvider.Current is not { } sharedHasher)
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        string? sharedHash = await sharedHasher(modelPath, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(sharedHash))
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
+        {
+            return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
+        }
+
+        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) != snapshot.Generation)
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);
+        return (ContentHashLookup.Found, sharedHash);
+    }
+
+    private static bool TryGetCachedHash(string cacheKey, long length, long writeTicks, out string? hash)
+    {
+        hash = null;
+        if (!ModelContentHashCache.TryGetValue(cacheKey, out var cached))
+        {
+            return false;
+        }
+
+        if (cached.Length != length)
+        {
+            return false;
+        }
+
+        if (cached.WriteTicks != writeTicks)
+        {
+            return false;
+        }
+
+        hash = cached.Hash;
+        return true;
+    }
+
+    /// <summary>
+    /// Re-reads the model file's metadata and reports whether it still matches the metadata
+    /// the caller observed. When the metadata cannot be re-read at all,
+    /// <paramref name="unreadable"/> is set so the caller can refuse to trust any digest.
+    /// </summary>
+    private static bool TryReadUnchangedMetadata(FileInfo info, long length, long writeTicks, out bool unreadable)
+    {
+        unreadable = false;
+        try
+        {
+            info.Refresh();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            unreadable = true;
+            return false;
+        }
+
+        if (!info.Exists)
+        {
+            return false;
+        }
+
+        if (info.Length != length)
+        {
+            return false;
+        }
+
+        return info.LastWriteTimeUtc.Ticks == writeTicks;
     }
 
     /// <summary>
@@ -514,11 +684,11 @@ internal sealed record SessionPoolKey
                 return null;
             }
 
-            if (attempt == 0 && ModelContentHashCache.TryGetValue(cacheKey, out var cached) &&
-                cached.Length == length && cached.WriteTicks == writeTicks &&
-                ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == generation)
+            (ContentHashLookup lookup, string? resolved) = attempt == 0
+                ? await TryResolveContentHashAsync(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks, generation), cancellationToken).ConfigureAwait(false) : default;
+            if (lookup != ContentHashLookup.NotFound)
             {
-                return cached.Hash;
+                return resolved;
             }
 
             string hash;
