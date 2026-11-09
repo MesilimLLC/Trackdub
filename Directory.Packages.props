@@ -48,8 +48,8 @@
       Upgrade path: bump to stable 3.x once it appears on nuget.org; remove the dotnet-libraries
       feed entry from NuGet.Config at that point.
     -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.19.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.19.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.18.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.18.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.18.0" />
     <!-- GenAI built against the Windows ML runtime (one onnxruntime.dll shared with DirectML and the
          catalog EPs). Windows TFM only; the portable TFM keeps the CPU/CUDA GenAI packages. -->

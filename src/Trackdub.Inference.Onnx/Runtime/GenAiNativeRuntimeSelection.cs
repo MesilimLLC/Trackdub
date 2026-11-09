@@ -152,8 +152,7 @@ internal static class GenAiNativeRuntimeSelection
             string? version = Marshal.PtrToStringAnsi(getVersion());
             if (selectedPair is not null && version != selectedPair.OrtVersion)
                 throw new InvalidOperationException($"Native ORT version '{version}' does not match supported version '{selectedPair.OrtVersion}'.");
-            // Register before publishing initialized state. A competing resolver is an error, not proof of identity.
-            NativeLibrary.SetDllImportResolver(typeof(OrtEnv).Assembly, ResolveOrt);
+            RegisterResolver(typeof(OrtEnv).Assembly, ResolveOrt, "onnxruntime.dll", path);
             selectedOrtPath = Path.GetFullPath(path);
             ortHandle = handle;
             return handle;
@@ -176,7 +175,7 @@ internal static class GenAiNativeRuntimeSelection
             string? loadedOrt = LoadedPath("onnxruntime.dll");
             if (!string.Equals(loadedOrt, selectedOrtPath, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("GenAI native pair not verified: ORT module identity changed during GenAI loading.");
-            NativeLibrary.SetDllImportResolver(typeof(Model).Assembly, ResolveGenAi);
+            RegisterResolver(typeof(Model).Assembly, ResolveGenAi, "onnxruntime-genai.dll", verification.GenAiPath!);
             selectedPair = verification.Pair;
             selectedGenAiPath = verification.GenAiPath;
             genAiHandle = handle;
@@ -198,6 +197,22 @@ internal static class GenAiNativeRuntimeSelection
         lock (Gate)
             return name.Equals("onnxruntime-genai", StringComparison.OrdinalIgnoreCase) || name.Equals("onnxruntime-genai.dll", StringComparison.OrdinalIgnoreCase)
                 ? genAiHandle : nint.Zero;
+    }
+
+    // Register before publishing initialized state. A competing resolver is not proof of identity, but the
+    // managed ORT/GenAI bindings register their own resolver on first use (for example, when an earlier stage
+    // already ran ORT in this process). That is acceptable only when the module they resolved is the file whose
+    // hash was just verified; any other state, including an unreadable module list, still fails closed.
+    private static void RegisterResolver(Assembly assembly, DllImportResolver resolver, string moduleFileName, string verifiedPath)
+    {
+        try
+        {
+            NativeLibrary.SetDllImportResolver(assembly, resolver);
+        }
+        catch (InvalidOperationException) when (string.Equals(
+            LoadedPath(moduleFileName), Path.GetFullPath(verifiedPath), StringComparison.OrdinalIgnoreCase))
+        {
+        }
     }
 
     private static void AssertLoadedPath(nint handle, string expected)
