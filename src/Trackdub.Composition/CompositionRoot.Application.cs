@@ -266,7 +266,8 @@ public static partial class CompositionRoot
                 sp.GetRequiredService<IApplicationLogger>(),
                 sp.GetRequiredService<IModelCacheRegistrar>(),
                 sp.GetRequiredService<TrackdubStoragePaths>().ModelCacheDirectory,
-                modelCacheLookup: sp.GetRequiredService<IModelCacheRecordLookup>()));
+                modelCacheLookup: sp.GetRequiredService<IModelCacheRecordLookup>(),
+                fingerprintService: sp.GetService<IFileFingerprintService>()));
     }
 
     private static void AddPipelineWorkflows(IServiceCollection services)

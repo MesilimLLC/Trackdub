@@ -1,19 +1,22 @@
+using Trackdub.Application.Transcripts;
 using Trackdub.Contracts;
 using Trackdub.Contracts.ApplicationContracts;
 using Trackdub.Contracts.Licensing;
 using Trackdub.Application.Projects;
 using Trackdub.Application.Runtime;
-using Trackdub.Application.Transcripts;
 using Trackdub.Composition;
 using Trackdub.Composition.NvidiaAfx;
 using Trackdub.Contracts.Diagnostics;
 using Trackdub.Contracts.Pipeline;
+using Trackdub.Domain;
 using Trackdub.Infrastructure.FileSystem;
 using Trackdub.Infrastructure.Logging;
 using Trackdub.Infrastructure.Persistence.Sqlite;
-using Trackdub.Domain;
+using Trackdub.Infrastructure.Settings;
 using Trackdub.Inference.Onnx.ExecutionProviders;
+using Trackdub.Inference.Onnx.Pool;
 using Trackdub.Inference.Onnx.QwenTextRefinement;
+using Trackdub.Inference.Runtime.ModelManifest;
 using Trackdub.Inference.Runtime.Planning;
 using Trackdub.TestDoubles;
 using Microsoft.Extensions.DependencyInjection;
@@ -434,6 +437,48 @@ public sealed class CompositionRootTests : IDisposable
         Assert.Equal("Missing native library", result.StatusLabel);
         Assert.Equal(runtimeDirectory, result.RuntimeRoot);
     }
+
+    [Fact]
+#pragma warning disable xUnit1031 // Blocking call intentional for wiring test — mirrors brief verbatim
+    public void AddTrackdub_shares_persisted_fingerprint_with_model_hash_consumers()
+    {
+        string root = CreateTempDirectory();
+        var storagePaths = new TrackdubStoragePaths(new TrackdubStorageOptions(
+            root, root, SharedAssetRoot: null, IsPortable: false));
+        using ServiceProvider provider = BuildProvider(services =>
+        {
+            // Registered before AddTrackdub() so the TryAdd registrations keep these instances.
+            services.AddSingleton(storagePaths);
+            services.AddSingleton<IAppStoragePaths>(storagePaths);
+        });
+        try
+        {
+            IFileFingerprintService fingerprints = provider.GetRequiredService<IFileFingerprintService>();
+            IModelHashVerifier verifier = provider.GetRequiredService<IModelHashVerifier>();
+
+            // DiarizationStageHandler is scoped; the root provider cannot resolve it under ValidateScopes.
+            using IServiceScope scope = provider.CreateScope();
+            DiarizationStageHandler diarization = scope.ServiceProvider.GetRequiredService<DiarizationStageHandler>();
+
+            Assert.IsType<Sha256FileFingerprintService>(fingerprints);
+            Assert.NotNull(verifier);
+            Assert.NotNull(diarization);
+
+            // Prove the persisted cache file is actually written under the cache root.
+            string filePath = Path.Join(root, "model.bin");
+            File.WriteAllBytes(filePath, [7, 8, 9]);
+            FileFingerprint fingerprint = fingerprints.ComputeAsync(filePath, CancellationToken.None).GetAwaiter().GetResult();
+
+            Assert.Equal(3, fingerprint.SizeBytes);
+            Assert.True(File.Exists(Path.Join(root, "file-fingerprints.json")));
+            Assert.NotNull(SessionPoolContentHashProvider.Current);
+        }
+        finally
+        {
+            SessionPoolContentHashProvider.Reset();
+        }
+    }
+#pragma warning restore xUnit1031
 
     public void Dispose()
     {
