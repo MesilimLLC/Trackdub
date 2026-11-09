@@ -258,15 +258,16 @@ public static partial class CompositionRoot
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, ChatterboxVoiceCloneTtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, Qwen3TtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, CosyVoiceTtsEngine>());
-        services.TryAddEnumerable(ServiceDescriptor.Scoped<ITextRefinementEngine, QwenTextRefinementEngine>());
+        services.TryAddScoped<QwenTextRefinementEngine>();
     }
 
     private static void AddCloudEngines(IServiceCollection services)
     {
         services.AddHttpClient<GeminiCloudTextRefinementEngine>(c => c.Timeout = TimeSpan.FromSeconds(30));
-        services.TryAddEnumerable(ServiceDescriptor.Scoped<ITextRefinementEngine, GeminiCloudTextRefinementEngine>());
         services.TryAddScoped<ITextRefinementEngine>(sp =>
-            new RoutedTextRefinementEngine(sp.GetServices<ITextRefinementEngine>()));
+            new RoutedTextRefinementEngine([
+                sp.GetRequiredService<QwenTextRefinementEngine>(),
+                sp.GetRequiredService<GeminiCloudTextRefinementEngine>()]));
         services.TryAddScoped<ILocalAssistant, QwenLocalAssistantEngine>();
         services.AddHttpClient<DeepLCloudTranslationEngine>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddHttpClient<OpenAiCloudTranslationEngine>(c => c.Timeout = TimeSpan.FromSeconds(60));

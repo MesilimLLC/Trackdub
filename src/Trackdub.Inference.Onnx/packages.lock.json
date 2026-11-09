@@ -130,7 +130,7 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
         "type": "CentralTransitive",
-        "requested": "[0.18.0, )",
+        "requested": "[0.19.0, )",
         "resolved": "0.19.0",
         "contentHash": "NkeT1JO776BCbg9bdPhvK52ReP4p9Z1BHs4PqHc/9d1EkuPQ4T0ir7fc7lTKolVeEXjaGNw0e+dT42tmjkOw2Q==",
         "dependencies": {
@@ -459,11 +459,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -511,9 +511,9 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
         "type": "CentralTransitive",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "EaJ3xnWwhcV35BK8tETmOXtOPbc0nIaEIkHFjh+U8N7+CIlGiVRZ4bzjkPlE0KL2ETV3XARHBEl5sr8YOXIJvg==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "NkeT1JO776BCbg9bdPhvK52ReP4p9Z1BHs4PqHc/9d1EkuPQ4T0ir7fc7lTKolVeEXjaGNw0e+dT42tmjkOw2Q==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "9.8.0"
         }
@@ -531,11 +531,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -561,11 +561,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -591,11 +591,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -621,11 +621,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -651,11 +651,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },
@@ -681,11 +681,11 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
         "type": "Direct",
-        "requested": "[0.18.0, )",
-        "resolved": "0.18.0",
-        "contentHash": "bucpxSGzJeLDjt9OHW0IaBKo/JjxAskNVoPjxFfVmuIjjHDs5TpobVPyXOtuTc2K8mZsBDqUJZ8fdTiuL4r9MQ==",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.18.0",
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
           "Microsoft.Windows.AI.MachineLearning": "2.1.1"
         }
       },

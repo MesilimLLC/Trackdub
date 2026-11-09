@@ -264,7 +264,7 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
         "type": "CentralTransitive",
-        "requested": "[0.18.0, )",
+        "requested": "[0.19.0, )",
         "resolved": "0.19.0",
         "contentHash": "NkeT1JO776BCbg9bdPhvK52ReP4p9Z1BHs4PqHc/9d1EkuPQ4T0ir7fc7lTKolVeEXjaGNw0e+dT42tmjkOw2Q==",
         "dependencies": {

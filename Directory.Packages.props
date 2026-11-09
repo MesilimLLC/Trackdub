@@ -50,10 +50,10 @@
     -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.19.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.19.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.18.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.19.0" />
     <!-- GenAI built against the Windows ML runtime (one onnxruntime.dll shared with DirectML and the
          catalog EPs). Windows TFM only; the portable TFM keeps the CPU/CUDA GenAI packages. -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" Version="0.18.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" Version="0.19.0" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26502.1" />
     <PackageVersion Include="System.Numerics.Tensors" Version="11.0.0-rc.3.26522.148" />
     <!-- Linux counterpart to the Windows ML catalog: pinned OpenVINO plugin EP (install, register,
