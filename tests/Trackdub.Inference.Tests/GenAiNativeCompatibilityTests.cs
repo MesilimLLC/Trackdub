@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Xml.Linq;
 using Trackdub.Inference.Onnx.Runtime;
 
@@ -14,6 +15,26 @@ public sealed class GenAiNativeCompatibilityTests
             Assert.Equal(NativePairStatus.NotVerified,
                 GenAiNativeRuntimeSelection.Verify(ort, genAi, "win-x64", []).Status);
         });
+    }
+
+    [Fact]
+    public void PreRegisteredResolverIsAcceptedOnlyForTheVerifiedLoadedModule()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        // SetDllImportResolver is once-per-assembly, so this test owns the test assembly's registration.
+        var assembly = typeof(GenAiNativeCompatibilityTests).Assembly;
+        DllImportResolver resolver = static (_, _, _) => nint.Zero;
+        NativeLibrary.SetDllImportResolver(assembly, resolver);
+
+        string loadedModule = Path.Join(Environment.SystemDirectory, "kernel32.dll");
+        GenAiNativeRuntimeSelection.RegisterResolver(assembly, resolver, "kernel32.dll", loadedModule);
+
+        string foreignCopy = Path.Join(Path.GetTempPath(), $"trackdub-resolver-{Guid.NewGuid():N}", "kernel32.dll");
+        Assert.Throws<InvalidOperationException>(() =>
+            GenAiNativeRuntimeSelection.RegisterResolver(assembly, resolver, "kernel32.dll", foreignCopy));
+        Assert.Throws<InvalidOperationException>(() =>
+            GenAiNativeRuntimeSelection.RegisterResolver(assembly, resolver, "not-a-loaded-module.dll", loadedModule));
     }
 
     [Fact]

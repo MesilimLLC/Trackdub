@@ -130,7 +130,7 @@
       },
       "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
         "type": "CentralTransitive",
-        "requested": "[0.18.0, )",
+        "requested": "[0.19.0, )",
         "resolved": "0.19.0",
         "contentHash": "NkeT1JO776BCbg9bdPhvK52ReP4p9Z1BHs4PqHc/9d1EkuPQ4T0ir7fc7lTKolVeEXjaGNw0e+dT42tmjkOw2Q==",
         "dependencies": {
@@ -423,6 +423,279 @@
         "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
         "dependencies": {
           "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041": {
+      "MathNet.Numerics": {
+        "type": "Direct",
+        "requested": "[5.0.0, )",
+        "resolved": "5.0.0",
+        "contentHash": "pg1W2VwaEQMAiTpGK840hZgzavnqjlCMTVSbtVCXVyT+7AX4mc1o89SPv4TBlAjhgCOo9c1Y+jZ5m3ti2YgGgA=="
+      },
+      "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+        "type": "Direct",
+        "requested": "[4.14.0, )",
+        "resolved": "4.14.0",
+        "contentHash": "gSWJlDWwmDhtbrEJGiHqvEjz9KthIiFD0qYB8zZ6a7z+xpMSPEtM9yTYELSa58iFWYlzSRqP9FXO6KoT3+ZMtg=="
+      },
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "o9nvEiddLLlAMOHN0XZ/06Oal0W6S7iWiSb8lzQAwfQKNOZtX4C8he5/I7Mc/DlSprNfovAW6kCkwX2BAE0JHw==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.ML.Tokenizers": {
+        "type": "Direct",
+        "requested": "[3.0.0-preview.26502.1, )",
+        "resolved": "3.0.0-preview.26502.1",
+        "contentHash": "Z+ZFKkR3iRMpSWpuB42vNrR30TxpH24LmHibaKNe27F3qmIF2JO4dzA3RIO0jZsc9nW01r/vDyEZdWy4ET3AvA=="
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      },
+      "System.Numerics.Tensors": {
+        "type": "Direct",
+        "requested": "[11.0.0-rc.3.26522.148, )",
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "9IVKWWs7IRbKJXWdBKbZBr32BOTvJ71qY6Um44w6iAI2kcQ4MS/ucaBGTHWY8HLfH2KEV+uQTwJaKGwWyaiYWA=="
+      },
+      "Microsoft.Extensions.AI.Abstractions": {
+        "type": "Transitive",
+        "resolved": "9.8.0",
+        "contentHash": "0++t+lPqX5amr7Kgh+ZFm1C5hhzMmFc5Dhoc6siNZ4sPXxy0pLTFRk+4vHn0hZf7Xe8Y9OoqL2cL4oTdjt8STQ=="
+      },
+      "trackdub.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Trackdub.Domain": "[1.0.0, )"
+        }
+      },
+      "trackdub.domain": {
+        "type": "Project"
+      },
+      "trackdub.inference": {
+        "type": "Project",
+        "dependencies": {
+          "Trackdub.Contracts": "[1.0.0, )",
+          "Trackdub.Domain": "[1.0.0, )"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.Managed": {
+        "type": "CentralTransitive",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "NkeT1JO776BCbg9bdPhvK52ReP4p9Z1BHs4PqHc/9d1EkuPQ4T0ir7fc7lTKolVeEXjaGNw0e+dT42tmjkOw2Q==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "9.8.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/linux-arm64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/linux-x64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/osx-arm64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/osx-x64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/win-arm64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      }
+    },
+    "net11.0-windows10.0.19041/win-x64": {
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows": {
+        "type": "Direct",
+        "requested": "[1.31.0, )",
+        "resolved": "1.31.0",
+        "contentHash": "Hm5ysNQmVDDYDK0wdND2gN5tGbgM0qEu7rL+HrEyi1zNadBKK1k9hXdIacBLc6kyIY4d2DsxXp5vrBJROn189w==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntimeGenAI.WinML": {
+        "type": "Direct",
+        "requested": "[0.19.0, )",
+        "resolved": "0.19.0",
+        "contentHash": "X4vYy5OFAe0qzbq9u3qIfSRFVDIiStEuZ1PVL+T3Q6iDeDKoULmQPJVU3c2exMv6gmdS8qMPrs9xSSGUJkw7Cg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntimeGenAI.Managed": "0.19.0",
+          "Microsoft.Windows.AI.MachineLearning": "2.1.1"
+        }
+      },
+      "Microsoft.Windows.AI.MachineLearning": {
+        "type": "Direct",
+        "requested": "[2.4.89, )",
+        "resolved": "2.4.89",
+        "contentHash": "uc+Lej0vmZJprvHEuNJs7xMegoParROM9pZ2a7uMeXQiELva42V1wAUoYHCsw/u5ho/nwkYasiSFWZ95ABot3A==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
         }
       }
     }
