@@ -116,11 +116,13 @@ jobs:
           platforms: linux/amd64
           tags: trackdub-ci:${{ matrix.profile }}
           labels: ${{ steps.meta.outputs.labels }}
-          load: true
+          # Uncompressed: the image goes straight into the local daemon for the checks below, so gzip only adds time.
+          outputs: type=docker,compression=uncompressed
           push: false
-          cache-from: type=gha,scope=trackdub-linux-amd64-${{ matrix.profile }}
+          # Both profiles share every layer except the last, so they share one cache scope.
+          cache-from: type=gha,scope=trackdub-linux-amd64
           # Pull requests only read the cache: exporting it from every PR run dominated the build time and was never reused, so only pushes refresh it.
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=min,scope=trackdub-linux-amd64-{0}', matrix.profile) || '' }}
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=min,scope=trackdub-linux-amd64' || '' }}
 
       - name: Record image size and compare with latest
         shell: bash
