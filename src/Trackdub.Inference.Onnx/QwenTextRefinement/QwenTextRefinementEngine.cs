@@ -71,23 +71,39 @@ public sealed class QwenTextRefinementEngine(
         GenAiModelKey modelKey = await GenAiModelKey.CreateAsync(
             modelRootPath, plan.ExecutionProvider!.Value, plan.ModelId, plan.Variant, plan.DeviceIndex,
             plan.ModelRevisionHash, cancellationToken).ConfigureAwait(false);
-        using GenAiModelLease modelLease = await GenAiModelPool.Shared
-            .GetLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
-        using IDisposable? executionAdmission = await CpuExecutionAdmission.Shared
-            .AcquireAsync(modelKey.Provider, cancellationToken).ConfigureAwait(false);
-        Model model = modelLease.Model;
-        Tokenizer tokenizer = modelLease.Tokenizer;
-
         var refinedSegments = new List<RefinedTextSegment>(request.Segments.Count);
-        foreach (TextRefinementInputSegment segment in request.Segments.OrderBy(static s => s.Index))
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            refinedSegments.Add(RefineSegment(model, tokenizer, request, segment, cancellationToken));
+            using GenAiModelLease modelLease = await GenAiModelPool.Shared
+                .GetLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
+            using IDisposable? executionAdmission = await CpuExecutionAdmission.Shared
+                .AcquireAsync(modelKey.Provider, cancellationToken).ConfigureAwait(false);
+            Model model = modelLease.Model;
+            Tokenizer tokenizer = modelLease.Tokenizer;
+
+            foreach (TextRefinementInputSegment segment in request.Segments.OrderBy(static s => s.Index))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                refinedSegments.Add(RefineSegment(model, tokenizer, request, segment, cancellationToken));
+            }
+        }
+        catch (Exception ex) when (IsNativeRuntimeFailure(ex))
+        {
+            throw WrapNativeFailure(ex);
         }
 
         LastExecutionSummary = CreateExecutionSummary(plan, "ONNX Runtime GenAI Qwen text refinement.");
         return refinedSegments;
     }
+
+    // Native model creation and generation throw runtime-specific exception types that the optional
+    // polish stage does not handle; surface them as InvalidOperationException so the stage skips
+    // polish and keeps the raw ASR transcript instead of failing the whole run.
+    internal static bool IsNativeRuntimeFailure(Exception ex) =>
+        ex is OnnxRuntimeGenAIException or Microsoft.ML.OnnxRuntime.OnnxRuntimeException;
+
+    internal static InvalidOperationException WrapNativeFailure(Exception ex) =>
+        new($"Qwen text refinement failed in ONNX Runtime: {ex.Message}", ex);
 
     private static RefinedTextSegment RefineSegment(
         Model model,
