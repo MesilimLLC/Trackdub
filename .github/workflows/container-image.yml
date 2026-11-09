@@ -119,7 +119,8 @@ jobs:
           load: true
           push: false
           cache-from: type=gha,scope=trackdub-linux-amd64-${{ matrix.profile }}
-          cache-to: type=gha,mode=max,scope=trackdub-linux-amd64-${{ matrix.profile }}
+          # Pull requests only read the cache: exporting it from every PR run dominated the build time and was never reused, so only pushes refresh it.
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=min,scope=trackdub-linux-amd64-{0}', matrix.profile) || '' }}
 
       - name: Record image size and compare with latest
         shell: bash
