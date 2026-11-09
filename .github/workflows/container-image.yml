@@ -116,10 +116,13 @@ jobs:
           platforms: linux/amd64
           tags: trackdub-ci:${{ matrix.profile }}
           labels: ${{ steps.meta.outputs.labels }}
-          load: true
+          # Uncompressed: the image goes straight into the local daemon for the checks below, so gzip only adds time.
+          outputs: type=docker,compression=uncompressed
           push: false
-          cache-from: type=gha,scope=trackdub-linux-amd64-${{ matrix.profile }}
-          cache-to: type=gha,mode=max,scope=trackdub-linux-amd64-${{ matrix.profile }}
+          # Both profiles share every layer except the last, so they share one cache scope.
+          cache-from: type=gha,scope=trackdub-linux-amd64
+          # Pull requests only read the cache: exporting it from every PR run dominated the build time and was never reused, so only pushes refresh it.
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=min,scope=trackdub-linux-amd64' || '' }}
 
       - name: Record image size and compare with latest
         shell: bash
@@ -174,9 +177,21 @@ jobs:
 
       - name: Install Trivy
         shell: bash
+        env:
+          TRIVY_VERSION: "0.76.1"
         run: |
           set -euo pipefail
-          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz" | sudo tar -C /usr/local/bin -xzf - trivy
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          curl -fsSL \
+            --retry 5 \
+            --retry-connrefused \
+            --retry-delay 2 \
+            -o "$tmp_dir/$archive" \
+            "$url"
+          sudo tar -C /usr/local/bin -xzf "$tmp_dir/$archive" trivy
           trivy --version
 
       - name: Scan image for vulnerabilities
@@ -192,7 +207,7 @@ jobs:
 
       - name: Upload image size record
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-size-${{ matrix.profile }}-${{ github.run_id }}
           path: image-size-${{ matrix.profile }}.json
