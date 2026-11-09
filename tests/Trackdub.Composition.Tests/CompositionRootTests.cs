@@ -13,6 +13,7 @@ using Trackdub.Infrastructure.Logging;
 using Trackdub.Infrastructure.Persistence.Sqlite;
 using Trackdub.Domain;
 using Trackdub.Inference.Onnx.ExecutionProviders;
+using Trackdub.Inference.Onnx.QwenTextRefinement;
 using Trackdub.Inference.Runtime.Planning;
 using Trackdub.TestDoubles;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,6 +33,18 @@ public sealed class CompositionRootTests : IDisposable
         Assert.NotNull(provider.GetRequiredService<TranscriptWorkspaceFactory>());
         Assert.NotNull(provider.GetRequiredService<ProjectSessionService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<IRuntimeModelBootstrapService>());
+    }
+
+    [Fact]
+    public void AddTrackdub_resolves_routed_text_refinement_engine_that_prefers_local_qwen()
+    {
+        using ServiceProvider provider = BuildProvider();
+        using IServiceScope scope = provider.CreateScope();
+
+        ITextRefinementEngine engine = scope.ServiceProvider.GetRequiredService<ITextRefinementEngine>();
+
+        Assert.IsType<RoutedTextRefinementEngine>(engine);
+        Assert.Equal(QwenTextRefinementEngine.EngineFamilyName, engine.EngineFamily);
     }
 
     [Fact]
