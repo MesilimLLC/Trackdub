@@ -123,7 +123,7 @@ public sealed class QwenTextRefinementEngine(
             or DllNotFoundException
             or EntryPointNotFoundException
             or BadImageFormatException
-        || ex is TypeInitializationException { InnerException: { } inner } && IsNativeRuntimeFailure(inner);
+        || (ex is TypeInitializationException { InnerException: { } inner } && IsNativeRuntimeFailure(inner));
 
     internal static InvalidOperationException WrapNativeFailure(Exception ex) =>
         new($"Qwen text refinement failed in ONNX Runtime: {ex.Message}", ex);
