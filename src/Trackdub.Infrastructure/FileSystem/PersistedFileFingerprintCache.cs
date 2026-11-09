@@ -8,6 +8,20 @@ namespace Trackdub.Infrastructure.FileSystem;
 /// (byte length and last write time). Persistence problems are never fatal: a corrupt or
 /// unwritable cache file degrades to "no persisted fingerprints" instead of blocking hashing.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A persisted fingerprint is an optimization, not an integrity proof. A hit is validated only by
+/// full path, byte length, and UTC write time, so byte corruption that leaves the length and the
+/// write time unchanged is not detected by this cache. The escape hatch is explicit invalidation:
+/// <see cref="Invalidate"/> forces the next computation to rehash.
+/// </para>
+/// <para>
+/// The cache file has a single writer per process. <see cref="Save"/> writes the owning service's
+/// whole in-memory map back to the file and invalidation markers are held per instance, so a
+/// second service pointed at the same cache file could keep serving an invalidated fingerprint and
+/// could write the invalidated entry back into the file. Use exactly one instance per cache file.
+/// </para>
+/// </remarks>
 internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IApplicationLogger logger)
 {
     private const int SchemaVersion = 1;
@@ -94,7 +108,12 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
         string temporaryPath = cacheFilePath + ".tmp";
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(cacheFilePath)!);
+            string? cacheDirectory = Path.GetDirectoryName(cacheFilePath);
+            if (!string.IsNullOrEmpty(cacheDirectory))
+            {
+                Directory.CreateDirectory(cacheDirectory);
+            }
+
             using (FileStream stream = new(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 JsonSerializer.Serialize(stream, snapshot, JsonOptions);
