@@ -111,11 +111,19 @@ public sealed class QwenTextRefinementEngine(
         return refinedSegments;
     }
 
-    // Native model creation and generation throw runtime-specific exception types that the optional
-    // polish stage does not handle; surface them as InvalidOperationException so the stage skips
-    // polish and keeps the raw ASR transcript instead of failing the whole run.
+    // Native model creation and generation throw runtime-specific exception types, and loading the
+    // native libraries throws DllNotFoundException, EntryPointNotFoundException or BadImageFormatException
+    // (possibly inside a TypeInitializationException). The optional polish stage handles none of them;
+    // surface them as InvalidOperationException so the stage skips polish and keeps the raw ASR
+    // transcript instead of failing the whole run. FileNotFoundException is left alone: the stage
+    // already handles it.
     internal static bool IsNativeRuntimeFailure(Exception ex) =>
-        ex is OnnxRuntimeGenAIException or Microsoft.ML.OnnxRuntime.OnnxRuntimeException;
+        ex is OnnxRuntimeGenAIException
+            or Microsoft.ML.OnnxRuntime.OnnxRuntimeException
+            or DllNotFoundException
+            or EntryPointNotFoundException
+            or BadImageFormatException
+        || ex is TypeInitializationException { InnerException: { } inner } && IsNativeRuntimeFailure(inner);
 
     internal static InvalidOperationException WrapNativeFailure(Exception ex) =>
         new($"Qwen text refinement failed in ONNX Runtime: {ex.Message}", ex);
