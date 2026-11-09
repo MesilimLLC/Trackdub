@@ -203,7 +203,7 @@ internal static class GenAiNativeRuntimeSelection
     // managed ORT/GenAI bindings register their own resolver on first use (for example, when an earlier stage
     // already ran ORT in this process). That is acceptable only when the module they resolved is the file whose
     // hash was just verified; any other state, including an unreadable module list, still fails closed.
-    private static void RegisterResolver(Assembly assembly, DllImportResolver resolver, string moduleFileName, string verifiedPath)
+    internal static void RegisterResolver(Assembly assembly, DllImportResolver resolver, string moduleFileName, string verifiedPath)
     {
         try
         {
