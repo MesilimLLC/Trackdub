@@ -71,13 +71,29 @@ public sealed class QwenTextRefinementEngine(
         GenAiModelKey modelKey = await GenAiModelKey.CreateAsync(
             modelRootPath, plan.ExecutionProvider!.Value, plan.ModelId, plan.Variant, plan.DeviceIndex,
             plan.ModelRevisionHash, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<RefinedTextSegment> refinedSegments = await RefineWithLeaseAsync(
+            request,
+            modelKey.Provider,
+            token => GenAiModelPool.Shared.GetLeaseAsync(modelKey, token),
+            cancellationToken).ConfigureAwait(false);
+
+        LastExecutionSummary = CreateExecutionSummary(plan, "ONNX Runtime GenAI Qwen text refinement.");
+        return refinedSegments;
+    }
+
+    // The lease factory is a seam so the native-failure handling can be tested without a native model.
+    internal static async Task<IReadOnlyList<RefinedTextSegment>> RefineWithLeaseAsync(
+        TextRefinementRequest request,
+        ExecutionProviderKind provider,
+        Func<CancellationToken, Task<GenAiModelLease>> acquireLease,
+        CancellationToken cancellationToken)
+    {
         var refinedSegments = new List<RefinedTextSegment>(request.Segments.Count);
         try
         {
-            using GenAiModelLease modelLease = await GenAiModelPool.Shared
-                .GetLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
+            using GenAiModelLease modelLease = await acquireLease(cancellationToken).ConfigureAwait(false);
             using IDisposable? executionAdmission = await CpuExecutionAdmission.Shared
-                .AcquireAsync(modelKey.Provider, cancellationToken).ConfigureAwait(false);
+                .AcquireAsync(provider, cancellationToken).ConfigureAwait(false);
             Model model = modelLease.Model;
             Tokenizer tokenizer = modelLease.Tokenizer;
 
@@ -92,7 +108,6 @@ public sealed class QwenTextRefinementEngine(
             throw WrapNativeFailure(ex);
         }
 
-        LastExecutionSummary = CreateExecutionSummary(plan, "ONNX Runtime GenAI Qwen text refinement.");
         return refinedSegments;
     }
 
