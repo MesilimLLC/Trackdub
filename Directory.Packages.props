@@ -10,12 +10,12 @@
     <WindowsMlOnnxRuntimeVersion>1.27.1</WindowsMlOnnxRuntimeVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.8" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.11" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0-rc.3.26522.148" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
-    <PackageVersion Include="Avalonia" Version="12.1.4" />
+    <PackageVersion Include="Avalonia" Version="12.1.5" />
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.4" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.5" />
     <PackageVersion Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
     <PackageVersion Include="ReactiveUI.Avalonia" Version="14.7.1" />
     <PackageVersion Include="Dapper" Version="2.1.89" />
@@ -48,8 +48,8 @@
       Upgrade path: bump to stable 3.x once it appears on nuget.org; remove the dotnet-libraries
       feed entry from NuGet.Config at that point.
     -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.18.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.18.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.19.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.19.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.18.0" />
     <!-- GenAI built against the Windows ML runtime (one onnxruntime.dll shared with DirectML and the
          catalog EPs). Windows TFM only; the portable TFM keeps the CPU/CUDA GenAI packages. -->
@@ -114,7 +114,7 @@
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.13.0" />
     <PackageVersion Include="Stripe.net" Version="47.2.0" />
     <PackageVersion Include="AWSSDK.CloudWatch" Version="4.0.102.2" />
-    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.109.3" />
+    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.110.2" />
     <PackageVersion Include="AWSSDK.ECS" Version="4.0.6.1" />
     <PackageVersion Include="AWSSDK.SimpleNotificationService" Version="4.0.100.5" />
     <PackageVersion Include="AWSSDK.SQS" Version="4.0.2.33" />
