@@ -19,6 +19,9 @@ public sealed class QwenTextRefinementNativeFailureTests
         new EntryPointNotFoundException("OgaCreateModel"),
         new BadImageFormatException("wrong architecture"),
         new TypeInitializationException("Microsoft.ML.OnnxRuntimeGenAI.NativeMethods", new DllNotFoundException("onnxruntime-genai.dll")),
+        new TypeInitializationException(
+            "Outer",
+            new TypeInitializationException("Microsoft.ML.OnnxRuntimeGenAI.NativeMethods", new DllNotFoundException("onnxruntime-genai.dll"))),
     };
 
     public static TheoryData<Exception> NonNativeFailures => new()
