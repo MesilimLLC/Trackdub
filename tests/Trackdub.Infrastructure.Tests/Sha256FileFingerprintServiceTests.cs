@@ -338,7 +338,10 @@ public sealed class Sha256FileFingerprintServiceTests : IDisposable
         File.SetLastWriteTimeUtc(path, writeTime);
 
         service.Invalidate(path);
-        FileFingerprint result = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        // A fresh instance must not reload the invalidated entry from disk either.
+        var reloaded = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+        FileFingerprint result = await reloaded.ComputeAsync(path, TestContext.Current.CancellationToken);
 
         Assert.NotEqual(before.Sha256, result.Sha256);
     }
