@@ -162,6 +162,7 @@ internal sealed class MaxineLipSyncHostSession : IDisposable
         catch (Exception ex) when (cancellationToken.IsCancellationRequested)
         {
             // Cancelling kills the host, which surfaces as broken pipes; report the cancellation.
+            process.Kill();
             throw ex as OperationCanceledException ?? new OperationCanceledException(cancellationToken);
         }
         catch (MaxineLipSyncHostProtocolException)
