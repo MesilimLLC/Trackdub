@@ -22,10 +22,10 @@ public static class SessionPoolContentHashProvider
     /// clears the provider when <paramref name="fingerprintService"/> is <see langword="null"/>.
     /// </summary>
     public static void Configure(IFileFingerprintService? fingerprintService) =>
-        Current = fingerprintService is null ? null : (path, cancellationToken) => HashCoreAsync(fingerprintService, path, cancellationToken);
+        Volatile.Write(ref _current, fingerprintService is null ? null : (path, cancellationToken) => HashCoreAsync(fingerprintService, path, cancellationToken));
 
     /// <summary>Removes the process-wide provider.</summary>
-    public static void Reset() => Current = null;
+    public static void Reset() => Volatile.Write(ref _current, null);
 
     private static async Task<string?> HashCoreAsync(
         IFileFingerprintService fingerprintService,
