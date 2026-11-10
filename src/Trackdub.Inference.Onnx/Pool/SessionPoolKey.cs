@@ -311,6 +311,7 @@ internal sealed record SessionPoolKey
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
+            long generation = ModelContentHashGenerations.GetOrAdd(cacheKey, 0);
             FileInfo info;
             long length;
             long writeTicks;
@@ -335,7 +336,7 @@ internal sealed record SessionPoolKey
             }
 
             (ContentHashLookup lookup, string? resolved) = attempt == 0
-                ? TryResolveContentHash(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks)) : default;
+                ? TryResolveContentHash(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks, generation)) : default;
             if (lookup != ContentHashLookup.NotFound)
             {
                 return resolved;
@@ -371,8 +372,16 @@ internal sealed record SessionPoolKey
 
             if (unchanged)
             {
-                ModelContentHashCache[cacheKey] = (length, writeTicks, hash);
-                return hash;
+                if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == generation)
+                {
+                    ModelContentHashCache[cacheKey] = (length, writeTicks, hash);
+                    if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == generation)
+                    {
+                        return hash;
+                    }
+
+                    ModelContentHashCache.TryRemove(cacheKey, out _);
+                }
             }
         }
 
@@ -410,9 +419,8 @@ internal sealed record SessionPoolKey
     /// <summary>
     /// The model file metadata a content digest is resolved against: the file handle used to
     /// revalidate the file, the length and write time observed before hashing, and the cache
-    /// generation the digest must belong to. The synchronous path does not track generations
-    /// — invalidation removes the cached entry outright, so it can never reuse one — and
-    /// therefore leaves <see cref="Generation"/> at its default.
+    /// generation the digest must belong to. Both the synchronous and asynchronous paths track
+    /// generations, so an invalidation racing the lookup can never resurrect a stale digest.
     /// </summary>
     private readonly struct ModelFileSnapshot(FileInfo info, long length, long writeTicks, long generation = 0)
     {
@@ -434,7 +442,8 @@ internal sealed record SessionPoolKey
         string cacheKey,
         ModelFileSnapshot snapshot)
     {
-        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash))
+        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash) &&
+            ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == snapshot.Generation)
         {
             return (ContentHashLookup.Found, cachedHash);
         }
@@ -463,6 +472,11 @@ internal sealed record SessionPoolKey
         if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
         {
             return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
+        }
+
+        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) != snapshot.Generation)
+        {
+            return (ContentHashLookup.NotFound, null);
         }
 
         ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);

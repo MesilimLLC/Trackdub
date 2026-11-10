@@ -75,6 +75,66 @@ public sealed class FfmpegMediaProbeTests
         }
     }
 
+    [Fact]
+    public async Task ProbeAsync_invalidates_resolved_tool_paths_when_launch_fails()
+    {
+        string root = Directory.CreateTempSubdirectory("trackdub-probe-launch-").FullName;
+        string source = Path.Join(root, "source.mp4");
+        File.WriteAllBytes(source, [1, 2, 3]);
+        var resolver = new RecordingToolResolver("/fake/ffprobe");
+        var runner = new FailingThenSucceedingRunner(ValidPayload);
+        var probe = new FfmpegMediaProbe(runner, resolver);
+        try
+        {
+            await Assert.ThrowsAsync<System.ComponentModel.Win32Exception>(
+                () => probe.ProbeAsync(source, TestContext.Current.CancellationToken));
+            Assert.Equal(1, resolver.InvalidateCalls);
+
+            MediaProbeSnapshot snapshot = await probe.ProbeAsync(source, TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, runner.Calls);
+            Assert.Equal("mov,mp4,m4a,3gp,3g2,mj2", snapshot.FormatName);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ProbeAsync_does_not_share_snapshots_for_case_distinct_paths()
+    {
+        string root = Directory.CreateTempSubdirectory("trackdub-probe-case-").FullName;
+        string upper = Path.Join(root, "Clip.mp4");
+        string lower = Path.Join(root, "clip.mp4");
+        File.WriteAllBytes(upper, [1, 2, 3]);
+        if (File.Exists(lower))
+        {
+            // Case-insensitive filesystem: both names identify the same file.
+            Directory.Delete(root, recursive: true);
+            return;
+        }
+
+        File.WriteAllBytes(lower, [1, 2, 3]);
+        DateTime timestamp = DateTime.UtcNow.AddMinutes(-1);
+        File.SetLastWriteTimeUtc(upper, timestamp);
+        File.SetLastWriteTimeUtc(lower, timestamp);
+        var resolver = new RecordingToolResolver("/fake/ffprobe");
+        var runner = new RecordingProbeRunner(ValidPayload);
+        var probe = new FfmpegMediaProbe(runner, resolver);
+        try
+        {
+            await probe.ProbeAsync(upper, TestContext.Current.CancellationToken);
+            await probe.ProbeAsync(lower, TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, runner.Calls);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string ToolName(string baseName) =>
         OperatingSystem.IsWindows() ? $"{baseName}.exe" : baseName;
 
@@ -94,5 +154,36 @@ public sealed class FfmpegMediaProbeTests
             Calls++;
             return Task.FromResult(new ProcessResult(0, output, string.Empty));
         }
+    }
+
+    private sealed class FailingThenSucceedingRunner(string output) : IProcessRunner
+    {
+        public int Calls { get; private set; }
+
+        public Task<ProcessResult> RunAsync(
+            string executablePath,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken,
+            ProcessRunOptions? options = null)
+        {
+            Calls++;
+            if (Calls == 1)
+            {
+                throw new System.ComponentModel.Win32Exception("ffprobe could not be launched.");
+            }
+
+            return Task.FromResult(new ProcessResult(0, output, string.Empty));
+        }
+    }
+
+    private sealed class RecordingToolResolver(string ffprobePath) : IFfmpegToolResolver
+    {
+        public int InvalidateCalls { get; private set; }
+
+        public string ResolveFfmpegPath(bool allowAutoDownload = true) => "ffmpeg";
+
+        public string ResolveFfprobePath(bool allowAutoDownload = true) => ffprobePath;
+
+        public void InvalidateResolvedPaths() => InvalidateCalls++;
     }
 }

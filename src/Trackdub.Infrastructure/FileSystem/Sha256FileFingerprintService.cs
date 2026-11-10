@@ -97,7 +97,9 @@ public sealed class Sha256FileFingerprintService : IFileFingerprintService
             return;
         }
 
-        foreach (PersistedFileFingerprintCache.Entry entry in cache.Load())
+        // CacheFingerprint saves most-recently-used first, so walk the persisted list in reverse
+        // to keep access sequences ascending: the LRU entry must be evicted first after a restart.
+        foreach (PersistedFileFingerprintCache.Entry entry in cache.Load().Reverse())
         {
             fingerprintCache[entry.Path] = new FingerprintCacheEntry(
                 entry.Path,

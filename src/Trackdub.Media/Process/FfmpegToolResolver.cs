@@ -30,39 +30,38 @@ internal sealed class FfmpegToolResolver(
 
     public string ResolveFfmpegPath(bool allowAutoDownload = true)
     {
-        if (resolvedFfmpegPath is not null)
+        if (Volatile.Read(ref resolvedFfmpegPath) is { } cached)
         {
-            return resolvedFfmpegPath;
+            return cached;
         }
 
-        return resolvedFfmpegPath = ResolveExecutable(
+        string resolved = ResolveExecutable(
             explicitFfmpegPath,
             "TRACKDUB_FFMPEG_PATH",
             GetPlatformExecutableNames("ffmpeg"),
             allowAutoDownload,
             autoDownloader);
+        Volatile.Write(ref resolvedFfmpegPath, resolved);
+        return resolved;
     }
 
-    private string CacheFfprobePath(string path) => resolvedFfprobePath = path;
+    private string CacheFfprobePath(string path)
+    {
+        Volatile.Write(ref resolvedFfprobePath, path);
+        return path;
+    }
 
     public void InvalidateResolvedPaths()
     {
-        resolvedFfmpegPath = null;
-        resolvedFfprobePath = null;
+        Volatile.Write(ref resolvedFfmpegPath, null);
+        Volatile.Write(ref resolvedFfprobePath, null);
     }
-
-    // Compensates for the single-string CacheFfprobePath helper so the module's primitive-type
-    // ratio does not degrade and trigger the CodeScene delta gate. The method is otherwise unused.
-    private static void CompensatePrimitiveObsession(
-        IProcessRunner runner,
-        IFfmpegToolResolver resolver,
-        IFfmpegAutoDownloader downloader) => GC.KeepAlive(runner);
 
     public string ResolveFfprobePath(bool allowAutoDownload = true)
     {
-        if (resolvedFfprobePath is not null)
+        if (Volatile.Read(ref resolvedFfprobePath) is { } cached)
         {
-            return resolvedFfprobePath;
+            return cached;
         }
 
         string ffmpegPath = ResolveFfmpegPath(allowAutoDownload);

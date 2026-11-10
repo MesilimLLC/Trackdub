@@ -20,12 +20,13 @@ public sealed class FfmpegMediaProbe : IMediaProbe
 
     private const int MaxCachedSnapshots = 128;
     private static readonly object SnapshotCacheLock = new();
-    private static readonly Dictionary<string, CachedSnapshot> SnapshotCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, CachedSnapshot> SnapshotCache = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private sealed record CachedSnapshot(long Length, long WriteTicks, MediaProbeSnapshot Snapshot, long AccessSequence);
     private static long snapshotAccessSequence;
 
     private readonly IProcessRunner processRunner;
-    private readonly FfmpegToolResolver toolResolver;
+    private readonly IFfmpegToolResolver toolResolver;
 
     public FfmpegMediaProbe(string? ffmpegPath = null, string? ffprobePath = null)
         : this(new ProcessRunner(), ffmpegPath, ffprobePath)
@@ -33,9 +34,14 @@ public sealed class FfmpegMediaProbe : IMediaProbe
     }
 
     internal FfmpegMediaProbe(IProcessRunner processRunner, string? ffmpegPath = null, string? ffprobePath = null)
+        : this(processRunner, new FfmpegToolResolver(ffmpegPath, ffprobePath))
+    {
+    }
+
+    internal FfmpegMediaProbe(IProcessRunner processRunner, IFfmpegToolResolver toolResolver)
     {
         this.processRunner = processRunner;
-        toolResolver = new FfmpegToolResolver(ffmpegPath, ffprobePath);
+        this.toolResolver = toolResolver;
     }
 
     public async Task<MediaProbeSnapshot> ProbeAsync(string sourcePath, CancellationToken cancellationToken)
@@ -49,20 +55,25 @@ public sealed class FfmpegMediaProbe : IMediaProbe
         var sourceInfo = new FileInfo(fullSourcePath);
         long length = sourceInfo.Length;
         long writeTicks = sourceInfo.LastWriteTimeUtc.Ticks;
+        string ffprobePath = toolResolver.ResolveFfprobePath();
+        // Key on the resolved binary as well as the file: two probe instances can be pointed at
+        // different ffprobe builds that report different metadata for the same file.
+        string cacheKey = ffprobePath + '\0' + fullSourcePath;
         lock (SnapshotCacheLock)
         {
-            if (SnapshotCache.TryGetValue(fullSourcePath, out CachedSnapshot? cached) &&
-                cached.Length == length)
+            if (SnapshotCache.TryGetValue(cacheKey, out CachedSnapshot? cached))
             {
-                if (cached.WriteTicks == writeTicks)
+                if (cached.Length == length && cached.WriteTicks == writeTicks)
                 {
-                    SnapshotCache[fullSourcePath] = cached with { AccessSequence = ++snapshotAccessSequence };
+                    SnapshotCache[cacheKey] = cached with { AccessSequence = ++snapshotAccessSequence };
                     return cached.Snapshot;
                 }
+
+                // The file changed; drop the stale snapshot instead of leaving it to LRU pressure.
+                SnapshotCache.Remove(cacheKey);
             }
         }
 
-        string ffprobePath = toolResolver.ResolveFfprobePath();
         ProcessResult result;
         try
         {
@@ -92,15 +103,33 @@ public sealed class FfmpegMediaProbe : IMediaProbe
 
         FfprobePayload payload = ParsePayload(result);
         var snapshot = CreateSnapshot(payload);
-        lock (SnapshotCacheLock)
+        bool unchanged;
+        try
         {
-            if (SnapshotCache.Count >= MaxCachedSnapshots && !SnapshotCache.ContainsKey(fullSourcePath))
-            {
-                string oldest = SnapshotCache.OrderBy(static pair => pair.Value.AccessSequence).First().Key;
-                SnapshotCache.Remove(oldest);
-            }
+            // Only cache the snapshot under metadata that still describes the probed bytes; if the
+            // file changed while ffprobe ran, the key would no longer match its contents.
+            var updatedInfo = new FileInfo(fullSourcePath);
+            unchanged = updatedInfo.Exists &&
+                updatedInfo.Length == length &&
+                updatedInfo.LastWriteTimeUtc.Ticks == writeTicks;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unchanged = false;
+        }
 
-            SnapshotCache[fullSourcePath] = new CachedSnapshot(length, writeTicks, snapshot, ++snapshotAccessSequence);
+        if (unchanged)
+        {
+            lock (SnapshotCacheLock)
+            {
+                if (SnapshotCache.Count >= MaxCachedSnapshots && !SnapshotCache.ContainsKey(cacheKey))
+                {
+                    string oldest = SnapshotCache.OrderBy(static pair => pair.Value.AccessSequence).First().Key;
+                    SnapshotCache.Remove(oldest);
+                }
+
+                SnapshotCache[cacheKey] = new CachedSnapshot(length, writeTicks, snapshot, ++snapshotAccessSequence);
+            }
         }
 
         return snapshot;
