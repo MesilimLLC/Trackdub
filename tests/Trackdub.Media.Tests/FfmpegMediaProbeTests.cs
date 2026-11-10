@@ -26,53 +26,27 @@ public sealed class FfmpegMediaProbeTests
     [Fact]
     public async Task ProbeAsync_reuses_snapshot_for_unchanged_file()
     {
-        string root = Directory.CreateTempSubdirectory("trackdub-probe-cache-").FullName;
-        string source = Path.Join(root, "source.mp4");
-        string ffmpeg = Path.Join(root, ToolName("ffmpeg"));
-        string ffprobe = Path.Join(root, ToolName("ffprobe"));
-        File.WriteAllBytes(source, [1, 2, 3]);
-        File.WriteAllBytes(ffmpeg, [0]);
-        File.WriteAllBytes(ffprobe, [0]);
-        var runner = new RecordingProbeRunner(ValidPayload);
-        var probe = new FfmpegMediaProbe(runner, ffmpeg, ffprobe);
-        try
+        await WithProbeAsync("trackdub-probe-cache-", async (probe, source, runner) =>
         {
             MediaProbeSnapshot first = await probe.ProbeAsync(source, TestContext.Current.CancellationToken);
             MediaProbeSnapshot second = await probe.ProbeAsync(source, TestContext.Current.CancellationToken);
 
             Assert.Equal(first, second);
             Assert.Equal(1, runner.Calls);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        });
     }
 
     [Fact]
     public async Task ProbeAsync_reprobes_when_source_stat_changes()
     {
-        string root = Directory.CreateTempSubdirectory("trackdub-probe-miss-").FullName;
-        string source = Path.Join(root, "source.mp4");
-        string ffmpeg = Path.Join(root, ToolName("ffmpeg"));
-        string ffprobe = Path.Join(root, ToolName("ffprobe"));
-        File.WriteAllBytes(source, [1]);
-        File.WriteAllBytes(ffmpeg, [0]);
-        File.WriteAllBytes(ffprobe, [0]);
-        var runner = new RecordingProbeRunner(ValidPayload);
-        var probe = new FfmpegMediaProbe(runner, ffmpeg, ffprobe);
-        try
+        await WithProbeAsync("trackdub-probe-miss-", async (probe, source, runner) =>
         {
             await probe.ProbeAsync(source, TestContext.Current.CancellationToken);
             File.AppendAllText(source, "changed");
             await probe.ProbeAsync(source, TestContext.Current.CancellationToken);
 
             Assert.Equal(2, runner.Calls);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        });
     }
 
     [Fact]
@@ -128,6 +102,29 @@ public sealed class FfmpegMediaProbeTests
             await probe.ProbeAsync(lower, TestContext.Current.CancellationToken);
 
             Assert.Equal(2, runner.Calls);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task WithProbeAsync(
+        string prefix,
+        Func<FfmpegMediaProbe, string, RecordingProbeRunner, Task> test)
+    {
+        string root = Directory.CreateTempSubdirectory(prefix).FullName;
+        string source = Path.Join(root, "source.mp4");
+        string ffmpeg = Path.Join(root, ToolName("ffmpeg"));
+        string ffprobe = Path.Join(root, ToolName("ffprobe"));
+        File.WriteAllBytes(source, [1, 2, 3]);
+        File.WriteAllBytes(ffmpeg, [0]);
+        File.WriteAllBytes(ffprobe, [0]);
+        var runner = new RecordingProbeRunner(ValidPayload);
+        var probe = new FfmpegMediaProbe(runner, ffmpeg, ffprobe);
+        try
+        {
+            await test(probe, source, runner);
         }
         finally
         {

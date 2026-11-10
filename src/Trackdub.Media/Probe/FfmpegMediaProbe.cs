@@ -25,6 +25,37 @@ public sealed class FfmpegMediaProbe : IMediaProbe
     private sealed record CachedSnapshot(long Length, long WriteTicks, MediaProbeSnapshot Snapshot, long AccessSequence);
     private static long snapshotAccessSequence;
 
+    private readonly record struct ProbeCacheKey(string Value);
+
+    private readonly record struct FfprobeCommand(string FfprobePath, string SourcePath);
+
+    private readonly record struct SourceFingerprint(long Length, long WriteTicks)
+    {
+        public static SourceFingerprint From(FileInfo info) =>
+            new(info.Length, info.LastWriteTimeUtc.Ticks);
+
+        public static bool TryRefresh(FileInfo info, out SourceFingerprint fingerprint)
+        {
+            try
+            {
+                info.Refresh();
+                if (!info.Exists)
+                {
+                    fingerprint = default;
+                    return false;
+                }
+
+                fingerprint = From(info);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                fingerprint = default;
+                return false;
+            }
+        }
+    }
+
     private readonly IProcessRunner processRunner;
     private readonly IFfmpegToolResolver toolResolver;
 
@@ -53,38 +84,124 @@ public sealed class FfmpegMediaProbe : IMediaProbe
         }
 
         var sourceInfo = new FileInfo(fullSourcePath);
-        long length = sourceInfo.Length;
-        long writeTicks = sourceInfo.LastWriteTimeUtc.Ticks;
+        SourceFingerprint fingerprint = SourceFingerprint.From(sourceInfo);
         string ffprobePath = toolResolver.ResolveFfprobePath();
         // Key on the resolved binary as well as the file: two probe instances can be pointed at
         // different ffprobe builds that report different metadata for the same file.
-        string cacheKey = ffprobePath + '\0' + fullSourcePath;
-        lock (SnapshotCacheLock)
-        {
-            if (SnapshotCache.TryGetValue(cacheKey, out CachedSnapshot? cached))
-            {
-                if (cached.Length == length && cached.WriteTicks == writeTicks)
-                {
-                    SnapshotCache[cacheKey] = cached with { AccessSequence = ++snapshotAccessSequence };
-                    return cached.Snapshot;
-                }
+        var cacheKey = new ProbeCacheKey(ffprobePath + '\0' + fullSourcePath);
 
-                // The file changed; drop the stale snapshot instead of leaving it to LRU pressure.
-                SnapshotCache.Remove(cacheKey);
-            }
+        if (TryGetCachedSnapshot(cacheKey, fingerprint, out MediaProbeSnapshot? cachedSnapshot))
+        {
+            return cachedSnapshot;
         }
 
-        ProcessResult result;
+        var command = new FfprobeCommand(ffprobePath, fullSourcePath);
+        ProcessResult result = await RunFfprobeAsync(command, cancellationToken).ConfigureAwait(false);
+        FfprobePayload payload = ParsePayload(result);
+        var snapshot = CreateSnapshot(payload);
+
+        // Only cache the snapshot under metadata that still describes the probed bytes; if the
+        // file changed while ffprobe ran, the key would no longer match its contents.
+        if (!SourceFingerprint.TryRefresh(sourceInfo, out SourceFingerprint updated))
+        {
+            return snapshot;
+        }
+
+        if (updated == fingerprint)
+        {
+            StoreSnapshot(cacheKey, fingerprint, snapshot);
+        }
+
+        return snapshot;
+    }
+
+    private static bool TryGetCachedSnapshot(
+        ProbeCacheKey cacheKey,
+        SourceFingerprint fingerprint,
+        out MediaProbeSnapshot? snapshot)
+    {
+        lock (SnapshotCacheLock)
+        {
+            return TryGetCachedSnapshotCore(cacheKey, fingerprint, out snapshot);
+        }
+    }
+
+    private static bool TryGetCachedSnapshotCore(
+        ProbeCacheKey cacheKey,
+        SourceFingerprint fingerprint,
+        out MediaProbeSnapshot? snapshot)
+    {
+        if (!SnapshotCache.TryGetValue(cacheKey.Value, out CachedSnapshot? cached))
+        {
+            snapshot = null;
+            return false;
+        }
+
+        if (cached.Length != fingerprint.Length)
+        {
+            SnapshotCache.Remove(cacheKey.Value);
+            snapshot = null;
+            return false;
+        }
+
+        if (cached.WriteTicks != fingerprint.WriteTicks)
+        {
+            SnapshotCache.Remove(cacheKey.Value);
+            snapshot = null;
+            return false;
+        }
+
+        SnapshotCache[cacheKey.Value] = cached with { AccessSequence = ++snapshotAccessSequence };
+        snapshot = cached.Snapshot;
+        return true;
+    }
+
+    private static void StoreSnapshot(
+        ProbeCacheKey cacheKey,
+        SourceFingerprint fingerprint,
+        MediaProbeSnapshot snapshot)
+    {
+        lock (SnapshotCacheLock)
+        {
+            EvictIfNeeded(cacheKey);
+            SnapshotCache[cacheKey.Value] = new CachedSnapshot(
+                fingerprint.Length,
+                fingerprint.WriteTicks,
+                snapshot,
+                ++snapshotAccessSequence);
+        }
+    }
+
+    private static void EvictIfNeeded(ProbeCacheKey cacheKey)
+    {
+        if (SnapshotCache.Count < MaxCachedSnapshots)
+        {
+            return;
+        }
+
+        if (SnapshotCache.ContainsKey(cacheKey.Value))
+        {
+            return;
+        }
+
+        string oldest = SnapshotCache.OrderBy(static pair => pair.Value.AccessSequence).First().Key;
+        SnapshotCache.Remove(oldest);
+    }
+
+    private async Task<ProcessResult> RunFfprobeAsync(
+        FfprobeCommand command,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            result = await processRunner.RunAsync(
-                ffprobePath,
+            ProcessResult result = await processRunner.RunAsync(
+                command.FfprobePath,
                 [
                     "-v", "quiet",
                     "-print_format", "json",
                     "-show_format",
                     "-show_streams",
-                    fullSourcePath
+                    command.SourcePath
                 ],
                 cancellationToken,
                 ProbeProcessOptions).ConfigureAwait(false);
@@ -94,45 +211,14 @@ public sealed class FfmpegMediaProbe : IMediaProbe
                 throw new InvalidOperationException(
                     $"ffprobe failed with exit code {result.ExitCode}: {result.StandardError}".Trim());
             }
+
+            return result;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException or DirectoryNotFoundException)
         {
             toolResolver.InvalidateResolvedPaths();
             throw;
         }
-
-        FfprobePayload payload = ParsePayload(result);
-        var snapshot = CreateSnapshot(payload);
-        bool unchanged;
-        try
-        {
-            // Only cache the snapshot under metadata that still describes the probed bytes; if the
-            // file changed while ffprobe ran, the key would no longer match its contents.
-            var updatedInfo = new FileInfo(fullSourcePath);
-            unchanged = updatedInfo.Exists &&
-                updatedInfo.Length == length &&
-                updatedInfo.LastWriteTimeUtc.Ticks == writeTicks;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            unchanged = false;
-        }
-
-        if (unchanged)
-        {
-            lock (SnapshotCacheLock)
-            {
-                if (SnapshotCache.Count >= MaxCachedSnapshots && !SnapshotCache.ContainsKey(cacheKey))
-                {
-                    string oldest = SnapshotCache.OrderBy(static pair => pair.Value.AccessSequence).First().Key;
-                    SnapshotCache.Remove(oldest);
-                }
-
-                SnapshotCache[cacheKey] = new CachedSnapshot(length, writeTicks, snapshot, ++snapshotAccessSequence);
-            }
-        }
-
-        return snapshot;
     }
 
     private static FfprobePayload ParsePayload(ProcessResult result)
@@ -157,8 +243,8 @@ public sealed class FfmpegMediaProbe : IMediaProbe
                 stream.Index,
                 stream.CodecName ?? "unknown",
                 stream.Channels ?? 0,
-                ParseInt(stream.SampleRate),
-                ParseDouble(stream.Duration)))
+                ParseOrDefault(stream.SampleRate, 0),
+                ParseOrDefault(stream.Duration, 0d)))
             .ToArray();
 
         IReadOnlyList<MediaVideoStream> videoStreams = payload.Streams
@@ -169,7 +255,7 @@ public sealed class FfmpegMediaProbe : IMediaProbe
                 stream.Width ?? 0,
                 stream.Height ?? 0,
                 ParseFrameRate(stream.AverageFrameRate),
-                ParseDouble(stream.Duration),
+                ParseOrDefault(stream.Duration, 0d),
                 stream.PixelFormat,
                 stream.ColorSpace,
                 stream.ColorTransfer,
@@ -187,18 +273,16 @@ public sealed class FfmpegMediaProbe : IMediaProbe
         return new MediaProbeSnapshot(
             payload.Format!.FormatName ?? "unknown",
             payload.Format.FormatLongName,
-            ParseDouble(payload.Format.Duration),
+            ParseOrDefault(payload.Format.Duration, 0d),
             ParseNullableLong(payload.Format.BitRate),
             audioStreams,
             videoStreams,
             subtitleStreams);
     }
 
-    private static int ParseInt(string? value) =>
-        int.TryParse(value, out int parsed) ? parsed : 0;
-
-    private static double ParseDouble(string? value) =>
-        double.TryParse(value, out double parsed) ? parsed : 0d;
+    private static T ParseOrDefault<T>(string? value, T fallback)
+        where T : struct, IParsable<T> =>
+        T.TryParse(value, null, out T parsed) ? parsed : fallback;
 
     private static long? ParseNullableLong(string? value) =>
         long.TryParse(value, out long parsed) ? parsed : null;
@@ -210,18 +294,47 @@ public sealed class FfmpegMediaProbe : IMediaProbe
             return 0d;
         }
 
-        const double frameRateDenominatorMin = 1e-9;
         string[] parts = value.Split('/');
-        if (parts.Length == 2 &&
-            double.TryParse(parts[0], out double numerator) &&
-            double.TryParse(parts[1], out double denominator) &&
-            Math.Abs(denominator) > frameRateDenominatorMin)
+        if (TryParseFrameRateRatio(parts, out double frameRate))
         {
-            double result = numerator / denominator;
-            return double.IsFinite(result) ? result : 0d;
+            return frameRate;
         }
 
-        return ParseDouble(value);
+        return ParseOrDefault(value, 0d);
+    }
+
+    private static bool TryParseFrameRateRatio(string[] parts, out double frameRate)
+    {
+        frameRate = 0d;
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        if (!double.TryParse(parts[0], out double numerator))
+        {
+            return false;
+        }
+
+        if (!double.TryParse(parts[1], out double denominator))
+        {
+            return false;
+        }
+
+        const double frameRateDenominatorMin = 1e-9;
+        if (Math.Abs(denominator) <= frameRateDenominatorMin)
+        {
+            return false;
+        }
+
+        double result = numerator / denominator;
+        if (!double.IsFinite(result))
+        {
+            return false;
+        }
+
+        frameRate = result;
+        return true;
     }
 
     private sealed record FfprobePayload(
