@@ -15,7 +15,8 @@ public static class SessionPoolContentHashProvider
     /// service is configured. The delegate returns the model's SHA-256 hex digest, or
     /// <see langword="null"/> when the shared fingerprint is unavailable.
     /// </summary>
-    public static Func<string, CancellationToken, Task<string?>>? Current { get; private set; }
+    public static Func<string, CancellationToken, Task<string?>>? Current => Volatile.Read(ref _current);
+    private static Func<string, CancellationToken, Task<string?>>? _current;
 
     /// <summary>
     /// Installs <paramref name="fingerprintService"/> as the shared content-hash provider, or
