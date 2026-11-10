@@ -141,7 +141,9 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
             return null;
         }
 
-        if (entry is not { SizeBytes: >= 0, LastWriteTimeUtcTicks: >= 0 })
+        if (entry.SizeBytes < 0 ||
+            entry.LastWriteTimeUtcTicks < 0 ||
+            entry.LastWriteTimeUtcTicks > DateTime.MaxValue.Ticks)
         {
             return null;
         }
