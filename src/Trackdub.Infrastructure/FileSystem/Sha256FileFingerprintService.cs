@@ -97,7 +97,7 @@ public sealed class Sha256FileFingerprintService : IFileFingerprintService
             return;
         }
 
-        foreach (PersistedFileFingerprintCache.Entry entry in cache.Load())
+        foreach (PersistedFileFingerprintCache.Entry entry in cache.Load().Reverse())
         {
             fingerprintCache[entry.Path] = new FingerprintCacheEntry(
                 entry.Path,
