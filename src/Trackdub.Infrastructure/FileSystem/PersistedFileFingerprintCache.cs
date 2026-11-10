@@ -25,7 +25,7 @@ namespace Trackdub.Infrastructure.FileSystem;
 internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IApplicationLogger logger)
 {
     private const int SchemaVersion = 1;
-    private const int MaxEntries = 512;
+    internal const int MaxEntries = 512;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
     private readonly object sync = new();
     private readonly HashSet<string> invalidatedPaths = new(StringComparer.OrdinalIgnoreCase);
