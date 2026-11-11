@@ -434,7 +434,8 @@ internal sealed record SessionPoolKey
         string cacheKey,
         ModelFileSnapshot snapshot)
     {
-        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash))
+        if (TryGetCachedHash(cacheKey, snapshot.Length, snapshot.WriteTicks, out string? cachedHash) &&
+            ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == snapshot.Generation)
         {
             return (ContentHashLookup.Found, cachedHash);
         }
@@ -444,29 +445,7 @@ internal sealed record SessionPoolKey
             return (ContentHashLookup.NotFound, null);
         }
 
-        string? sharedHash;
-        try
-        {
-            sharedHash = sharedHasher(modelPath, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException)
-        {
-            System.Diagnostics.Trace.TraceWarning($"Shared model fingerprint failed for '{modelPath}': {ex.Message}");
-            return (ContentHashLookup.NotFound, null);
-        }
-
-        if (string.IsNullOrWhiteSpace(sharedHash))
-        {
-            return (ContentHashLookup.NotFound, null);
-        }
-
-        if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
-        {
-            return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
-        }
-
-        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);
-        return (ContentHashLookup.Found, sharedHash);
+        return TryResolveContentHashAsync(modelPath, cacheKey, snapshot, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     /// <summary>

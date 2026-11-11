@@ -235,7 +235,7 @@ public static partial class CompositionRoot
     private static void AddModelDownloadServices(IServiceCollection services)
     {
         services.TryAddSingleton<IModelHashVerifier>(sp =>
-            new ModelHashVerifier(sp.GetService<IFileFingerprintService>()));
+            new ModelHashVerifier(sp.GetRequiredService<IFileFingerprintService>()));
         // The warm queue is injected here so a successful install drives engine warming directly.
         // ModelDownloadOrchestrator is constructed on every download path, so this trigger runs
         // where installs actually happen rather than depending on some other type being resolved.

@@ -323,6 +323,20 @@ public sealed class Sha256FileFingerprintServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ComputeAsync_ignores_persisted_entry_with_out_of_range_write_time()
+    {
+        string path = CreateTempFile("valid content");
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        File.WriteAllText(cachePath, "{\"Version\":1,\"Entries\":[{\"Path\":\"" + path + "\",\"Sha256\":\"abc\",\"SizeBytes\":13,\"LastWriteTimeUtcTicks\":9223372036854775807}]}");
+        var service = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+
+        FileFingerprint result = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("valid content"))).ToLowerInvariant(), result.Sha256);
+    }
+
+    [Fact]
     public async Task Invalidate_forces_rehash_even_when_file_stat_is_unchanged()
     {
         string path = CreateTempFile("original");

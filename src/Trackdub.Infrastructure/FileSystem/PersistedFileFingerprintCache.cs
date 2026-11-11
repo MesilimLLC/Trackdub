@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Trackdub.Contracts;
 
@@ -28,7 +29,16 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
     private const int MaxEntries = 512;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
     private readonly object sync = new();
-    private readonly HashSet<string> invalidatedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> invalidatedPaths = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> invalidationGenerations = new(StringComparer.Ordinal);
+
+    public long CurrentInvalidationGeneration(string path)
+    {
+        lock (sync)
+        {
+            return invalidationGenerations.TryGetValue(path, out long generation) ? generation : 0;
+        }
+    }
 
     /// <summary>
     /// Reads the persisted entries, dropping any that are unusable and normalizing the
@@ -60,7 +70,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
     {
         lock (sync)
         {
-            return invalidatedPaths.Contains(path);
+            return invalidationGenerations.ContainsKey(path);
         }
     }
 
@@ -68,18 +78,29 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
     {
         lock (sync)
         {
+            invalidationGenerations.AddOrUpdate(path, 1, (_, current) => current + 1);
             invalidatedPaths.Add(path);
             Snapshot current = new(SchemaVersion, ReadEntriesUnlocked().Where(entry =>
-                !string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray());
+                !string.Equals(entry.Path, path, StringComparison.Ordinal)).ToArray());
             WriteSnapshotUnlocked(current, "fingerprint invalidation");
         }
     }
 
-    public void ClearInvalidation(string path)
+    public bool TryClearInvalidation(string path, long capturedGeneration)
     {
         lock (sync)
         {
+            long current = invalidationGenerations.TryGetValue(path, out long generation) ? generation : 0;
+            if (current != capturedGeneration)
+            {
+                // A newer invalidation happened since the caller captured the generation; the
+                // pending marker belongs to a newer hash operation, so do not publish or clear it.
+                return false;
+            }
+
+            invalidationGenerations.Remove(path);
             invalidatedPaths.Remove(path);
+            return true;
         }
     }
 
@@ -117,7 +138,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
             using (FileStream stream = new(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 JsonSerializer.Serialize(stream, snapshot, JsonOptions);
-                stream.Flush(flushToDisk: true);
+                stream.Flush();
             }
             File.Move(temporaryPath, cacheFilePath, overwrite: true);
         }
