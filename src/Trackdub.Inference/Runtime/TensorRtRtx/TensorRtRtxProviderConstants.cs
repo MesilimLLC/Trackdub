@@ -47,11 +47,25 @@ public static class TensorRtRtxProviderConstants
         OperatingSystem.IsLinux() ? BundledVersionLinux : BundledVersionWindows;
 
     /// <summary>
+    /// Ceiling, in bytes, on the kernel (tactic) shared memory TensorRT-RTX may use when it builds
+    /// engines on Windows. A TensorRT-RTX launch after a DirectML dispatch in the same process fails
+    /// with CUDA_ERROR_INVALID_VALUE unless the engine was built under this limit (NVIDIA TensorRT-RTX
+    /// 1.7 release notes, known issues). Trackdub mixes DirectML and TensorRT-RTX stages in one
+    /// process, so every Windows engine is built under it.
+    /// </summary>
+    public const long WindowsDirectMlInteropSharedMemoryLimitBytes = 99 * 1024;
+
+    /// <summary>
     /// Version identity for anything that must invalidate with the engine cache (smoke verdicts,
-    /// EP-context stamps): changes when either the EP ABI plugin or the TRT-RTX runtime changes.
+    /// EP-context stamps, the runtime cache directory): changes when the EP ABI plugin or the
+    /// TRT-RTX runtime changes, and on Windows when the engine-build shared-memory limit changes,
+    /// because engines and kernels built without the limit fail after a DirectML dispatch.
     /// </summary>
     public static string BundledFingerprintVersion =>
-        $"{BundledVersion}+{BundledCudaVariant}+trt-rtx-{BundledTrtRtxRuntimeVersion}";
+        $"{BundledVersion}+{BundledCudaVariant}+trt-rtx-{BundledTrtRtxRuntimeVersion}{EngineBuildPolicyTag}";
+
+    private static string EngineBuildPolicyTag =>
+        OperatingSystem.IsWindows() ? $"+smem{WindowsDirectMlInteropSharedMemoryLimitBytes / 1024}k" : string.Empty;
 
     public const string NativeOrtExecutionProviderName = "TensorrtExecutionProvider";
 

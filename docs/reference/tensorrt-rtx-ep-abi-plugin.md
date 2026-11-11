@@ -131,6 +131,61 @@ Provider bundle (installed by Model Manager or `Fetch-TrtRtxEp.ps1`):
 
 Manifest: `runtime/trt-rtx-ep.manifest.json` (pinned NVIDIA GitHub release URLs + checksums).
 
+### DirectML interop and the engine-build limit (Windows)
+
+TensorRT-RTX inference launched after a DirectML dispatch in the same process fails with
+`CUDA_ERROR_INVALID_VALUE` (`cuKernelSetAttribute returned error invalid argument`), which ONNX
+Runtime reports as `ShapeInferenceNotRegistered`. Trackdub mixes DirectML and TensorRT-RTX stages in one
+process, so every Windows engine is built with `nv_max_shared_mem_size = 101376` (99 KiB), NVIDIA's
+documented workaround (TensorRT-RTX 1.7 release notes, known issues).
+
+- NVIDIA scopes the issue to "CUDA driver R615 or earlier", but it reproduced on driver 621.14
+  (RTX 5070, EP ABI 0.5.0, TensorRT-RTX 1.7.1), so the limit is not gated on the driver version.
+- The limit is part of `BundledFingerprintVersion` on Windows (`...+smem99k`). Engines and runtime-cache
+  kernels built without it keep failing after the limit is added, so the fingerprint change moves the
+  runtime cache directory and invalidates smoke verdicts and EP-context stamps.
+- A smaller caller-supplied `nv_max_shared_mem_size` is kept. Zero, larger, or unparsable values are
+  clamped to the limit.
+- The effect on kernel performance has not been measured.
+
+### CUDA graphs (on by default)
+
+TensorRT-RTX sessions capture CUDA graphs by default (`OnnxExecutionSessionFactory.DefaultEnableCudaGraph`).
+The sources disagree on what that requires. The TensorRT-RTX runtime docs ("Working with RTX CUDA Graphs")
+say native capture recaptures when input sizes or buffer locations change and falls back to normal
+execution for graphs it cannot capture. The ONNX Runtime TensorRT-RTX EP docs say to avoid or be careful with
+`enable_cuda_graph` when input shapes or device bindings change frequently, and that data-dependent control
+flow is a poor fit. What has been checked here is output equality, not the mechanism: see the measurements below.
+
+- Opt a model out by putting `enable_cuda_graph = 0` in that call site's TRT options (a caller profile
+  wins over the default). The Qwen3-ASR encoder is opted out because its mel length changes almost every
+  chunk, so capture would record a graph per length. The CosyVoice speech tokenizer is opted out too: in the
+  per-graph benchmark it was 17% slower with capture (median 5.3 ms off, 6.2 ms on); the other CosyVoice graphs
+  that ran gained 37-94%. The Nemotron/Parakeet runtime options used to force
+  `0`; they now follow the default.
+- Variable-length inputs (Parakeet and Nemotron encoders) can still create many captured graphs on long
+  files, and captured graphs use device memory; that memory has not been measured. Parakeet was run on
+  6, 15 and 40 second clips with capture on and off, sharing one engine cache per lane so each length met
+  uncached shapes: transcripts were identical, and after the first run stage times differed by under a
+  second (33.1 vs 34.1 s, 39.3 vs 38.5 s). Cold first runs took 35-97 s in both lanes across repeated runs.
+- `TRACKDUB_TRT_RTX_CUDA_GRAPHS` overrides every call site and caller profile for diagnosis and A/B
+  runs: `on`, `1` or `true` force capture on; `off`, `0` or `false` force it off; any other value leaves the
+  call site's choice alone. Set it before the process starts; it is read each time options are built,
+  including for session-pool keys. `Trackdub.Benchmarks --cuda-graphs on|off|compare` refuses to run while it
+  is set, because it would give every lane the same capture mode.
+- Measured on an RTX 5070 with graphs forced on, on one short clip: identical stage output for Whisper (tiny,
+  base, small, medium), Parakeet, Sortformer and Spleeter. Nemotron and CosyVoice were not run.
+- Per-graph `Trackdub.Benchmarks --cuda-graphs compare` runs (device-bound I/O, source graphs, 50 runs) showed
+  57-87% lower median latency on most single-graph models. Those runs use persistent device-bound buffers, the
+  condition the benchmark section above names for graphs, so they are a ceiling. The gain with managed I/O,
+  which most stages use, was not measured.
+- EP-context artifacts are valid whichever capture mode loads them: `BuildCompileOptionsIdentity` leaves
+  `enable_cuda_graph` out, because capture is a runtime session setting rather than an engine-build option.
+  Compile and warmup sessions strip capture from the model's profile (`ForEngineBuild`), so they run with
+  capture off even for MADLAD, whose runtime profile turns it on.
+- A call site that decides per session (Whisper turns capture on only for its fixed-address bound path)
+  writes `enable_cuda_graph` explicitly with `WithCudaGraphs`, so its decision wins over the default.
+
 Compiled TRT RTX runtime cache:
 
 ```text

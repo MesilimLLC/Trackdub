@@ -352,7 +352,8 @@ public sealed class EpContextWarmupService : IEpContextWarmupService
 #endif
             using SessionOptions options = new();
             ExecutionProviderKind selectedProvider =
-                OnnxExecutionSessionFactory.AppendTensorRtRtxOrFallbackProvider(options, modelTrtOptions);
+                OnnxExecutionSessionFactory.AppendTensorRtRtxOrFallbackProvider(
+                    options, OnnxExecutionSessionFactory.ForEngineBuild(modelTrtOptions));
             options.LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING;
             InferenceSession session = new(modelPath, options);
             if (selectedProvider is ExecutionProviderKind.TensorRTRtx)

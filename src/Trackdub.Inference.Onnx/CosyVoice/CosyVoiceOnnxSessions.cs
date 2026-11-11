@@ -9,27 +9,28 @@ namespace Trackdub.Inference.Onnx.CosyVoice;
 /// </summary>
 internal sealed class CosyVoiceOnnxSessions : IDisposable
 {
+    private readonly OnnxExecutionSessionFactory.SingleSessionLease[] leases;
+
     internal CosyVoiceOnnxSessions(
-        OnnxExecutionSessionFactory.SingleSessionLease campplus,
-        OnnxExecutionSessionFactory.SingleSessionLease speechTokenizer,
-        OnnxExecutionSessionFactory.SingleSessionLease textEncoder,
-        OnnxExecutionSessionFactory.SingleSessionLease tokenGenerator,
-        OnnxExecutionSessionFactory.SingleSessionLease flowEncoder,
-        OnnxExecutionSessionFactory.SingleSessionLease flowEstimator,
-        OnnxExecutionSessionFactory.SingleSessionLease f0Predictor,
-        OnnxExecutionSessionFactory.SingleSessionLease source,
-        OnnxExecutionSessionFactory.SingleSessionLease vocoder,
+        OnnxExecutionSessionFactory.SingleSessionLease[] leases,
         string selectedProvider)
     {
-        Campplus = campplus;
-        SpeechTokenizer = speechTokenizer;
-        TextEncoder = textEncoder;
-        TokenGenerator = tokenGenerator;
-        FlowEncoder = flowEncoder;
-        FlowEstimator = flowEstimator;
-        F0Predictor = f0Predictor;
-        Source = source;
-        Vocoder = vocoder;
+        ArgumentNullException.ThrowIfNull(leases);
+        if (leases.Length != 9)
+        {
+            throw new ArgumentException("CosyVoice requires nine session leases.", nameof(leases));
+        }
+
+        this.leases = leases;
+        Campplus = leases[0];
+        SpeechTokenizer = leases[1];
+        TextEncoder = leases[2];
+        TokenGenerator = leases[3];
+        FlowEncoder = leases[4];
+        FlowEstimator = leases[5];
+        F0Predictor = leases[6];
+        Source = leases[7];
+        Vocoder = leases[8];
         SelectedProvider = selectedProvider;
     }
 
@@ -55,15 +56,10 @@ internal sealed class CosyVoiceOnnxSessions : IDisposable
 
     public void Dispose()
     {
-        Campplus.Dispose();
-        SpeechTokenizer.Dispose();
-        TextEncoder.Dispose();
-        TokenGenerator.Dispose();
-        FlowEncoder.Dispose();
-        FlowEstimator.Dispose();
-        F0Predictor.Dispose();
-        Source.Dispose();
-        Vocoder.Dispose();
+        foreach (OnnxExecutionSessionFactory.SingleSessionLease lease in leases)
+        {
+            lease.Dispose();
+        }
     }
 }
 
@@ -73,6 +69,11 @@ internal sealed class CosyVoiceOnnxSessions : IDisposable
 /// </summary>
 internal sealed class CosyVoiceSessionPins : IDisposable
 {
+    // Measured slower with capture on TensorRT-RTX (median 5.3 ms off vs 6.2 ms on, RTX 5070) and its mel
+    // length changes with every prompt clip, so it stays out of the CUDA graph default.
+    internal static readonly IReadOnlyDictionary<string, string> SpeechTokenizerTrtOptions =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["enable_cuda_graph"] = "0" };
+
     private readonly OnnxExecutionSessionFactory.PooledSingleSessionPin[] pins;
 
     private CosyVoiceSessionPins(OnnxExecutionSessionFactory.PooledSingleSessionPin[] pins)
@@ -86,21 +87,47 @@ internal sealed class CosyVoiceSessionPins : IDisposable
         CancellationToken cancellationToken,
         bool allowTrtInitFallback = true)
     {
-        async Task<OnnxExecutionSessionFactory.PooledSingleSessionPin> Pin(string path) =>
-            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, path).ConfigureAwait(false);
+        string[] paths =
+        [
+            modelFiles.CampPlusPath,
+            modelFiles.SpeechTokenizerPath,
+            modelFiles.TextEncoderPath,
+            modelFiles.TokenGeneratorPath,
+            modelFiles.FlowEncoderPath,
+            modelFiles.FlowDecoderEstimatorPath,
+            modelFiles.HiftF0PredictorPath,
+            modelFiles.HiftSourcePath,
+            modelFiles.HiftVocoderPath,
+        ];
+        IReadOnlyDictionary<string, string>?[] trtOptions =
+        [
+            null,
+            SpeechTokenizerTrtOptions,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        ];
 
-        var pins = new OnnxExecutionSessionFactory.PooledSingleSessionPin[9];
+        var pins = new OnnxExecutionSessionFactory.PooledSingleSessionPin[paths.Length];
         try
         {
-            pins[0] = await Pin(modelFiles.CampPlusPath).ConfigureAwait(false);
-            pins[1] = await Pin(modelFiles.SpeechTokenizerPath).ConfigureAwait(false);
-            pins[2] = await Pin(modelFiles.TextEncoderPath).ConfigureAwait(false);
-            pins[3] = await Pin(modelFiles.TokenGeneratorPath).ConfigureAwait(false);
-            pins[4] = await Pin(modelFiles.FlowEncoderPath).ConfigureAwait(false);
-            pins[5] = await Pin(modelFiles.FlowDecoderEstimatorPath).ConfigureAwait(false);
-            pins[6] = await Pin(modelFiles.HiftF0PredictorPath).ConfigureAwait(false);
-            pins[7] = await Pin(modelFiles.HiftSourcePath).ConfigureAwait(false);
-            pins[8] = await Pin(modelFiles.HiftVocoderPath).ConfigureAwait(false);
+            for (int i = 0; i < paths.Length; i++)
+            {
+                pins[i] = await OnnxExecutionSessionFactory.PinPooledSingleAsync(
+                    new OnnxExecutionSessionFactory.PooledSessionRequest
+                    {
+                        EngineFamily = "cosyvoice",
+                        Provider = provider,
+                        CancellationToken = cancellationToken,
+                        AllowTrtInitFallback = allowTrtInitFallback,
+                        AdditionalTrtOptions = trtOptions[i],
+                    },
+                    paths[i]).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -126,10 +153,7 @@ internal sealed class CosyVoiceSessionPins : IDisposable
                 leases[i] = await pins[i].AcquireAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            return new CosyVoiceOnnxSessions(
-                leases[0], leases[1], leases[2], leases[3], leases[4],
-                leases[5], leases[6], leases[7], leases[8],
-                leases[2].SelectedProvider);
+            return new CosyVoiceOnnxSessions(leases, leases[2].SelectedProvider);
         }
         catch
         {
