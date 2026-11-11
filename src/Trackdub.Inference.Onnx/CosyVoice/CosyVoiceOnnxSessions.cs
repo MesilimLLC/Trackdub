@@ -11,6 +11,9 @@ internal sealed class CosyVoiceOnnxSessions : IDisposable
 {
     private readonly OnnxExecutionSessionFactory.SingleSessionLease[] leases;
 
+    /// <summary>
+    /// Wires the nine execution leases from the acquire step, validating the array arity before use.
+    /// </summary>
     internal CosyVoiceOnnxSessions(
         OnnxExecutionSessionFactory.SingleSessionLease[] leases,
         string selectedProvider)

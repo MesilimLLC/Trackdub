@@ -37,8 +37,10 @@ internal static class TensorRtRtxDirectMlInterop
         }
     }
 
-    // A smaller caller limit is kept. Zero means "device maximum" and anything above the cap leaves
-    // the engine uncapped, so both (and unparsable values) are clamped to the workaround value.
+    /// <summary>
+    /// A smaller caller limit is kept. Zero means "device maximum" and anything above the cap leaves
+    /// the engine uncapped, so both (and unparsable values) are clamped to the workaround value.
+    /// </summary>
     private static bool KeepsCallerLimit(IDictionary<string, string> trtOptions)
     {
         if (!trtOptions.TryGetValue(MaxSharedMemSizeOptionKey, out string? requested))
