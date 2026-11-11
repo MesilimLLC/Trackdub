@@ -91,7 +91,7 @@ gh workflow run opencode.yml -f prompt="Summarize recent pipeline changes"
 - **Trigger:** issue comments and pull request review comments (`created`), or manual (`workflow_dispatch` with `prompt`)
 - **Runs:** `ubuntu-latest`
 - **Tasks:** calls the `tonythethompson/opencode-review-threads` reusable `opencode-bot.yml` with the comment or supplied prompt; replies as `opencode-agent[bot]`
-- **Gate (enforced inside the called reusable workflow; the caller also pre-filters commenter association):** non-bot commenters with `OWNER`/`MEMBER`/`COLLABORATOR`/`CONTRIBUTOR` association whose comment starts with or contains ` /oc` or ` /opencode`; `workflow_dispatch` requires `prompt`
+- **Gate (enforced inside the called reusable workflow; the caller also pre-filters commenter association):** non-bot commenters with `OWNER`/`MEMBER`/`COLLABORATOR` association (exact match) whose comment starts with or contains ` /oc` or ` /opencode`; `workflow_dispatch` requires `prompt`
 
 ### TRT RTX smoke (`trt-rtx-smoke.yml`)
 
