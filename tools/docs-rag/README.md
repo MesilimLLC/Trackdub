@@ -50,7 +50,7 @@ Remote pages are listed once, in `corpus.v1.json`. A vendor source is `["id", "u
 
 ### Provenance
 
-Each sync stages `first-party/_sync.json` with the commit of every indexed repo. The Worker stamps first-party hits with `repo`, `localPath`, `syncedCommit` (`syncedDirty` when the tree was modified) and `syncedAt`, and hides the manifest itself from results. Agents with the checkout should read `localPath` instead of the indexed copy.
+Each sync stages `first-party/_sync.json` with the commit of every indexed repo. The Worker stamps first-party hits with `repo`, `localPath` and `syncedAt`, and hides the manifest itself from results. It adds `syncedCommit` (and `syncedDirty` when the tree was modified) only when the hit's index timestamp is at or after its own R2 object's upload time, so the indexed bytes match that commit. Unchanged files keep their old upload time and keep their stamp. Hits that fail the check, or whose object is missing, get no commit stamp. Agents with the checkout should read `localPath` instead of the indexed copy.
 
 ### Eval
 
