@@ -243,9 +243,7 @@ public sealed class OnnxExecutionSessionFactoryTests
                     "trt-rtx",
                     Trackdub.Inference.Runtime.TensorRtRtx.TensorRtRtxProviderConstants.BundledFingerprintVersion),
                 options["nv_runtime_cache_path"]);
-            // Cuda-graph capture requires stable device buffer addresses across Run() calls; most
-            // call sites build fresh input tensors every call, so the flag must default to off.
-            // It has to be an explicit "0": the TensorRT RTX EP treats a missing key as true.
+            // An explicit false has to be written as "0": a missing key would leave the EP's own default.
             Assert.Equal("0", options["enable_cuda_graph"]);
         }
         finally
@@ -268,6 +266,32 @@ public sealed class OnnxExecutionSessionFactoryTests
 
         Assert.False(options.ContainsKey("device_id"));
         Assert.Equal("1024", options["nv_max_workspace_size"]);
+    }
+
+    [Fact]
+    public void Cuda_graph_capture_is_on_by_default_across_session_creation_paths()
+    {
+        Assert.True(OnnxExecutionSessionFactory.DefaultEnableCudaGraph);
+        Assert.Equal(
+            "1",
+            OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+                null, OnnxExecutionSessionFactory.DefaultEnableCudaGraph, cudaGraphOverride: null)["enable_cuda_graph"]);
+        Assert.Equal(
+            OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
+            new OnnxExecutionSessionFactory.SessionOptionsRequest(
+                ExecutionProviderKind.TensorRTRtx,
+                WindowsMlExecutionDevicePolicy.Explicit).EnableCudaGraph);
+    }
+
+    [Fact]
+    public void A_caller_profile_can_opt_a_model_out_of_the_default()
+    {
+        var optOut = new Dictionary<string, string>(StringComparer.Ordinal) { ["enable_cuda_graph"] = "0" };
+
+        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+            optOut, OnnxExecutionSessionFactory.DefaultEnableCudaGraph, cudaGraphOverride: null);
+
+        Assert.Equal("0", options["enable_cuda_graph"]);
     }
 
     [Fact]

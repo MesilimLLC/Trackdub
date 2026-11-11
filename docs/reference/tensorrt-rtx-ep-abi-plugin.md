@@ -148,14 +148,24 @@ documented workaround (TensorRT-RTX 1.7 release notes, known issues).
   clamped to the limit.
 - The effect on kernel performance has not been measured.
 
-### CUDA graph override
+### CUDA graphs (on by default)
 
-`enable_cuda_graph` is chosen per call site (Whisper's device-bound path, MADLAD and the Nemotron encoder
-turn it on; everything else leaves it off). `TRACKDUB_TRT_RTX_CUDA_GRAPHS=on|off` overrides every call
-site and caller profile for diagnosis and A/B runs; any other value leaves the call site's choice alone.
-Per-graph `Trackdub.Benchmarks --cuda-graphs compare` runs on RTX 5070 (device-bound I/O, source graphs)
-showed 57-87% lower median latency on most single-graph models, with identical stage outputs for Whisper
-(tiny, small, medium), Parakeet, Sortformer and Spleeter when forced on.
+TensorRT-RTX sessions capture CUDA graphs by default (`OnnxExecutionSessionFactory.DefaultEnableCudaGraph`).
+NVIDIA's native capture recaptures when input sizes or buffer locations change and falls back to normal
+execution for graphs it cannot capture, so a call site does not need stable device buffers to be correct
+(TensorRT-RTX "Working with RTX CUDA Graphs").
+
+- Opt a model out by putting `enable_cuda_graph = 0` in that call site's TRT options (a caller profile
+  wins over the default). No model is opted out today. The Nemotron/Parakeet runtime options used to force
+  `0`; they now follow the default.
+- `TRACKDUB_TRT_RTX_CUDA_GRAPHS` overrides every call site and caller profile for diagnosis and A/B
+  runs: `on`, `1` or `true` force capture on; `off`, `0` or `false` force it off; any other value leaves the
+  call site's choice alone.
+- Measured on an RTX 5070 (device-bound I/O, source graphs, 50 runs): 57-87% lower median latency on most
+  single-graph models, and identical stage output with graphs forced on for Whisper (tiny, small, medium),
+  Parakeet, Sortformer and Spleeter. Nemotron and CosyVoice were not run.
+- EP-context artifacts are unaffected: their identity records `enable_cuda_graph=0` for the compile step
+  regardless of the session flag.
 
 Compiled TRT RTX runtime cache:
 

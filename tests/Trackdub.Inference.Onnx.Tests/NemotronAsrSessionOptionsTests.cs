@@ -7,19 +7,20 @@ public sealed class NemotronAsrSessionOptionsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Shared_runtime_and_smoke_options_disable_capture_for_both_sessions(bool hasPromptInput)
+    public void Shared_runtime_and_smoke_options_follow_the_session_default_for_both_sessions(bool hasPromptInput)
     {
         NemotronAsrEncoderTrtProfiles.SessionOptions options =
             NemotronAsrEncoderTrtProfiles.BuildRuntimeOptions(hasPromptInput);
 
-        Assert.Equal("0", OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(options.Encoder)["enable_cuda_graph"]);
-        Assert.Equal("0", OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(options.Decoder)["enable_cuda_graph"]);
+        Assert.Equal("1", OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(options.Encoder)["enable_cuda_graph"]);
+        Assert.Equal("1", OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(options.Decoder)["enable_cuda_graph"]);
         foreach ((string name, string shape) in NemotronAsrEncoderTrtProfiles.BuildOptions(hasPromptInput))
         {
             Assert.Equal(shape, options.Encoder[name]);
         }
 
-        Assert.Single(options.Decoder);
+        Assert.Empty(options.Decoder);
+        Assert.DoesNotContain("enable_cuda_graph", options.Encoder.Keys);
     }
 
     [Fact]

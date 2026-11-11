@@ -405,7 +405,7 @@ internal static partial class OnnxExecutionSessionFactory
         public string? DecoderLogId { get; init; }
         public string? OptionsEncoderModelPath { get; init; }
         public string? OptionsDecoderModelPath { get; init; }
-        public bool EnableEncoderCudaGraph { get; init; }
+        public bool EnableEncoderCudaGraph { get; init; } = DefaultEnableCudaGraph;
     }
 
     private static async Task<DualPooledLeasePair> AcquirePooledWhisperPairAsync(
@@ -503,7 +503,6 @@ internal static partial class OnnxExecutionSessionFactory
             Provider = provider,
             EncoderModelPath = paths.Encoder,
             DecoderModelPath = paths.Decoder,
-            EnableEncoderCudaGraph = false,
         }).ConfigureAwait(false);
 
         return new NemotronAsrSessionLease(

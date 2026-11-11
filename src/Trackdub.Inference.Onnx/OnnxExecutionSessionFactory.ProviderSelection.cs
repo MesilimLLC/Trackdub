@@ -31,7 +31,7 @@ internal static partial class OnnxExecutionSessionFactory
         ExecutionProviderKind Provider,
         WindowsMlExecutionDevicePolicy DevicePolicy,
         IReadOnlyDictionary<string, string>? AdditionalTrtOptions = null,
-        bool EnableCudaGraph = false,
+        bool EnableCudaGraph = DefaultEnableCudaGraph,
         string? LogId = null,
         string? TrtModelPath = null);
 
@@ -136,7 +136,7 @@ internal static partial class OnnxExecutionSessionFactory
     private static SessionOptionsSelection CreateTensorRtRtxSelection(
         SessionOptions options,
         IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
+        bool enableCudaGraph = DefaultEnableCudaGraph)
     {
         ExecutionProviderKind selectedProvider =
             AppendTensorRtRtxOrFallbackProvider(options, additionalTrtOptions, enableCudaGraph);

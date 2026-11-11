@@ -31,47 +31,25 @@ public sealed class TensorRtRtxDirectMlInteropTests
         }
     }
 
-    [Fact]
-    public void Apply_keeps_a_smaller_caller_supplied_shared_memory_limit()
-    {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = "65536",
-        };
-
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
-
-        Assert.Equal("65536", options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
-    }
-
     [Theory]
-    [InlineData("0")]
-    [InlineData("202752")]
-    [InlineData("not-a-number")]
-    [InlineData("-1")]
-    public void Apply_clamps_caller_limits_that_leave_the_engine_uncapped(string requested)
+    [InlineData("65536", true, "65536")]
+    [InlineData("101376", true, "101376")]
+    [InlineData("0", true, LimitText)]
+    [InlineData("202752", true, LimitText)]
+    [InlineData("not-a-number", true, LimitText)]
+    [InlineData("-1", true, LimitText)]
+    [InlineData("0", false, "0")]
+    [InlineData("202752", false, "202752")]
+    public void Apply_resolves_a_caller_supplied_limit(string requested, bool isWindows, string expected)
     {
         var options = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = requested,
         };
 
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows);
 
-        Assert.Equal(LimitText, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
-    }
-
-    [Fact]
-    public void Apply_leaves_caller_limits_untouched_off_windows()
-    {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = "0",
-        };
-
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: false);
-
-        Assert.Equal("0", options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+        Assert.Equal(expected, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
     }
 
     [Fact]
@@ -117,5 +95,23 @@ public sealed class TensorRtRtxDirectMlInteropTests
         OnnxExecutionSessionFactory.ApplyCudaGraphOverride(options, overrideValue);
 
         Assert.Equal(expected, options["enable_cuda_graph"]);
+    }
+
+    [Theory]
+    [InlineData("off", "0")]
+    [InlineData("on", "1")]
+    [InlineData(null, "1")]
+    public void Override_wins_over_a_profile_built_with_WithCudaGraphsEnabled(string? overrideValue, string expected)
+    {
+        IReadOnlyDictionary<string, string> profile = OnnxExecutionSessionFactory.WithCudaGraphsEnabled(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["trt_profile_min_shapes"] = "input_features:1x80x1" });
+
+        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+            profile,
+            enableCudaGraph: false,
+            overrideValue);
+
+        Assert.Equal(expected, options["enable_cuda_graph"]);
+        Assert.Equal("input_features:1x80x1", options["nv_profile_min_shapes"]);
     }
 }

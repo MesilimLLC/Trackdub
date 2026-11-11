@@ -174,7 +174,7 @@ internal static partial class OnnxExecutionSessionFactory
         public required WindowsMlExecutionDevicePolicy DevicePolicy { get; init; }
         public IReadOnlyDictionary<string, string>? AdditionalTrtEncoderOptions { get; init; }
         public IReadOnlyDictionary<string, string>? AdditionalTrtDecoderOptions { get; init; }
-        public bool EnableEncoderCudaGraph { get; init; }
+        public bool EnableEncoderCudaGraph { get; init; } = DefaultEnableCudaGraph;
         public string? EncoderLogId { get; init; }
         public string? DecoderLogId { get; init; }
         public string? EncoderModelPath { get; init; }
@@ -194,7 +194,7 @@ internal static partial class OnnxExecutionSessionFactory
         public IReadOnlyDictionary<string, string>? AdditionalTrtDecoderOptions { get; init; }
         public string? ModelId { get; init; }
         public string? Variant { get; init; }
-        public bool EnableEncoderCudaGraph { get; init; }
+        public bool EnableEncoderCudaGraph { get; init; } = DefaultEnableCudaGraph;
         public string? EncoderLogId { get; init; }
         public string? DecoderLogId { get; init; }
     }
@@ -347,7 +347,7 @@ internal static partial class OnnxExecutionSessionFactory
             ResolveSessionOptionsProvider(request.Provider, request.BootstrapResult.SelectedProvider);
         return new DualOptionsSelections(
             CreateSessionOptions(new SessionOptionsRequest(sessionProvider, request.DevicePolicy, request.AdditionalTrtEncoderOptions, request.EnableEncoderCudaGraph, request.EncoderLogId, request.EncoderModelPath)),
-            CreateSessionOptions(new SessionOptionsRequest(sessionProvider, request.DevicePolicy, request.AdditionalTrtDecoderOptions, EnableCudaGraph: false, request.DecoderLogId, request.DecoderModelPath)));
+            CreateSessionOptions(new SessionOptionsRequest(sessionProvider, request.DevicePolicy, request.AdditionalTrtDecoderOptions, DefaultEnableCudaGraph, request.DecoderLogId, request.DecoderModelPath)));
     }
 
     private static DualSessionMetadata ResolveDualSessionMetadata(
@@ -958,7 +958,7 @@ internal static partial class OnnxExecutionSessionFactory
     internal static ExecutionProviderKind AppendTensorRtRtxOrFallbackProvider(
         SessionOptions options,
         IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
-        bool enableCudaGraph = false)
+        bool enableCudaGraph = DefaultEnableCudaGraph)
     {
 #if WINDOWS
         WindowsMlOnnxRuntimeNativeResolver.EnsureInitialized();
@@ -1130,7 +1130,7 @@ internal static partial class OnnxExecutionSessionFactory
         ExecutionProviderKind selectedProviderKind,
         WindowsMlExecutionDevicePolicy devicePolicy,
         IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
+        bool enableCudaGraph = DefaultEnableCudaGraph)
     {
         if (selectedProviderKind is ExecutionProviderKind.TensorRTRtx)
         {
