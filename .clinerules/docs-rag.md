@@ -2,16 +2,17 @@
 
 Hosted MCP server `trackdub-docs-rag` answering "how does X actually work at
 Trackdub" from first-party docs + pin-accurate vendor docs. Spec:
-`tools/docs-rag/SPEC.md`. Corpus: 197 docs, Cloudflare AI Search over R2.
+`tools/docs-rag/SPEC.md`. Corpus: ~380 docs, Cloudflare AI Search over R2. Kept current by `.github/workflows/docs-rag-sync.yml`.
 
 Tools: `search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`.
 
 ## Required
 
-- **Use it for implementation facts before guessing.** Pin versions, EP wiring,
+- **Use it for implementation facts before guessing.** EP wiring,
   model-family support, "which layer owns this decision", and "what does this
-  vendor page actually say" should come from a search, not from memory. This
-  corpus is keyed to the current pins; a plausible-sounding wrong version is a
+  vendor page actually say" should come from a search, not from memory. Pin
+  versions come from `runtime/trt-rtx-ep.manifest.json` first; the RAG repeats
+  them, it does not define them. A plausible-sounding wrong version is a
   defect, not a rounding error.
 - **Read `AGENTS.md` and repo source first for policy.** The RAG indexes
   documentation, which is the *third* place in the conflict order (source
@@ -19,7 +20,9 @@ Tools: `search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`.
   cross-checks; it does not override what the tests assert.
 - **Cite the `key` you got the fact from.** Every hit carries an R2 path
   (`first-party/trackdub/...`, `vendor/nvidia/...`). Name it when stating a
-  pin or claim so the answer is checkable.
+  pin or claim so the answer is checkable. First-party hits also carry `repo`,
+  `localPath` and `syncedCommit`: with that checkout available, read the local
+  file; the indexed copy is only as new as that commit.
 - **Escalate to `get_trackdub_doc` when a chunk is cut off** (4000-char cap).
   Read the whole doc before drawing a conclusion from a truncated one.
 - **Prefer first-party over vendor for Trackdub behavior.** Vendor scopes
@@ -35,12 +38,13 @@ Tools: `search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`.
 | Need | Tool |
 |---|---|
 | Verbatim chunks, exact identifiers, quotes, EP APIs | `search_trackdub_docs` |
-| Synthesized explanation across docs | `ask_trackdub_docs` |
+| Synthesized explanation across docs (confirm versions and flags against the cited keys) | `ask_trackdub_docs` |
 | A chunk you already have but need whole | `get_trackdub_doc` |
 
 `search` is the default. It is hybrid vector+keyword, so a code identifier
-(camel-case, dotted, `Namespace:Member`, snake_case) usually resolves directly;
-a prose question is better served by `ask`.
+(camel-case, dotted, `Namespace:Member`, snake_case) usually resolves directly.
+Use `ask` only when you want a synthesized explanation, and treat its answer as
+generated text: check every version, flag and symbol against the cited keys.
 
 ## Scopes
 
