@@ -115,4 +115,21 @@ public sealed class TensorRtRtxDirectMlInteropTests
         Assert.Equal(expected, options["enable_cuda_graph"]);
         Assert.Equal("input_features:1x80x1", options["nv_profile_min_shapes"]);
     }
+
+    [Theory]
+    [InlineData(true, "1")]
+    [InlineData(false, "0")]
+    public void A_per_session_decision_wins_over_the_default(bool decision, string expected)
+    {
+        IReadOnlyDictionary<string, string> profile = OnnxExecutionSessionFactory.WithCudaGraphs(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["trt_profile_min_shapes"] = "x:1" },
+            decision);
+
+        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+            profile,
+            OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
+            cudaGraphOverride: null);
+
+        Assert.Equal(expected, options["enable_cuda_graph"]);
+    }
 }

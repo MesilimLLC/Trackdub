@@ -173,8 +173,11 @@ flow is a poor fit. What has been checked here is output equality, not the mecha
   57-87% lower median latency on most single-graph models. Those runs use persistent device-bound buffers, the
   condition the benchmark section above names for graphs, so they are a ceiling. The gain with managed I/O,
   which most stages use, was not measured.
-- EP-context artifacts are unaffected: their identity records `enable_cuda_graph=0` for the compile step
-  regardless of the session flag.
+- EP-context artifacts are valid whichever capture mode loads them: `BuildCompileOptionsIdentity` leaves
+  `enable_cuda_graph` out, because capture is a runtime session setting rather than an engine-build option.
+  Compile and warmup sessions still run with capture off.
+- A call site that decides per session (Whisper turns capture on only for its fixed-address bound path)
+  writes `enable_cuda_graph` explicitly with `WithCudaGraphs`, so its decision wins over the default.
 
 Compiled TRT RTX runtime cache:
 

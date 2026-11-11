@@ -26,4 +26,13 @@ public sealed class NemotronAsrSessionOptionsTests
     [Fact]
     public void Benchmark_profiles_leave_capture_mode_under_caller_control() =>
         Assert.DoesNotContain("enable_cuda_graph", NemotronAsrEncoderTrtProfiles.BuildOptions(hasPromptInput: true).Keys);
+
+    [Fact]
+    public void Qwen3_asr_encoder_opts_out_of_the_cuda_graph_default() =>
+        Assert.Equal(
+            "0",
+            OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+                Qwen3Asr.Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions,
+                OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
+                cudaGraphOverride: null)["enable_cuda_graph"]);
 }

@@ -462,11 +462,20 @@ internal static partial class OnnxExecutionSessionFactory
     /// stay free of the flag so benchmark/AOT consumers keep explicit control of the session mode.
     /// </summary>
     internal static IReadOnlyDictionary<string, string> WithCudaGraphsEnabled(
-        IReadOnlyDictionary<string, string> options)
+        IReadOnlyDictionary<string, string> options) =>
+        WithCudaGraphs(options, enabled: true);
+
+    /// <summary>
+    /// Copies <paramref name="options"/> with <c>enable_cuda_graph</c> written explicitly, so a call
+    /// site that decides per session (rather than taking the default) always wins over the default.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> WithCudaGraphs(
+        IReadOnlyDictionary<string, string> options,
+        bool enabled)
     {
         var merged = new Dictionary<string, string>(options, StringComparer.Ordinal)
         {
-            ["enable_cuda_graph"] = "1",
+            ["enable_cuda_graph"] = enabled ? "1" : "0",
         };
         return merged;
     }
