@@ -92,6 +92,8 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
                     + "request managed I/O or the trt-rtx provider.");
             }
 
+            ThrowIfCudaGraphOverrideConflicts(request, settings);
+
             fullModelPath = ResolveModelPath(fullModelPath, notes);
             bool isCompositeGraph = LooksLikeWhisperEncoder(fullModelPath) || LooksLikeOpusEncoder(fullModelPath);
             if (deviceBound && isCompositeGraph)
@@ -497,6 +499,22 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
         string? CompileOptionsIdentity,
         string? ArtifactIdentity);
 
+    // Needs only the settings and the environment, so it runs before provider registration (which can
+    // download the EP bundle) and model resolution.
+    private static void ThrowIfCudaGraphOverrideConflicts(BenchmarkRequest request, BenchmarkExecutionSettings settings)
+    {
+        if (request.ProviderPreference is BenchmarkProviderPreference.TensorRtRtx
+            && !ShouldUseCatalogDevicePolicyForPreference(request.ProviderPreference)
+            && settings.EffectiveTensorRtRtx.CudaGraphMode is not BenchmarkCudaGraphMode.Auto
+            && OnnxExecutionSessionFactory.IsCudaGraphOverrideSet())
+        {
+            throw new NotSupportedException(
+                "--cuda-graphs on, off and compare choose the capture mode for each run, so they cannot run while "
+                + $"{OnnxExecutionSessionFactory.CudaGraphsOverrideEnvironmentVariable} is set: it would give every lane "
+                + "the same capture mode and report a comparison that compares nothing. Unset the variable.");
+        }
+    }
+
     private static BenchmarkSessionPlan CreateSessionPlan(
         BenchmarkRequest request,
         BenchmarkExecutionSettings settings,
@@ -535,15 +553,6 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
             }
 
             return BenchmarkSessionPlan.Default;
-        }
-
-        if (trtSettings.CudaGraphMode is not BenchmarkCudaGraphMode.Auto
-            && OnnxExecutionSessionFactory.IsCudaGraphOverrideSet())
-        {
-            throw new NotSupportedException(
-                "--cuda-graphs on, off and compare choose the capture mode for each run, so they cannot run while "
-                + $"{OnnxExecutionSessionFactory.CudaGraphsOverrideEnvironmentVariable} is set: it would give every lane "
-                + "the same capture mode and report a comparison that compares nothing. Unset the variable.");
         }
 
         string? cacheDirectory = trtSettings.CacheMode switch
