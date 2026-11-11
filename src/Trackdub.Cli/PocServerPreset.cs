@@ -78,6 +78,19 @@ internal static class PocServerQualityPreset
     { ["translation"] = "quantized", ["tts"] = "default" };
 }
 
+/// <summary>
+/// English-to-Mandarin preset for the server profile: the quality-tier pipeline with the target language set to Chinese.
+/// Qwen3-TTS CustomVoice is used because it speaks Mandarin natively; Kokoro has no verified Mandarin route in this codebase.
+/// Host qualification and audio quality are separate acceptance steps and are not established by this definition.
+/// </summary>
+internal static class PocServerZhPreset
+{
+    internal const string Name = "poc-server-zh-v1";
+    internal static PipelinePreset Create() => PocServerQualityPreset.Create() with { TargetLanguage = "zh" };
+    internal static IReadOnlyDictionary<string, string> Providers => PocServerQualityPreset.Providers;
+    internal static IReadOnlyDictionary<string, string> Variants => PocServerQualityPreset.Variants;
+}
+
 /// <summary>Built-in preset lookup shared by single-run and batch execution.</summary>
 internal static class PocPresets
 {
@@ -100,6 +113,14 @@ internal static class PocPresets
             preset = PocServerQualityPreset.Create();
             providers = PocServerQualityPreset.Providers;
             variants = PocServerQualityPreset.Variants;
+            return true;
+        }
+
+        if (string.Equals(name, PocServerZhPreset.Name, StringComparison.Ordinal))
+        {
+            preset = PocServerZhPreset.Create();
+            providers = PocServerZhPreset.Providers;
+            variants = PocServerZhPreset.Variants;
             return true;
         }
 
