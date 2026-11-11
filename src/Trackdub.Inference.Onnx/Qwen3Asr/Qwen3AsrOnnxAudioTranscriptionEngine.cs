@@ -44,8 +44,11 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
 
     public const string EngineFamilyName = "qwen3-asr";
 
+    // The encoder sees a different mel length for almost every chunk, so capture would record a new
+    // graph per length for little gain; it stays out of the CUDA graph default.
     internal static readonly IReadOnlyDictionary<string, string> TrtEncoderOptions = new Dictionary<string, string>
     {
+        ["enable_cuda_graph"] = "0",
         ["trt_profile_min_shapes"] = "mel:1x128x1",
         ["trt_profile_max_shapes"] = "mel:1x128x3000",
         ["trt_profile_opt_shapes"] = "mel:1x128x3000",

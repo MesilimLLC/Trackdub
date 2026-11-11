@@ -151,19 +151,28 @@ documented workaround (TensorRT-RTX 1.7 release notes, known issues).
 ### CUDA graphs (on by default)
 
 TensorRT-RTX sessions capture CUDA graphs by default (`OnnxExecutionSessionFactory.DefaultEnableCudaGraph`).
-NVIDIA's native capture recaptures when input sizes or buffer locations change and falls back to normal
-execution for graphs it cannot capture, so a call site does not need stable device buffers to be correct
-(TensorRT-RTX "Working with RTX CUDA Graphs").
+The sources disagree on what that requires. The TensorRT-RTX runtime docs ("Working with RTX CUDA Graphs")
+say native capture recaptures when input sizes or buffer locations change and falls back to normal
+execution for graphs it cannot capture. The ONNX Runtime TensorRT-RTX EP docs say to avoid or be careful with
+`enable_cuda_graph` when input shapes or device bindings change frequently, and that data-dependent control
+flow is a poor fit. What has been checked here is output equality, not the mechanism: see the measurements below.
 
 - Opt a model out by putting `enable_cuda_graph = 0` in that call site's TRT options (a caller profile
-  wins over the default). No model is opted out today. The Nemotron/Parakeet runtime options used to force
+  wins over the default). The Qwen3-ASR encoder is opted out because its mel length changes almost every
+  chunk, so capture would record a graph per length. The Nemotron/Parakeet runtime options used to force
   `0`; they now follow the default.
+- Variable-length inputs (Parakeet and Nemotron encoders) can still create many captured graphs on long
+  files. Captured graphs use device memory. This has not been measured.
 - `TRACKDUB_TRT_RTX_CUDA_GRAPHS` overrides every call site and caller profile for diagnosis and A/B
   runs: `on`, `1` or `true` force capture on; `off`, `0` or `false` force it off; any other value leaves the
-  call site's choice alone.
-- Measured on an RTX 5070 (device-bound I/O, source graphs, 50 runs): 57-87% lower median latency on most
-  single-graph models, and identical stage output with graphs forced on for Whisper (tiny, small, medium),
-  Parakeet, Sortformer and Spleeter. Nemotron and CosyVoice were not run.
+  call site's choice alone. Set it before the process starts; it is read each time options are built,
+  including for session-pool keys.
+- Measured on an RTX 5070 with graphs forced on, on one short clip: identical stage output for Whisper (tiny,
+  base, small, medium), Parakeet, Sortformer and Spleeter. Nemotron and CosyVoice were not run.
+- Per-graph `Trackdub.Benchmarks --cuda-graphs compare` runs (device-bound I/O, source graphs, 50 runs) showed
+  57-87% lower median latency on most single-graph models. Those runs use persistent device-bound buffers, the
+  condition the benchmark section above names for graphs, so they are a ceiling. The gain with managed I/O,
+  which most stages use, was not measured.
 - EP-context artifacts are unaffected: their identity records `enable_cuda_graph=0` for the compile step
   regardless of the session flag.
 

@@ -4,6 +4,7 @@ using Trackdub.Inference.Runtime.TensorRtRtx;
 
 namespace Trackdub.Inference.Tests;
 
+[Collection(nameof(OnnxExecutionSessionFactoryStateCollection))]
 public sealed class TensorRtRtxDirectMlInteropTests
 {
     private const string LimitText = "101376";

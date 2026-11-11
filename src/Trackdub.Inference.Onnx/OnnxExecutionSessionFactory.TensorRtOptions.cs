@@ -99,7 +99,9 @@ internal static partial class OnnxExecutionSessionFactory
     /// <summary>
     /// Diagnostic and A/B override for <c>enable_cuda_graph</c>: <c>on</c>, <c>1</c> or <c>true</c>, and
     /// <c>off</c>, <c>0</c> or <c>false</c> (case-insensitive), win over the call site and any caller
-    /// profile; anything else leaves the call site's choice alone.
+    /// profile; anything else leaves the call site's choice alone. The variable is read each time
+    /// options are built, including for pool-key fingerprints, so set it before the process starts
+    /// rather than changing it mid-run.
     /// </summary>
     internal static void ApplyCudaGraphOverride(IDictionary<string, string> trtOptions, string? overrideValue)
     {
