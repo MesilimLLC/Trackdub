@@ -1,29 +1,27 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "servers": {
-      "trackdub-docs-rag": {
-        "type": "remote",
-        "url": "https://trackdub-docs-rag.trackdub.workers.dev/mcp",
-        "oauth": false,
-        "headers": {
-          "Authorization": "Bearer {env:DOCS_RAG_TOKEN}"
-        }
-      },
-      "nvidia-cuda-docs": {
-        "type": "remote",
-        "url": "https://api.copilot.nsight.ngc.nvidia.com/mcp/cuda-docs"
-      },
-      "trackdub-gpu-docs": {
-        "type": "local",
-        "command": [
-          "uv",
-          "--directory",
-          "D:/Dev/Trackdub_Workspace/Trackdub/tools/mcp-trackdub-gpu-docs",
-          "run",
-          "trackdub-gpu-docs-mcp"
-        ]
+    "trackdub-docs-rag": {
+      "type": "remote",
+      "url": "https://trackdub-docs-rag.trackdub.workers.dev/mcp",
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:DOCS_RAG_TOKEN}"
       }
+    },
+    "nvidia-cuda-docs": {
+      "type": "remote",
+      "url": "https://api.copilot.nsight.ngc.nvidia.com/mcp/cuda-docs"
+    },
+    "trackdub-gpu-docs": {
+      "type": "local",
+      "command": [
+        "uv",
+        "--directory",
+        "tools/mcp-trackdub-gpu-docs",
+        "run",
+        "trackdub-gpu-docs-mcp"
+      ]
     }
   }
 }

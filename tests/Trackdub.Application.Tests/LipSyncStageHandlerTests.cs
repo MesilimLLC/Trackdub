@@ -514,7 +514,9 @@ public sealed class LipSyncStageHandlerTests
     [InlineData(false)]
     public async Task Failed_extraction_leaves_no_temp_segment_file(bool throwCancellation)
     {
-        string[] tempBefore = Directory.GetFiles(Path.GetTempPath(), "trackdub-src-seg-*.wav");
+        // Track only the paths this handler asked the extractor to write; scanning the shared temp
+        // folder races with other tests that create trackdub-src-seg-* files in parallel.
+        var extractionOutputPaths = new System.Collections.Concurrent.ConcurrentQueue<string>();
         string directory = CreateTempDirectory();
         try
         {
@@ -547,6 +549,7 @@ public sealed class LipSyncStageHandlerTests
                 Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns<Task>(call =>
                 {
                     // Simulate a partially-created extraction, then fail.
+                    extractionOutputPaths.Enqueue(call.ArgAt<string>(3));
                     File.WriteAllBytes(call.ArgAt<string>(3), [1]);
                     if (throwCancellation) throw new OperationCanceledException(cts.Token);
                     throw new InvalidOperationException("Extractor failed.");
@@ -571,9 +574,8 @@ public sealed class LipSyncStageHandlerTests
                 await handler.HandleAsync(request, cts.Token);
             }
 
-            string[] leaked = Directory.GetFiles(Path.GetTempPath(), "trackdub-src-seg-*.wav")
-                .Except(tempBefore).ToArray();
-            Assert.Empty(leaked);
+            Assert.NotEmpty(extractionOutputPaths);
+            Assert.All(extractionOutputPaths, path => Assert.False(File.Exists(path), $"Leaked temp segment: {path}"));
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
