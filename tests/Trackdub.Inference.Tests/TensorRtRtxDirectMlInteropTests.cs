@@ -34,14 +34,7 @@ public sealed class TensorRtRtxDirectMlInteropTests
     [Fact]
     public void Apply_keeps_a_smaller_caller_supplied_shared_memory_limit()
     {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = "65536",
-        };
-
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
-
-        Assert.Equal("65536", options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+        Assert.Equal("65536", ApplyAndReadCallerLimit("65536", isWindows: true));
     }
 
     [Theory]
@@ -51,27 +44,25 @@ public sealed class TensorRtRtxDirectMlInteropTests
     [InlineData("-1")]
     public void Apply_clamps_caller_limits_that_leave_the_engine_uncapped(string requested)
     {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = requested,
-        };
-
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
-
-        Assert.Equal(LimitText, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+        Assert.Equal(LimitText, ApplyAndReadCallerLimit(requested, isWindows: true));
     }
 
     [Fact]
     public void Apply_leaves_caller_limits_untouched_off_windows()
     {
+        Assert.Equal("0", ApplyAndReadCallerLimit("0", isWindows: false));
+    }
+
+    private static string ApplyAndReadCallerLimit(string requested, bool isWindows)
+    {
         var options = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = "0",
+            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = requested,
         };
 
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows: false);
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows);
 
-        Assert.Equal("0", options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+        return options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey];
     }
 
     [Fact]
