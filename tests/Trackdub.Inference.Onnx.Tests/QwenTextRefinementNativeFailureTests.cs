@@ -15,6 +15,13 @@ public sealed class QwenTextRefinementNativeFailureTests
     {
         Uninitialized<OnnxRuntimeGenAIException>(),
         Uninitialized<OnnxRuntimeException>(),
+        new DllNotFoundException("onnxruntime-genai.dll"),
+        new EntryPointNotFoundException("OgaCreateModel"),
+        new BadImageFormatException("wrong architecture"),
+        new TypeInitializationException("Microsoft.ML.OnnxRuntimeGenAI.NativeMethods", new DllNotFoundException("onnxruntime-genai.dll")),
+        new TypeInitializationException(
+            "Outer",
+            new TypeInitializationException("Microsoft.ML.OnnxRuntimeGenAI.NativeMethods", new DllNotFoundException("onnxruntime-genai.dll"))),
     };
 
     public static TheoryData<Exception> NonNativeFailures => new()
@@ -23,6 +30,8 @@ public sealed class QwenTextRefinementNativeFailureTests
         new FileNotFoundException("missing genai_config.json"),
         new OperationCanceledException(),
         new IOException("disk error"),
+        new TypeInitializationException("Some.Other.Type", new InvalidOperationException("not native")),
+        new TypeInitializationException("Some.Other.Type", null),
     };
 
     [Theory]
