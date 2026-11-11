@@ -29,6 +29,16 @@ public sealed class TensorRtRtxCudaGraphOptionsTests
         new SessionDecision(false, "0"),
     };
 
+    [Fact]
+    public void ParseCudaGraphOverride_selects_a_flag_only_for_recognized_values()
+    {
+        Assert.Equal("1", OnnxExecutionSessionFactory.ParseCudaGraphOverride(" On "));
+        Assert.Equal("0", OnnxExecutionSessionFactory.ParseCudaGraphOverride("FALSE"));
+        Assert.Null(OnnxExecutionSessionFactory.ParseCudaGraphOverride("auto"));
+        Assert.Null(OnnxExecutionSessionFactory.ParseCudaGraphOverride(null));
+        Assert.Null(OnnxExecutionSessionFactory.ParseCudaGraphOverride(string.Empty));
+    }
+
     [Theory]
     [MemberData(nameof(OverrideCases))]
     public void ApplyCudaGraphOverride_only_acts_on_on_or_off(OverrideCase testCase)

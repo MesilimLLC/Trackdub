@@ -107,18 +107,25 @@ internal static partial class OnnxExecutionSessionFactory
     /// </summary>
     internal static void ApplyCudaGraphOverride(IDictionary<string, string> trtOptions, string? overrideValue)
     {
-        string? flag = overrideValue?.Trim().ToLowerInvariant() switch
+        string? flag = ParseCudaGraphOverride(overrideValue);
+        if (flag is not null)
+        {
+            trtOptions["enable_cuda_graph"] = flag;
+        }
+    }
+
+    /// <summary>The <c>enable_cuda_graph</c> value an override string selects, or null when it selects nothing.</summary>
+    internal static string? ParseCudaGraphOverride(string? overrideValue) =>
+        overrideValue?.Trim().ToLowerInvariant() switch
         {
             "on" or "1" or "true" => "1",
             "off" or "0" or "false" => "0",
             _ => null,
         };
 
-        if (flag is not null)
-        {
-            trtOptions["enable_cuda_graph"] = flag;
-        }
-    }
+    /// <summary>True when <c>TRACKDUB_TRT_RTX_CUDA_GRAPHS</c> is set to a value that overrides capture.</summary>
+    internal static bool IsCudaGraphOverrideSet() =>
+        ParseCudaGraphOverride(Environment.GetEnvironmentVariable(CudaGraphsOverrideEnvironmentVariable)) is not null;
 
     private static void MergeAdditionalTensorRtRtxOptions(
         Dictionary<string, string> trtOptions,

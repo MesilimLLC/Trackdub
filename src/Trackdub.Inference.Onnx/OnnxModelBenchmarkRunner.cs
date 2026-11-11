@@ -537,6 +537,15 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
             return BenchmarkSessionPlan.Default;
         }
 
+        if (trtSettings.CudaGraphMode is not BenchmarkCudaGraphMode.Auto
+            && OnnxExecutionSessionFactory.IsCudaGraphOverrideSet())
+        {
+            throw new NotSupportedException(
+                "--cuda-graphs on, off and compare choose the capture mode for each run, so they cannot run while "
+                + $"{OnnxExecutionSessionFactory.CudaGraphsOverrideEnvironmentVariable} is set: it would give every lane "
+                + "the same capture mode and report a comparison that compares nothing. Unset the variable.");
+        }
+
         string? cacheDirectory = trtSettings.CacheMode switch
         {
             BenchmarkRuntimeCacheMode.Isolated =>

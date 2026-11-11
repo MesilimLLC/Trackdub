@@ -164,11 +164,15 @@ flow is a poor fit. What has been checked here is output equality, not the mecha
   that ran gained 37-94%. The Nemotron/Parakeet runtime options used to force
   `0`; they now follow the default.
 - Variable-length inputs (Parakeet and Nemotron encoders) can still create many captured graphs on long
-  files. Captured graphs use device memory. This has not been measured.
+  files, and captured graphs use device memory; that memory has not been measured. Parakeet was run on
+  6, 15 and 40 second clips with capture on and off, sharing one engine cache per lane so each length met
+  uncached shapes: transcripts were identical, and after the first run stage times differed by under a
+  second (33.1 vs 34.1 s, 39.3 vs 38.5 s). Cold first runs took 35-97 s in both lanes across repeated runs.
 - `TRACKDUB_TRT_RTX_CUDA_GRAPHS` overrides every call site and caller profile for diagnosis and A/B
   runs: `on`, `1` or `true` force capture on; `off`, `0` or `false` force it off; any other value leaves the
   call site's choice alone. Set it before the process starts; it is read each time options are built,
-  including for session-pool keys.
+  including for session-pool keys. `Trackdub.Benchmarks --cuda-graphs on|off|compare` refuses to run while it
+  is set, because it would give every lane the same capture mode.
 - Measured on an RTX 5070 with graphs forced on, on one short clip: identical stage output for Whisper (tiny,
   base, small, medium), Parakeet, Sortformer and Spleeter. Nemotron and CosyVoice were not run.
 - Per-graph `Trackdub.Benchmarks --cuda-graphs compare` runs (device-bound I/O, source graphs, 50 runs) showed
