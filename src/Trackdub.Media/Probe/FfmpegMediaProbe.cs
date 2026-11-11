@@ -118,7 +118,7 @@ public sealed class FfmpegMediaProbe : IMediaProbe
     private static bool TryGetCachedSnapshot(
         ProbeCacheKey cacheKey,
         SourceFingerprint fingerprint,
-        out MediaProbeSnapshot? snapshot)
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MediaProbeSnapshot? snapshot)
     {
         lock (SnapshotCacheLock)
         {
@@ -129,7 +129,7 @@ public sealed class FfmpegMediaProbe : IMediaProbe
     private static bool TryGetCachedSnapshotCore(
         ProbeCacheKey cacheKey,
         SourceFingerprint fingerprint,
-        out MediaProbeSnapshot? snapshot)
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MediaProbeSnapshot? snapshot)
     {
         if (!SnapshotCache.TryGetValue(cacheKey.Value, out CachedSnapshot? cached))
         {
