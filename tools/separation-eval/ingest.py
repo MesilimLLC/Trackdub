@@ -39,7 +39,7 @@ MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 ROLES = ("dialogue", "music", "sfx", "ambience", "rir")
 ITEM_PASSTHROUGH_KEYS = ("range_bytes", "ext", "tag_basis", "title", "creator", "query", "retrieved_at", "freesound_id",
-                         "language", "gender_class", "provenance", "local_only")
+                         "language", "gender_class", "provenance", "local_only", "band_limit_hz")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 EXT_PATTERN = re.compile(r"^[a-z0-9]{1,5}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
