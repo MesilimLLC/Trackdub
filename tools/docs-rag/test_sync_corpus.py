@@ -482,8 +482,15 @@ class PinAndProvenanceTests(unittest.TestCase):
         active = subprocess.CompletedProcess([], 1, stdout="Indexing job active", stderr="")
         with patch.object(sync_corpus.subprocess, "run", return_value=active), patch.object(
             sync_corpus.time, "sleep"
-        ), patch.object(sync_corpus.time, "monotonic", side_effect=[0, 10_000]):
+        ) as sleep, patch.object(sync_corpus.time, "monotonic", side_effect=[0, 0, 10_000]):
             self.assertEqual(sync_corpus.wait_and_verify(Path("api"), timeout_minutes=1), 1)
+        sleep.assert_called_once()
+
+    def test_wait_returns_success_even_if_output_mentions_the_sentinel(self):
+        done = subprocess.CompletedProcess([], 0, stdout="warning: Indexing job active earlier", stderr="")
+        with patch.object(sync_corpus.subprocess, "run", return_value=done) as run:
+            self.assertEqual(sync_corpus.wait_and_verify(Path("api"), timeout_minutes=5), 0)
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

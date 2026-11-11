@@ -444,15 +444,19 @@ def reindex(api_root: Path, instance: str) -> int:
     return result.returncode
 
 
+def job_pending(result: subprocess.CompletedProcess) -> bool:
+    """The verifier exits nonzero while a reindex job runs; only that case is worth polling again."""
+    return result.returncode != 0 and "Indexing job active" in result.stdout + result.stderr
+
+
 def wait_and_verify(api_root: Path, timeout_minutes: int, poll_seconds: int = 30) -> int:
     """Poll the read-only verifier until the reindex job is done, then return its verdict."""
     command = ["node", str(TOOL_ROOT / "verify_index.mjs"), "--api-root", str(api_root)]
     deadline = time.monotonic() + timeout_minutes * 60
     while True:
         result = subprocess.run(command, capture_output=True, text=True, check=False)
-        output = result.stdout + result.stderr
-        if "Indexing job active" not in output:
-            print(output, flush=True)
+        if not job_pending(result):
+            print(result.stdout + result.stderr, flush=True)
             return result.returncode
         if time.monotonic() >= deadline:
             print(f"Indexing job still active after {timeout_minutes} minutes; re-run verify_index.mjs later.", flush=True)

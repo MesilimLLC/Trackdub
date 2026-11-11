@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
@@ -55,19 +56,23 @@ class _Index:
     titles: tuple[frozenset[str], ...]
 
 
+def _file_stamp(path: Path) -> tuple[str, int] | None:
+    return (path.name, path.stat().st_mtime_ns) if path.is_file() else None
+
+
 def _signature() -> tuple:
-    stamps: list[tuple[str, int]] = []
-    if MANIFEST_PATH.is_file():
-        stamps.append((MANIFEST_PATH.name, MANIFEST_PATH.stat().st_mtime_ns))
+    """Everything the built index depends on; any change to one of these rebuilds it."""
+    repo_root = find_repo_root()
+    # gpu-vendor sources are read from corpus.v1.json, so edits to it must invalidate the index.
+    tracked = [MANIFEST_PATH, repo_root / "tools" / "docs-rag" / "corpus.v1.json", *_repo_file_paths(repo_root)]
+    stamps = [stamp for stamp in map(_file_stamp, tracked) if stamp]
     if CHUNKS_DIR.is_dir():
         stamps.extend((p.name, p.stat().st_mtime_ns) for p in sorted(CHUNKS_DIR.glob("*.txt")))
-    repo_root = find_repo_root()
-    for source in load_sources():
-        if source.kind == "repo-file" and source.path:
-            path = repo_root / source.path
-            if path.is_file():
-                stamps.append((source.path, path.stat().st_mtime_ns))
     return tuple(stamps)
+
+
+def _repo_file_paths(repo_root: Path) -> list[Path]:
+    return [repo_root / source.path for source in load_sources() if source.kind == "repo-file" and source.path]
 
 
 @lru_cache(maxsize=2)
@@ -87,7 +92,7 @@ def _build(signature: tuple) -> _Index:
 class _Query:
     weights: dict[str, float]
     idf: dict[str, float]
-    symbols: list[str]
+    symbols: tuple[str, ...]
 
 
 def _is_symbol(raw: str) -> bool:
@@ -189,7 +194,7 @@ def _cap_per_source(index: _Index, ranked: list[tuple[float, int]], cap: int) ->
 
 
 def _result(chunk: Chunk, score: float, query: _Query) -> dict:
-    text_l = chunk.text.lower()
+    present = set(_terms(chunk.text))
     return {
         "score": round(score, 3),
         "sourceId": chunk.source_id,
@@ -197,7 +202,7 @@ def _result(chunk: Chunk, score: float, query: _Query) -> dict:
         "origin": chunk.origin,
         "tags": list(chunk.tags),
         "chunkIndex": chunk.chunk_index,
-        "matched": sorted(t for t in query.weights if t in text_l),
+        "matched": sorted(t for t in query.weights if t in present),
         "excerpt": _snippet(chunk.text, query.weights, query.idf),
     }
 
@@ -209,7 +214,7 @@ def search_chunks(query: str, *, limit: int = 8, tag: str | None = None) -> list
     if not weights or total == 0:
         return []
     idf = {t: math.log(1.0 + (total - index.df.get(t, 0) + 0.5) / (index.df.get(t, 0) + 0.5)) for t in weights}
-    query_data = _Query(weights, idf, symbols)
+    query_data = _Query(weights, idf, tuple(symbols))
     ranked = _rank(index, query_data, tag.lower() if tag else None)
     kept = _cap_per_source(index, ranked, max(1, min(limit, 20)))
     return [_result(index.chunks[i], score, query_data) for score, i in kept]
