@@ -1,0 +1,120 @@
+{
+  "description": "Retrieval eval for trackdub-gpu-docs (gpu_expect: source ids) and trackdub-docs-rag (rag_expect: R2 key substrings). A question passes at k when any expected entry appears in the top k distinct documents.",
+  "questions": [
+    {
+      "q": "How do I register the TensorRT RTX execution provider library with ONNX Runtime as a plugin EP",
+      "gpu_expect": ["ort-plugin-ep-usage", "td-trt-rtx-ep-abi-plugin", "ort-tensorrt-rtx-ep"],
+      "rag_expect": ["vendor/onnxruntime/plugin-ep", "tensorrt-rtx-ep-abi-plugin"]
+    },
+    {
+      "q": "Which EP ABI version and CUDA variant does Trackdub pin",
+      "gpu_expect": ["td-trt-rtx-ep-manifest", "td-trt-rtx-ep-abi-plugin", "gh-ep-abi-v050"],
+      "rag_expect": ["trt-rtx-ep.manifest.json", "tensorrt-rtx-ep-abi-plugin", "docs-rag-pin"]
+    },
+    {
+      "q": "standalone EP ABI plugin versus Windows ML catalog execution provider decision",
+      "gpu_expect": ["td-adr-0002-windows-ml", "td-winml-phase-5-catalog", "td-trt-rtx-ep-abi-plugin"],
+      "rag_expect": ["ADR-0002-windows-ml-provider-strategy", "windows-ml-phase-5-catalog-eps"]
+    },
+    {
+      "q": "TensorRT-RTX AOT and JIT compilation and runtime cache",
+      "gpu_expect": ["nv-trt-rtx-how-it-works", "ort-tensorrt-rtx-ep"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-how", "vendor/onnxruntime/trt-rtx-ep"]
+    },
+    {
+      "q": "weightless EPContext and synchronous GPU allocator in EP ABI 0.5.0",
+      "gpu_expect": ["gh-ep-abi-v050-technical-notes", "gh-ep-abi-v050"],
+      "rag_expect": ["vendor/nvidia/ep-abi-v050"]
+    },
+    {
+      "q": "DirectML as a legacy GPU fallback",
+      "gpu_expect": ["ms-directml"],
+      "rag_expect": ["vendor/microsoft/directml"]
+    },
+    {
+      "q": "Windows ML device policy for choosing execution providers",
+      "gpu_expect": ["td-winml-phase-3-device-policy", "ms-winml-select-eps"],
+      "rag_expect": ["windows-ml-phase-3-device-policies", "vendor/microsoft/winml-select"]
+    },
+    {
+      "q": "which provider each pipeline stage uses on Windows ML",
+      "gpu_expect": ["td-winml-stage-provider-matrix"],
+      "rag_expect": ["windows-ml-stage-provider-matrix"]
+    },
+    {
+      "q": "which DLLs are bundled with the Windows EP ABI zip, tensorrt_rtx_1_7.dll",
+      "gpu_expect": ["td-trt-rtx-ep-manifest", "td-trt-rtx-ep-abi-plugin", "gh-ep-abi-v050"],
+      "rag_expect": ["trt-rtx-ep.manifest.json", "tensorrt-rtx-ep-abi-plugin", "vendor/nvidia/ep-abi-v050"]
+    },
+    {
+      "q": "porting an existing TensorRT application to TensorRT-RTX",
+      "gpu_expect": ["nv-trt-rtx-porting"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-porting"]
+    },
+    {
+      "q": "TensorRT-RTX software license agreement terms",
+      "gpu_expect": ["nv-trt-rtx-sla"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-sla"]
+    },
+    {
+      "q": "what is new in TensorRT-RTX 1.7",
+      "gpu_expect": ["nv-trt-rtx-release-notes-1-7"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-release-notes-1-7"]
+    },
+    {
+      "q": "TensorRT-RTX Python API builder and runtime",
+      "gpu_expect": ["nv-trt-rtx-python-api"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-python-api"]
+    },
+    {
+      "q": "TensorRT-RTX C++ API runtime config",
+      "gpu_expect": ["nv-trt-rtx-c-api"],
+      "rag_expect": ["vendor/nvidia/trt-rtx-c-api"]
+    },
+    {
+      "q": "installing and registering Windows ML execution providers from the catalog",
+      "gpu_expect": ["ms-winml-initialize-eps"],
+      "rag_expect": ["vendor/microsoft/winml-init"]
+    },
+    {
+      "q": "which execution providers does Windows ML support",
+      "gpu_expect": ["ms-winml-supported-eps"],
+      "rag_expect": ["vendor/microsoft/winml-eps"]
+    },
+    {
+      "q": "olive quantize command line options",
+      "rag_expect": ["vendor/olive/olive-cli-quantize"]
+    },
+    {
+      "q": "Avalonia data binding syntax and compiled bindings",
+      "rag_expect": ["vendor/avalonia/avalonia-data-binding"]
+    },
+    {
+      "q": "ReactiveUI binding a view model property to a control",
+      "rag_expect": ["vendor/reactiveui/reactiveui-binding"]
+    },
+    {
+      "q": "LatentSync 1.6 ONNX export for lip sync",
+      "rag_expect": ["latentsync-1.6-onnx"]
+    },
+    {
+      "q": "insightface buffalo_s model pack for face detection",
+      "rag_expect": ["insightface-buffalo-s", "lip-sync-alignment/insightface"]
+    },
+    {"q": "nv_use_sync_gpu_allocator provider option", "kind": "needle", "gpu_expect": ["gh-ep-abi-v050-technical-notes"], "rag_expect": ["vendor/nvidia/ep-abi-v050-technical-notes"]},
+    {"q": "ep_refit_table weightless EPContext refit", "kind": "needle", "gpu_expect": ["gh-ep-abi-v050-technical-notes"], "rag_expect": ["vendor/nvidia/ep-abi-v050-technical-notes"]},
+    {"q": "Catalog.FindAllProviders and RegisterCertifiedAsync", "kind": "needle", "gpu_expect": ["ms-winml-initialize-eps"], "rag_expect": ["vendor/microsoft/winml-init"]},
+    {"q": "provider_specific_option when appending an execution provider to ort SessionOptions", "kind": "needle", "gpu_expect": ["ms-winml-select-eps"], "rag_expect": ["vendor/microsoft/winml-select"]},
+    {"q": "kSTRONGLY_TYPED network creation flag in nvinfer.h", "kind": "needle", "gpu_expect": ["nv-trt-rtx-c-api"], "rag_expect": ["vendor/nvidia/trt-rtx-c-api"]},
+    {"q": "serialized_engine and stride_nd in the python bindings", "kind": "needle", "gpu_expect": ["nv-trt-rtx-python-api"], "rag_expect": ["vendor/nvidia/trt-rtx-python-api"]},
+    {"q": "create a runtime_config and set the runtime cache path", "kind": "needle", "gpu_expect": ["nv-trt-rtx-how-it-works"], "rag_expect": ["vendor/nvidia/trt-rtx-how"]},
+    {"q": "onnxruntime_perf_test with compile_options and stream_handle", "kind": "needle", "gpu_expect": ["ort-tensorrt-rtx-ep"], "rag_expect": ["vendor/onnxruntime/trt-rtx-ep"]},
+    {"q": "lib_registration_name and ep_device when registering a plugin EP library", "kind": "needle", "gpu_expect": ["ort-plugin-ep-usage"], "rag_expect": ["vendor/onnxruntime/plugin-ep"]},
+    {"q": "DEFAULT_RENDER versus MIN_POWER device policy", "kind": "needle", "gpu_expect": ["td-winml-phase-3-device-policy"], "rag_expect": ["windows-ml-phase-3-device-policies"]},
+    {"q": "find_package CMake change in TensorRT-RTX 1.7", "kind": "needle", "gpu_expect": ["nv-trt-rtx-release-notes-1-7"], "rag_expect": ["vendor/nvidia/trt-rtx-release-notes-1-7"]},
+    {"q": "libtensorrt_plugins.so in the Linux bundle used by Trackdub.Benchmarks", "kind": "needle", "gpu_expect": ["td-trt-rtx-ep-abi-plugin"], "rag_expect": ["tensorrt-rtx-ep-abi-plugin"]},
+    {"q": "convert mymodel.onnx to mymodel.plan on H100 versus Orin", "kind": "needle", "gpu_expect": ["nv-trt-rtx-porting"], "rag_expect": ["vendor/nvidia/trt-rtx-porting"]},
+    {"q": "EP ABI repository contributing guide and coding guidelines", "kind": "needle", "gpu_expect": ["gh-ep-abi-readme"], "rag_expect": ["vendor/nvidia/ep-abi-readme"]},
+    {"q": "Windows ML EP versions 1.8.x and 2.x and the minimum driver version", "kind": "needle", "gpu_expect": ["ms-winml-supported-eps"], "rag_expect": ["vendor/microsoft/winml-eps"]}
+  ]
+}
