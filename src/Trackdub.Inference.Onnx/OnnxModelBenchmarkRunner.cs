@@ -83,7 +83,7 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
             cancellationToken.ThrowIfCancellationRequested();
 
             BenchmarkExecutionSettings settings = request.Execution ?? BenchmarkExecutionSettings.Default;
-            settings.Validate(request.RunCount);
+            BenchmarkRunGuards.Validate(request, settings);
             bool deviceBound = settings.IoMode is BenchmarkIoMode.DeviceBound;
             if (deviceBound && request.ProviderPreference is not BenchmarkProviderPreference.TensorRtRtx)
             {
@@ -91,8 +91,6 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
                     "Device-bound I/O timing requires the explicit TensorRT-RTX provider route; "
                     + "request managed I/O or the trt-rtx provider.");
             }
-
-            ThrowIfCudaGraphOverrideConflicts(request, settings);
 
             fullModelPath = ResolveModelPath(fullModelPath, notes);
             bool isCompositeGraph = LooksLikeWhisperEncoder(fullModelPath) || LooksLikeOpusEncoder(fullModelPath);
@@ -498,22 +496,6 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
         IReadOnlyDictionary<string, string> EffectiveProviderOptions,
         string? CompileOptionsIdentity,
         string? ArtifactIdentity);
-
-    // Needs only the settings and the environment, so it runs before provider registration (which can
-    // download the EP bundle) and model resolution.
-    private static void ThrowIfCudaGraphOverrideConflicts(BenchmarkRequest request, BenchmarkExecutionSettings settings)
-    {
-        if (request.ProviderPreference is BenchmarkProviderPreference.TensorRtRtx
-            && !ShouldUseCatalogDevicePolicyForPreference(request.ProviderPreference)
-            && settings.EffectiveTensorRtRtx.CudaGraphMode is not BenchmarkCudaGraphMode.Auto
-            && OnnxExecutionSessionFactory.IsCudaGraphOverrideSet())
-        {
-            throw new NotSupportedException(
-                "--cuda-graphs on, off and compare choose the capture mode for each run, so they cannot run while "
-                + $"{OnnxExecutionSessionFactory.CudaGraphsOverrideEnvironmentVariable} is set: it would give every lane "
-                + "the same capture mode and report a comparison that compares nothing. Unset the variable.");
-        }
-    }
 
     private static BenchmarkSessionPlan CreateSessionPlan(
         BenchmarkRequest request,
