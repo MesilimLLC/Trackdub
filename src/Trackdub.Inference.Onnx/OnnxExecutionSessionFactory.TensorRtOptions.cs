@@ -35,6 +35,8 @@ internal static partial class OnnxExecutionSessionFactory
     {
         public string Value { get; init; }
 
+        public string[] Parts => Value.Split('|');
+
         public static implicit operator ClassicTensorRtCacheIdentity(string value) => new() { Value = value };
     }
 
@@ -288,28 +290,27 @@ internal static partial class OnnxExecutionSessionFactory
 
     internal static bool HasCompleteClassicTensorRtCacheIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        string[] parts = environmentFingerprint.Value.Split('|');
-        if (parts.Length != 5)
+        if (environmentFingerprint.Parts.Length != 5)
         {
             return false;
         }
 
-        if (!HasKnownFingerprintParts(parts))
+        if (!HasKnownFingerprintParts(environmentFingerprint))
         {
             return false;
         }
 
-        if (!HasValidTensorRtBinaryIdentity(parts))
+        if (!HasValidTensorRtBinaryIdentity(environmentFingerprint))
         {
             return false;
         }
 
-        return HasValidOrtIdentity(parts);
+        return HasValidOrtIdentity(environmentFingerprint);
     }
 
-    private static bool HasKnownFingerprintParts(string[] parts)
+    private static bool HasKnownFingerprintParts(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        foreach (string part in parts)
+        foreach (string part in environmentFingerprint.Parts)
         {
             if (string.IsNullOrWhiteSpace(part))
             {
@@ -325,10 +326,10 @@ internal static partial class OnnxExecutionSessionFactory
         return true;
     }
 
-    private static bool HasValidTensorRtBinaryIdentity(string[] parts)
+    private static bool HasValidTensorRtBinaryIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
         const string tensorRtHashPrefix = "trt-sha256-";
-        string identity = parts[3];
+        string identity = environmentFingerprint.Parts[3];
         if (!identity.StartsWith(tensorRtHashPrefix, StringComparison.Ordinal))
         {
             return false;
@@ -342,9 +343,9 @@ internal static partial class OnnxExecutionSessionFactory
         return identity.AsSpan(tensorRtHashPrefix.Length).ToArray().All(Uri.IsHexDigit);
     }
 
-    private static bool HasValidOrtIdentity(string[] parts)
+    private static bool HasValidOrtIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        string identity = parts[4];
+        string identity = environmentFingerprint.Parts[4];
         if (!identity.StartsWith("ort-", StringComparison.Ordinal))
         {
             return false;
