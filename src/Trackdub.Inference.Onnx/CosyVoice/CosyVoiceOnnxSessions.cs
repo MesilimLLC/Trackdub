@@ -73,6 +73,11 @@ internal sealed class CosyVoiceOnnxSessions : IDisposable
 /// </summary>
 internal sealed class CosyVoiceSessionPins : IDisposable
 {
+    // Measured slower with capture on TensorRT-RTX (median 5.3 ms off vs 6.2 ms on, RTX 5070) and its mel
+    // length changes with every prompt clip, so it stays out of the CUDA graph default.
+    internal static readonly IReadOnlyDictionary<string, string> SpeechTokenizerTrtOptions =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["enable_cuda_graph"] = "0" };
+
     private readonly OnnxExecutionSessionFactory.PooledSingleSessionPin[] pins;
 
     private CosyVoiceSessionPins(OnnxExecutionSessionFactory.PooledSingleSessionPin[] pins)
@@ -86,14 +91,16 @@ internal sealed class CosyVoiceSessionPins : IDisposable
         CancellationToken cancellationToken,
         bool allowTrtInitFallback = true)
     {
-        async Task<OnnxExecutionSessionFactory.PooledSingleSessionPin> Pin(string path) =>
-            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, path).ConfigureAwait(false);
+        async Task<OnnxExecutionSessionFactory.PooledSingleSessionPin> Pin(
+            string path,
+            IReadOnlyDictionary<string, string>? trtOptions = null) =>
+            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, AdditionalTrtOptions = trtOptions }, path).ConfigureAwait(false);
 
         var pins = new OnnxExecutionSessionFactory.PooledSingleSessionPin[9];
         try
         {
             pins[0] = await Pin(modelFiles.CampPlusPath).ConfigureAwait(false);
-            pins[1] = await Pin(modelFiles.SpeechTokenizerPath).ConfigureAwait(false);
+            pins[1] = await Pin(modelFiles.SpeechTokenizerPath, SpeechTokenizerTrtOptions).ConfigureAwait(false);
             pins[2] = await Pin(modelFiles.TextEncoderPath).ConfigureAwait(false);
             pins[3] = await Pin(modelFiles.TokenGeneratorPath).ConfigureAwait(false);
             pins[4] = await Pin(modelFiles.FlowEncoderPath).ConfigureAwait(false);

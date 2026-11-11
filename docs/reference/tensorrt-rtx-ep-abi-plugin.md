@@ -159,7 +159,9 @@ flow is a poor fit. What has been checked here is output equality, not the mecha
 
 - Opt a model out by putting `enable_cuda_graph = 0` in that call site's TRT options (a caller profile
   wins over the default). The Qwen3-ASR encoder is opted out because its mel length changes almost every
-  chunk, so capture would record a graph per length. The Nemotron/Parakeet runtime options used to force
+  chunk, so capture would record a graph per length. The CosyVoice speech tokenizer is opted out too: in the
+  per-graph benchmark it was 17% slower with capture (median 5.3 ms off, 6.2 ms on); the other CosyVoice graphs
+  that ran gained 37-94%. The Nemotron/Parakeet runtime options used to force
   `0`; they now follow the default.
 - Variable-length inputs (Parakeet and Nemotron encoders) can still create many captured graphs on long
   files. Captured graphs use device memory. This has not been measured.
