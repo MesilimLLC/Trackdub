@@ -7,6 +7,10 @@ on:
     paths:
       - '.dockerignore'
       - 'Dockerfile'
+      - 'Dockerfile.api'
+      - 'Dockerfile.api.dockerignore'
+      - 'Dockerfile.cloud-worker'
+      - 'Dockerfile.cloud-worker.dockerignore'
       - 'docker-compose.yml'
       - 'docker-compose.aws.yml'
       - 'docker/**'
@@ -24,6 +28,10 @@ on:
     paths:
       - '.dockerignore'
       - 'Dockerfile'
+      - 'Dockerfile.api'
+      - 'Dockerfile.api.dockerignore'
+      - 'Dockerfile.cloud-worker'
+      - 'Dockerfile.cloud-worker.dockerignore'
       - 'docker-compose.yml'
       - 'docker-compose.aws.yml'
       - 'docker/**'
@@ -59,7 +67,7 @@ jobs:
       contents: read
       packages: write
     env:
-      IMAGE_NAME: ghcr.io/mesililm-llc/trackdub
+      IMAGE_NAME: ghcr.io/mesilimllc/trackdub
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -287,6 +295,45 @@ jobs:
             dotnet /app/Trackdub.Cli.dll run pipeline --help > /tmp/trackdub-machine-help.txt
             grep -F -- "--result-file" /tmp/trackdub-machine-help.txt
             grep -F -- "--progress-file" /tmp/trackdub-machine-help.txt
+          '
+
+      - name: Verify cloud worker image builds on this server image
+        if: matrix.profile == 'server'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The default builder (Docker driver) can see the locally loaded server image; the buildx container builder cannot.
+          docker buildx build --builder default \
+            -f Dockerfile.cloud-worker \
+            --build-arg SERVER_IMAGE=trackdub-ci:server \
+            -t trackdub-cloud-worker-ci:server \
+            --load .
+          # --entrypoint sh below bypasses the image entrypoint, so check the configured one separately.
+          test "$(docker image inspect trackdub-cloud-worker-ci:server --format '{{json .Config.Entrypoint}}')" = '["dotnet","/app/adapter/Trackdub.CloudJobAdapter.dll"]'
+          docker run --rm --entrypoint sh trackdub-cloud-worker-ci:server -c '
+            set -e
+            test -f /app/adapter/Trackdub.CloudJobAdapter.dll
+            test "$(id -u)" = 10001
+            test -x /usr/bin/setsid
+          '
+
+      - name: Verify CPU API image builds without inference payload
+        if: matrix.profile == 'server'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --builder default \
+            -f Dockerfile.api \
+            -t trackdub-cloud-api-ci:cpu \
+            --load .
+          docker run --rm --entrypoint sh trackdub-cloud-api-ci:cpu -c '
+            set -e
+            command -v ffprobe >/dev/null
+            if find /app \( -iname "*onnx*" -o -iname "*cuda*" -o -iname "*tensorrt*" \) | grep -q .; then
+              echo "CPU API image must not carry ONNX/CUDA/TensorRT files" >&2
+              find /app \( -iname "*onnx*" -o -iname "*cuda*" -o -iname "*tensorrt*" \) >&2
+              exit 1
+            fi
           '
 
       - name: Publish verified image

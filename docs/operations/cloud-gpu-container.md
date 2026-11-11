@@ -16,21 +16,21 @@ One `Dockerfile` publishes two GPU profiles from a shared `runtime-base` stage: 
 `.github/workflows/container-image.yml` builds `linux/amd64` for both profiles on container-related pull requests, checks the runtime, and publishes on `main`, `container-v*` tags, or manual dispatch. Every published tag carries the profile suffix:
 
 ```text
-ghcr.io/mesililm-llc/trackdub:main-rtx
-ghcr.io/mesililm-llc/trackdub:main-server
-ghcr.io/mesililm-llc/trackdub:sha-<commit>-rtx
-ghcr.io/mesililm-llc/trackdub:sha-<commit>-server
-ghcr.io/mesililm-llc/trackdub:container-vX.Y.Z-rtx
-ghcr.io/mesililm-llc/trackdub:container-vX.Y.Z-server
-ghcr.io/mesililm-llc/trackdub:pr-N-rtx
-ghcr.io/mesililm-llc/trackdub:pr-N-server
-ghcr.io/mesililm-llc/trackdub:latest-rtx
-ghcr.io/mesililm-llc/trackdub:latest-server
+ghcr.io/mesilimllc/trackdub:main-rtx
+ghcr.io/mesilimllc/trackdub:main-server
+ghcr.io/mesilimllc/trackdub:sha-<commit>-rtx
+ghcr.io/mesilimllc/trackdub:sha-<commit>-server
+ghcr.io/mesilimllc/trackdub:container-vX.Y.Z-rtx
+ghcr.io/mesilimllc/trackdub:container-vX.Y.Z-server
+ghcr.io/mesilimllc/trackdub:pr-N-rtx
+ghcr.io/mesilimllc/trackdub:pr-N-server
+ghcr.io/mesilimllc/trackdub:latest-rtx
+ghcr.io/mesilimllc/trackdub:latest-server
 ```
 
-The earlier bare tags (`main`, `sha-<commit>`, `container-vX.Y.Z`, `latest`) are retired deliberately: with two profiles, an unsuffixed tag would not say which GPU route the image provisions for. Local Compose builds pick a target with `TRACKDUB_GPU_TARGET` (default `rtx`); `docker-compose.aws.yml` always selects the `server` target and defaults `TRACKDUB_IMAGE` to `ghcr.io/mesililm-llc/trackdub:main-server` so AWS workers pull the published server image.
+The earlier bare tags (`main`, `sha-<commit>`, `container-vX.Y.Z`, `latest`) are retired deliberately: with two profiles, an unsuffixed tag would not say which GPU route the image provisions for. Local Compose builds pick a target with `TRACKDUB_GPU_TARGET` (default `rtx`); `docker-compose.aws.yml` always selects the `server` target and defaults `TRACKDUB_IMAGE` to `ghcr.io/mesilimllc/trackdub:main-server` so AWS workers pull the published server image.
 
-The first GHCR package may default to private. After the first successful publish, set `ghcr.io/mesililm-llc/trackdub` visibility to public in the package settings if AWS workers should pull it anonymously. ECR mirroring can be added later without changing the model-volume process.
+The first GHCR package may default to private. After the first successful publish, set `ghcr.io/mesilimllc/trackdub` visibility to public in the package settings if AWS workers should pull it anonymously. ECR mirroring can be added later without changing the model-volume process.
 
 ## Curated POC model volume
 
@@ -61,7 +61,7 @@ TTS routing follows from that fix. The planner restricts Kokoro to CUDA/CPU (Ten
 On an AWS Linux GPU worker with Docker Compose v2:
 
 ```bash
-git clone --depth 1 https://github.com/Mesililm-LLC/Trackdub.git
+git clone --depth 1 https://github.com/MesilimLLC/Trackdub.git
 cd Trackdub
 
 docker volume create trackdub_trackdub-data
@@ -202,7 +202,7 @@ export TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml
 TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh
 ```
 
-`docker-compose.aws.yml` defaults to the published `ghcr.io/mesililm-llc/trackdub:main-server` image (override with `TRACKDUB_IMAGE`) and builds the `server` target when Compose must build instead of pull. The AWS override binds that EBS mount to `/data`; the seed script detects the override and uses it for every CLI invocation. No VRAM budget is pinned anymore: the session pool auto-scales its admission budget from detected GPU VRAM (75% on cards up to 16 GiB, 85% above that, floor 4096 MB), detecting VRAM via /proc and sysfs with an NVML fallback for containers where /proc/driver/nvidia is hidden. Run `trackdub doctor` and check the `accelerator-vram-budget` row to see the detected VRAM, the resolved budget, and its source; it warns when detection failed and the floor fallback is in effect. Set `TRACKDUB_SESSION_VRAM_BUDGET_MB` only as an explicit operator override. MADLAD's TRT-RTX bundle is estimated at ~8069 MB for its encoder/decoder sessions. Treat the resulting engine cache as specific to that instance's GPU and driver.
+`docker-compose.aws.yml` defaults to the published `ghcr.io/mesilimllc/trackdub:main-server` image (override with `TRACKDUB_IMAGE`) and builds the `server` target when Compose must build instead of pull. The AWS override binds that EBS mount to `/data`; the seed script detects the override and uses it for every CLI invocation. No VRAM budget is pinned anymore: the session pool auto-scales its admission budget from detected GPU VRAM (75% on cards up to 16 GiB, 85% above that, floor 4096 MB), detecting VRAM via /proc and sysfs with an NVML fallback for containers where /proc/driver/nvidia is hidden. Run `trackdub doctor` and check the `accelerator-vram-budget` row to see the detected VRAM, the resolved budget, and its source; it warns when detection failed and the floor fallback is in effect. Set `TRACKDUB_SESSION_VRAM_BUDGET_MB` only as an explicit operator override. MADLAD's TRT-RTX bundle is estimated at ~8069 MB for its encoder/decoder sessions. Treat the resulting engine cache as specific to that instance's GPU and driver.
 
 Run the provisioning script once on each newly provisioned GPU/driver combination, and again after a driver or provider update. It writes the cache under `/data` (the persistent `trackdub-data` volume). The separate `trackdub-linml` volume persists plugin downloads. If changing the Compose project name, carry both volumes forward or the worker will appear unseeded.
 

@@ -21,6 +21,34 @@ public sealed class CliMachineBoundaryTests
         Assert.Equal("cpu", PocServerPreset.Providers["vad"]);
     }
 
+    [Theory]
+    [InlineData("SPEAKER_00:ef_dora", "ef_dora")]
+    [InlineData("SPEAKER_00:qwen3:vivian", "qwen3:vivian")]
+    public void VoiceOverrideSplitsOnFirstColonOnly(string token, string expectedVoice)
+    {
+        var parsed = CliModelOverrides.ParseVoiceOverrides([token]);
+        Assert.NotNull(parsed);
+        Assert.Equal(expectedVoice, parsed!["SPEAKER_00"]);
+    }
+
+    [Fact]
+    public void ChinesePresetTargetsMandarinWithQwen3TtsAndResolvesBuiltIn()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Join(root, "AGENTS.md"))) root = Path.GetDirectoryName(root);
+        Assert.NotNull(root);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Join(root, "src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json")));
+        var models = manifest.RootElement.GetProperty("models").EnumerateArray().ToArray();
+        Assert.True(PocPresets.TryResolve(PocServerZhPreset.Name, out var preset, out var providers, out var variants));
+        Assert.Equal("en", preset!.SourceLanguage);
+        Assert.Equal("zh", preset.TargetLanguage);
+        Assert.Equal("qwen3-tts-1.7b-customvoice", preset.Models!["tts"]);
+        Assert.Equal("cuda", providers!["tts"]);
+        Assert.Equal("quantized", variants!["translation"]);
+        foreach (string alias in preset.Models.Values)
+            Assert.Contains(models, model => model.GetProperty("aliases").EnumerateArray().Any(a => a.GetString() == alias));
+    }
+
     [Fact]
     public void QualityPresetModelsResolveInBundledInventory()
     {

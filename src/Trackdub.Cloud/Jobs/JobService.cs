@@ -11,7 +11,7 @@ public sealed class JobService(IJobStore store, IArtifactStore artifacts, TimePr
     {
         if (request.SchemaVersion != 1 || string.IsNullOrWhiteSpace(request.ProjectName) || request.ProjectName.Length > 120
             || request.Input is null || request.Input.UploadId == Guid.Empty || request.SourceLanguage != "en"
-            || request.TargetLanguage != "es" || request.Preset != "poc-server-v1"
+            || !CloudPresets.TryGet(request.Preset, request.TargetLanguage, out _)
             || string.IsNullOrWhiteSpace(key) || key.Length > 128 || key.Any(char.IsControl))
             throw new JobException("INVALID_INPUT", 400, "Invalid job request or idempotency key.");
         var upload = await store.GetUploadAsync(request.Input.UploadId, token).ConfigureAwait(false);

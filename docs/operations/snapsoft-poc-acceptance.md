@@ -25,6 +25,9 @@ TensorRT/cuDNN/CUDA sonames, the ONNX Runtime native libraries, and the
 `poc-server-v1` remains the accepted baseline. `poc-server-quality-v1` is an evaluation-only
 CLI preset and is not part of this acceptance contract until its quality, latency, VRAM and
 cost evidence is reviewed.
+`poc-server-zh-v1` (`en`->`zh`, Qwen3-TTS `qwen3:vivian`, otherwise the quality-preset pipeline) is accepted by
+the API and supervisor, but its seed list (`docker/poc-server-zh-models.txt`), Mandarin audio quality, VRAM and
+cost on the target GPU are unverified. Seed and qualify it separately from `poc-server-v1`.
 
 There is deliberately no production fake scheduler. `IJobScheduler` is the integration
 seam. SnapSoft must select Batch or ECS before one concrete adapter is implemented.
@@ -35,8 +38,8 @@ returns 503, and no accepted jobs are placed in an in-memory queue. Merely setti
 ## API and authentication
 
 - `POST /uploads`: reserve a private S3 key; return upload ID, presigned PUT URL, expiry
-  and required content-type/checksum headers. Limit: 100 MiB, MP4 audio/video, five
-  minutes, maximum 1920x1080. Declared metadata is not proof of valid media.
+  and required content-type/checksum headers. Limit: 1 GiB, MP4 audio/video, ten
+  minutes, maximum 1920x1080 (`CloudLimits`). Declared metadata is not proof of valid media.
 - Client PUTs the bytes directly to S3, retaining `x-amz-version-id`. S3 CORS must
   permit the configured portal origin and expose that header. Presigned URLs expire
   after 15 minutes and are bearer capabilities; never log or persist them as identity.
@@ -46,8 +49,8 @@ returns 503, and no accepted jobs are placed in an in-memory queue. Merely setti
   automatically from the blob; do not manually override their forbidden header. A different
   actual length invalidates the signature. Real S3 rejection still needs AWS acceptance.
   Replacing the key later cannot change that reference. No arbitrary URLs/buckets/keys.
-- `POST /jobs`: schema v1 request plus one `Idempotency-Key`. Languages `en`/`es`,
-  preset `poc-server-v1`; project name is display text. Return 202, Location and Retry-After
+- `POST /jobs`: schema v1 request plus one `Idempotency-Key`. Approved pairs (`CloudPresets`): `en`->`es` with
+  `poc-server-v1` and `en`->`zh` with `poc-server-zh-v1`; project name is display text. Return 202, Location and Retry-After
   only after atomic job/idempotency/outbox creation and upload-condition validation.
   Same owner/key/body returns the original job after API restart; changed body returns 409.
 - `GET /jobs/{id}`, `POST /jobs/{id}/cancel`, `GET /jobs/{id}/artifacts`: JWT ownership
