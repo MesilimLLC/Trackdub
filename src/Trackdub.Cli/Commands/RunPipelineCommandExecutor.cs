@@ -40,6 +40,13 @@ internal sealed class PipelineRunState
     public string? ResultFile;
     public string? ProgressFile;
     public Dictionary<string, string>? VoiceOverrides;
+    public Dictionary<string, string>? VariantOverrides;
+
+    public bool HasInvalidOverrides => VoiceOverrides is null || VariantOverrides is null;
+
+    public IReadOnlyDictionary<string, string>? MergeVariants(IReadOnlyDictionary<string, string>? presetVariants) =>
+        CliModelOverrides.MergeVariants(presetVariants, VariantOverrides);
+
     public IReadOnlyList<string>? SubtitleFormats;
     public bool IsBatchMode;
     public bool? TtsRubberbandStretch;
@@ -85,6 +92,7 @@ internal static class RunPipelineCommandExecutor
         ParseAudioInputs(parseResult, options, state);
         ParseBatchInputs(parseResult, options, state);
         state.VoiceOverrides = CliModelOverrides.ParseVoiceOverrides(state.VoiceOverrideTokens);
+        state.VariantOverrides = CliModelOverrides.ParseVariantOverrides(parseResult.GetValue(options.Variant) ?? []);
         state.SubtitleFormats = ResolveSubtitleFormats(state.SubtitleFormatTokens);
         state.IsBatchMode = state.InputDir is not null || state.InputGlob is not null;
         state.ResultFile = parseResult.GetValue(options.ResultFile);
@@ -159,7 +167,7 @@ internal static class RunPipelineCommandExecutor
             return false;
         }
 
-        if (state.VoiceOverrides is null)
+        if (state.HasInvalidOverrides)
         {
             exitCode = Program.ExitArgumentError;
             return false;
@@ -296,16 +304,17 @@ internal static class RunPipelineCommandExecutor
             stageFilter, state.ForceRerun,
             state.TtsRubberbandStretch, state.NoTtsRubberbandStretch, state.TtsRubberbandThreshold,
             state.TtsAutoStretchMaxOverrun);
-        if (PocPresets.TryResolve(
-                state.PresetName,
-                out _,
-                out IReadOnlyDictionary<string, string>? presetProviders,
-                out IReadOnlyDictionary<string, string>? presetVariants))
+        bool presetResolved = PocPresets.TryResolve(
+            state.PresetName,
+            out _,
+            out IReadOnlyDictionary<string, string>? presetProviders,
+            out IReadOnlyDictionary<string, string>? presetVariants);
+        templateOptions = templateOptions with { ModelVariantPreferences = state.MergeVariants(presetVariants) };
+        if (presetResolved)
         {
             templateOptions = templateOptions with
             {
                 ExecutionProviderPreferences = presetProviders,
-                ModelVariantPreferences = presetVariants,
                 RequireExecutionProviderPreferences = true,
             };
         }
@@ -680,7 +689,7 @@ internal static class RunPipelineCommandExecutor
                     ResultFile = state.ResultFile,
                     ProgressFile = state.ProgressFile,
                     ExecutionProviderPreferences = presetProviders,
-                    ModelVariantPreferences = presetVariants,
+                    ModelVariantPreferences = state.MergeVariants(presetVariants),
                 },
                 progress, Console.Out, ct),
             cancellationToken);
