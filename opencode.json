@@ -18,7 +18,7 @@
       "command": [
         "uv",
         "--directory",
-        "D:/Dev/Trackdub_Workspace/Trackdub/tools/mcp-trackdub-gpu-docs",
+        "tools/mcp-trackdub-gpu-docs",
         "run",
         "trackdub-gpu-docs-mcp"
       ]
