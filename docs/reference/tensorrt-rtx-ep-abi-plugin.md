@@ -175,7 +175,8 @@ flow is a poor fit. What has been checked here is output equality, not the mecha
   which most stages use, was not measured.
 - EP-context artifacts are valid whichever capture mode loads them: `BuildCompileOptionsIdentity` leaves
   `enable_cuda_graph` out, because capture is a runtime session setting rather than an engine-build option.
-  Compile and warmup sessions still run with capture off.
+  Compile and warmup sessions strip capture from the model's profile (`ForEngineBuild`), so they run with
+  capture off even for MADLAD, whose runtime profile turns it on.
 - A call site that decides per session (Whisper turns capture on only for its fixed-address bound path)
   writes `enable_cuda_graph` explicitly with `WithCudaGraphs`, so its decision wins over the default.
 

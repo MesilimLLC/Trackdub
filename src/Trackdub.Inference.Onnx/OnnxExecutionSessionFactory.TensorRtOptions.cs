@@ -466,6 +466,13 @@ internal static partial class OnnxExecutionSessionFactory
         WithCudaGraphs(options, enabled: true);
 
     /// <summary>
+    /// Options for a session that only compiles or warms engines: capture is never useful there, so it
+    /// is switched off even when the model's runtime profile turns it on (MADLAD's does).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> ForEngineBuild(IReadOnlyDictionary<string, string>? options) =>
+        WithCudaGraphs(options ?? new Dictionary<string, string>(StringComparer.Ordinal), enabled: false);
+
+    /// <summary>
     /// Copies <paramref name="options"/> with <c>enable_cuda_graph</c> written explicitly, so a call
     /// site that decides per session (rather than taking the default) always wins over the default.
     /// </summary>

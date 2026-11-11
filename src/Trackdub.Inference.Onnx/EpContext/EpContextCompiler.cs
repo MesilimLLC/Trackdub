@@ -221,7 +221,8 @@ public sealed class EpContextCompiler
         };
         // Match production TRT RTX options (including the model's optimization profile) so the
         // compiled engines match the inference path.
-        selectedProvider = OnnxExecutionSessionFactory.AppendTensorRtRtxOrFallbackProvider(options, modelTrtOptions, enableCudaGraph: false);
+        selectedProvider = OnnxExecutionSessionFactory.AppendTensorRtRtxOrFallbackProvider(
+            options, OnnxExecutionSessionFactory.ForEngineBuild(modelTrtOptions));
         return options;
     }
 
