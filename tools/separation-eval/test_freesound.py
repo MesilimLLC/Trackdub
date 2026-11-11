@@ -1,8 +1,12 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
+import urllib.error
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 import freesound
 import ingest
@@ -22,6 +26,7 @@ def result(sound_id=264499, **over):
 SPEC = {"name": "ambience crowd", "role": "ambience", "tags": ["crowd"], "q": "crowd",
         "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "limit": 10, "pages": 3}
 CREDS = freesound.Credentials("cid", "sec")
+GRANT = freesound.AuthorizationGrant("code1", "ver1")
 NO_EXCLUSIONS = freesound.SearchContext("2026-11-10", frozenset())
 
 
@@ -130,26 +135,73 @@ class SearchTests(unittest.TestCase):
 
 
 class TokenTests(unittest.TestCase):
-    def test_authorize_url(self):
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(freesound.authorize_url("cid", "st")).query)
-        self.assertEqual(query, {"client_id": ["cid"], "response_type": ["code"], "state": ["st"]})
+    def test_pkce_challenge_matches_the_rfc_7636_example(self):
+        verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        self.assertEqual(freesound.pkce_challenge(verifier), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
 
-    def test_exchange_posts_the_authorization_code_grant(self):
+    def test_authorize_url_asks_for_an_s256_challenge(self):
+        url = freesound.authorize_url("cid", "st", "chal")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(query, {"client_id": ["cid"], "response_type": ["code"], "state": ["st"],
+                                 "code_challenge": ["chal"], "code_challenge_method": ["S256"]})
+
+    def test_exchange_posts_the_authorization_code_grant_with_the_verifier(self):
         posted = []
 
         def post(url, fields):
             posted.append((url, fields))
             return {"access_token": "a1", "refresh_token": "r1", "expires_in": 86400, "scope": "read write"}
 
-        record = freesound.exchange_code("code1", CREDS, post=post, now=lambda: 1000.0)
+        record = freesound.exchange_code(GRANT, CREDS, post=post, now=lambda: 1000.0)
         self.assertEqual(posted, [(freesound.TOKEN_URL, {"client_id": "cid", "client_secret": "sec",
-                                                         "grant_type": "authorization_code", "code": "code1"})])
+                                                         "grant_type": "authorization_code", "code": "code1",
+                                                         "code_verifier": "ver1"})])
         self.assertEqual(record["expires_at"], 87400.0)
         self.assertEqual(record["refresh_token"], "r1")
 
     def test_malformed_token_response_is_rejected(self):
         with self.assertRaisesRegex(freesound.FreesoundError, "unexpected token response"):
-            freesound.exchange_code("c", CREDS, post=lambda u, f: {"error": "invalid_grant"})
+            freesound.exchange_code(GRANT, CREDS, post=lambda u, f: {"error": "invalid_grant"})
+
+    def test_authorize_then_exchange_carries_the_verifier_through_the_pending_file(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(freesound, "credentials", lambda: CREDS):
+            token = Path(td) / "t.json"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(freesound.main(["authorize", "--token-file", str(token)]), 0)
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(out.getvalue().strip()).query)
+            pending = json.loads(freesound.pending_file_for(token).read_text(encoding="utf-8"))
+            self.assertEqual(query["state"], [pending["state"]])
+            self.assertEqual(query["code_challenge"], [freesound.pkce_challenge(pending["code_verifier"])])
+            self.assertGreaterEqual(len(pending["code_verifier"]), 43)
+
+            sent = []
+
+            def fake_exchange(grant, creds, **kwargs):
+                sent.append(grant)
+                return {"access_token": "a1", "refresh_token": "r1", "expires_at": 4_000_000_000.0}
+
+            with mock.patch.object(freesound, "exchange_code", fake_exchange), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(freesound.main(["exchange", "--code", "abc", "--token-file", str(token)]), 0)
+            self.assertEqual(sent, [freesound.AuthorizationGrant("abc", pending["code_verifier"])])
+            self.assertEqual(freesound.read_token(token)["access_token"], "a1")
+            self.assertFalse(freesound.pending_file_for(token).exists())
+
+    def test_exchange_without_a_pending_authorization_asks_to_authorize_first(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(freesound, "credentials", lambda: CREDS):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = freesound.main(["exchange", "--code", "abc", "--token-file", str(Path(td) / "t.json")])
+            self.assertEqual(code, 1)
+            self.assertIn("no pending authorization", err.getvalue())
+
+    def test_malformed_pending_authorization_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "p.json"
+            path.write_text(json.dumps({"state": "s"}), encoding="utf-8")
+            with self.assertRaisesRegex(freesound.FreesoundError, "malformed"):
+                freesound.read_pending_verifier(path)
 
     def test_valid_token_is_returned_without_refresh(self):
         with tempfile.TemporaryDirectory() as td:
@@ -224,6 +276,108 @@ class FetcherTests(unittest.TestCase):
         fetch("https://archive.org/download/x/y.mp3", Path("b"), 1024)
         self.assertEqual(calls, [("https://freesound.org/apiv2/sounds/12/download/", "tok"),
                                  ("https://archive.org/download/x/y.mp3", None)])
+
+
+class FakeClock:
+    def __init__(self):
+        self.now, self.sleeps = 100.0, []
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+DOWNLOAD = "https://freesound.org/apiv2/sounds/12/download/"
+
+
+class BudgetTests(unittest.TestCase):
+    def budget(self, interval=2.0, cap=10):
+        clock = FakeClock()
+        return freesound.DownloadBudget(interval, cap, clock=clock.time, sleep=clock.sleep), clock
+
+    def test_downloads_start_at_least_one_interval_apart(self):
+        budget, clock = self.budget(interval=2.0)
+        for _ in range(4):
+            budget.acquire()
+        self.assertEqual(clock.sleeps, [2.0, 2.0, 2.0])
+
+    def test_time_spent_downloading_counts_toward_the_interval(self):
+        budget, clock = self.budget(interval=2.0)
+        budget.acquire()
+        clock.now += 1.5
+        budget.acquire()
+        self.assertEqual(clock.sleeps, [0.5])
+
+    def test_a_download_that_takes_longer_than_the_interval_is_not_delayed(self):
+        budget, clock = self.budget(interval=2.0)
+        budget.acquire()
+        clock.now += 30.0
+        budget.acquire()
+        self.assertEqual(clock.sleeps, [])
+
+    def test_rate_stays_under_thirty_a_minute_at_the_default_interval(self):
+        budget, clock = self.budget(interval=2.2, cap=100)
+        start = clock.now
+        for _ in range(31):
+            budget.acquire()
+        self.assertLess(30 / ((clock.now - start) / 60), 30)
+
+    def test_budget_stops_after_the_cap(self):
+        budget, _ = self.budget(cap=2)
+        budget.acquire()
+        budget.acquire()
+        with self.assertRaisesRegex(freesound.FreesoundError, "budget of 2 requests"):
+            budget.acquire()
+        self.assertEqual(budget.used, 2)
+
+    def test_authorized_fetcher_uses_the_budget_for_freesound_downloads_only(self):
+        budget, clock = self.budget(cap=1)
+        calls = []
+
+        def fake_fetch(url, dest, range_bytes=None, *, bearer_token=None):
+            calls.append(url)
+
+        fetch = freesound.authorized_fetcher("tok", fetch=fake_fetch, budget=budget)
+        fetch("https://archive.org/download/x/y.mp3", Path("a"), 1024)
+        fetch("https://archive.org/download/x/z.mp3", Path("b"), 1024)
+        fetch(DOWNLOAD, Path("c"), None)
+        self.assertEqual(budget.used, 1)
+        with self.assertRaisesRegex(freesound.FreesoundError, "budget"):
+            fetch("https://freesound.org/apiv2/sounds/13/download/", Path("d"), None)
+        self.assertEqual(len(calls), 3)
+
+    def test_a_429_stops_every_later_download_without_a_request(self):
+        budget, _ = self.budget()
+        calls = []
+
+        def throttled_fetch(url, dest, range_bytes=None, *, bearer_token=None):
+            calls.append(url)
+            cause = urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+            raise ingest.IngestError("download failed: HTTP Error 429") from cause
+
+        fetch = freesound.authorized_fetcher("tok", fetch=throttled_fetch, budget=budget)
+        with self.assertRaises(ingest.IngestError):
+            fetch(DOWNLOAD, Path("a"), None)
+        with self.assertRaisesRegex(freesound.FreesoundError, "429"):
+            fetch("https://freesound.org/apiv2/sounds/13/download/", Path("b"), None)
+        self.assertEqual(len(calls), 1)
+
+    def test_other_failures_do_not_stop_the_run(self):
+        budget, _ = self.budget()
+        calls = []
+
+        def failing_fetch(url, dest, range_bytes=None, *, bearer_token=None):
+            calls.append(url)
+            raise ingest.IngestError("download failed: HTTP Error 404")
+
+        fetch = freesound.authorized_fetcher("tok", fetch=failing_fetch, budget=budget)
+        for sound in (12, 13):
+            with self.assertRaises(ingest.IngestError):
+                fetch(f"https://freesound.org/apiv2/sounds/{sound}/download/", Path("a"), None)
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

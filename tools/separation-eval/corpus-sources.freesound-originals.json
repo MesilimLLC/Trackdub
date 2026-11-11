@@ -1,23 +1,31 @@
 {
   "name": "corpus-sources.freesound-originals",
-  "notes": "Freesound original files for corpus v1.1, searched with freesound.py and downloaded by ingest.py over OAuth2. Mirrors the Freesound queries in corpus-sources.v1.json, restricted to CC0, lossless types (wav, flac, aiff), 1 or 2 channels and at least 44.1 kHz. Tags come from the query and are unverified. Run discover with the FSD50K ground-truth CSVs as --exclude-ids so sounds used to train DnR-derived models stay out.",
+  "notes": "Freesound original files for corpus v1.1, searched with freesound.py and downloaded by ingest.py over OAuth2. Mirrors the Freesound queries in corpus-sources.v1.json, restricted to CC0, lossless types (wav, flac, aiff), 1 or 2 channels and at least 44.1 kHz. The limits add up to 500, the daily allowance of original downloads. max_filesize_bytes bounds disk use per search. Tags come from the query and are unverified. Run discover with the FSD50K ground-truth CSVs as --exclude-ids so sounds used to train DnR-derived models stay out; manifest items record freesound_id so they can also be filtered afterwards.",
   "freesound": [
-    {"name": "sfx explosion", "role": "sfx", "tags": ["loud"], "q": "explosion", "pages": 2, "limit": 12, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2},
-    {"name": "sfx gunshot", "role": "sfx", "tags": ["loud"], "q": "gunshot", "pages": 2, "limit": 12, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2},
-    {"name": "sfx impact crash", "role": "sfx", "tags": ["loud"], "q": "impact crash", "pages": 2, "limit": 12, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2},
-    {"name": "sfx engine", "role": "sfx", "tags": ["loud"], "q": "engine roar", "pages": 2, "limit": 12, "min_duration_s": 3, "max_duration_s": 60, "per_creator_cap": 2},
-    {"name": "sfx thunder", "role": "sfx", "tags": ["loud"], "q": "thunder", "pages": 2, "limit": 12, "min_duration_s": 3, "max_duration_s": 60, "per_creator_cap": 2},
+    {"name": "sfx explosion", "role": "sfx", "tags": ["loud"], "q": "explosion", "pages": 4, "limit": 28, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
+    {"name": "sfx gunshot", "role": "sfx", "tags": ["loud"], "q": "gunshot", "pages": 4, "limit": 28, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
+    {"name": "sfx impact crash", "role": "sfx", "tags": ["loud"], "q": "impact crash", "pages": 4, "limit": 28, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
+    {"name": "sfx engine", "role": "sfx", "tags": ["loud"], "q": "engine roar", "pages": 4, "limit": 28, "min_duration_s": 3, "max_duration_s": 60, "per_creator_cap": 4, "max_filesize_bytes": 25000000},
+    {"name": "sfx thunder", "role": "sfx", "tags": ["loud"], "q": "thunder", "pages": 4, "limit": 28, "min_duration_s": 3, "max_duration_s": 60, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
+    {"name": "sfx car crash", "role": "sfx", "tags": ["loud"], "q": "car crash", "pages": 4, "limit": 20, "min_duration_s": 2, "max_duration_s": 40, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
+    {"name": "sfx punch hit", "role": "sfx", "tags": ["loud"], "q": "punch hit", "pages": 4, "limit": 20, "min_duration_s": 1, "max_duration_s": 30, "per_creator_cap": 2, "max_filesize_bytes": 25000000},
 
-    {"name": "ambience crowd", "role": "ambience", "tags": ["crowd"], "q": "crowd", "pages": 3, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience restaurant murmur", "role": "ambience", "tags": ["crowd"], "q": "restaurant crowd murmur", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience stadium", "role": "ambience", "tags": ["crowd"], "q": "stadium crowd", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience room tone", "role": "ambience", "tags": [], "q": "room tone", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience city", "role": "ambience", "tags": [], "q": "city ambience", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience rain", "role": "ambience", "tags": [], "q": "rain", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
-    {"name": "ambience forest", "role": "ambience", "tags": [], "q": "forest ambience", "pages": 2, "limit": 12, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2},
+    {"name": "ambience crowd", "role": "ambience", "tags": ["crowd"], "q": "crowd", "pages": 5, "limit": 55, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 4, "max_filesize_bytes": 100000000},
+    {"name": "ambience restaurant murmur", "role": "ambience", "tags": ["crowd"], "q": "restaurant crowd murmur", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 4, "max_filesize_bytes": 100000000},
+    {"name": "ambience stadium", "role": "ambience", "tags": ["crowd"], "q": "stadium crowd", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "max_filesize_bytes": 100000000},
+    {"name": "ambience room tone", "role": "ambience", "tags": [], "q": "room tone", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "max_filesize_bytes": 100000000},
+    {"name": "ambience city", "role": "ambience", "tags": [], "q": "city ambience", "pages": 4, "limit": 30, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "max_filesize_bytes": 100000000},
+    {"name": "ambience rain", "role": "ambience", "tags": [], "q": "rain", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "max_filesize_bytes": 100000000},
+    {"name": "ambience forest", "role": "ambience", "tags": [], "q": "forest ambience", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 2, "max_filesize_bytes": 100000000},
 
-    {"name": "rir impulse response", "role": "rir", "tags": [], "q": "impulse response", "pages": 3, "limit": 50, "min_duration_s": 0.5, "max_duration_s": 10, "per_creator_cap": 6},
+    {"name": "ambience applause", "role": "ambience", "tags": ["crowd"], "q": "applause", "pages": 4, "limit": 20, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 3, "max_filesize_bytes": 100000000},
+    {"name": "ambience street traffic", "role": "ambience", "tags": [], "q": "street ambience traffic", "pages": 4, "limit": 25, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 3, "max_filesize_bytes": 100000000},
+    {"name": "ambience market crowd", "role": "ambience", "tags": ["crowd"], "q": "market crowd", "pages": 4, "limit": 20, "min_duration_s": 20, "max_duration_s": 300, "per_creator_cap": 3, "max_filesize_bytes": 100000000},
+    {"name": "sfx engine start", "role": "sfx", "tags": ["loud"], "q": "car engine start", "pages": 4, "limit": 20, "min_duration_s": 3, "max_duration_s": 60, "per_creator_cap": 4, "max_filesize_bytes": 25000000},
 
-    {"name": "dialogue whispered speech", "role": "dialogue", "tags": ["whisper"], "q": "whispering speech", "pages": 2, "limit": 20, "min_duration_s": 5, "max_duration_s": 120, "per_creator_cap": 2}
+    {"name": "rir impulse response", "role": "rir", "tags": [], "q": "impulse response", "pages": 5, "limit": 70, "min_duration_s": 0.5, "max_duration_s": 10, "per_creator_cap": 6, "max_filesize_bytes": 20000000},
+
+    {"name": "dialogue whispered speech", "role": "dialogue", "tags": ["whisper"], "q": "whispering speech", "pages": 4, "limit": 40, "min_duration_s": 5, "max_duration_s": 120, "per_creator_cap": 4, "max_filesize_bytes": 40000000},
+    {"name": "dialogue whisper", "role": "dialogue", "tags": ["whisper"], "q": "whisper", "pages": 4, "limit": 30, "min_duration_s": 5, "max_duration_s": 120, "per_creator_cap": 4, "max_filesize_bytes": 40000000}
   ]
 }

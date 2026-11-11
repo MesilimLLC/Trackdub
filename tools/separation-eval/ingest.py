@@ -38,7 +38,8 @@ DEV_PERCENT = 30
 MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 ROLES = ("dialogue", "music", "sfx", "ambience", "rir")
-ITEM_PASSTHROUGH_KEYS = ("range_bytes", "ext", "tag_basis", "title", "creator", "query", "retrieved_at", "freesound_id")
+ITEM_PASSTHROUGH_KEYS = ("range_bytes", "ext", "tag_basis", "title", "creator", "query", "retrieved_at", "freesound_id",
+                         "language", "gender_class", "provenance", "local_only")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 EXT_PATTERN = re.compile(r"^[a-z0-9]{1,5}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -259,6 +260,35 @@ def cache_path(cache: Path, rec: dict) -> Path:
     return destination
 
 
+def _local_problem(rec: dict, cache: Path) -> str | None:
+    """Why a local-only item cannot be used from the cache, or None when its file is there and intact."""
+    try:
+        path = cache_path(cache, rec)
+    except (IngestError, KeyError, TypeError, AttributeError):
+        return "has no usable cache location"
+    if not path.is_file():
+        return "is missing from the cache"
+    expected = rec.get("sha256")
+    if expected is not None and sha256_file(path) != expected:
+        return "differs from its recorded sha256"
+    return None
+
+
+def split_unusable_local(records: Iterable[dict], cache: Path) -> tuple[list[dict], list[Rejection]]:
+    """Set aside local-only items (built on this machine from archives) that are missing or corrupted in the
+    cache. Their `url` is only provenance, so there is nothing to download."""
+    kept: list[dict] = []
+    rejected: list[Rejection] = []
+    for rec in records:
+        problem = _local_problem(rec, cache) if isinstance(rec, dict) and rec.get("local_only") is True else None
+        if problem:
+            rejected.append(Rejection(str(rec.get("id", "<missing>")),
+                                      f"local-only item {problem}; rebuild it with build_local_items.py"))
+        else:
+            kept.append(rec)
+    return kept, rejected
+
+
 def fetch_all(
     pending: list[tuple[dict, Path]],
     fetch: Fetcher,
@@ -317,7 +347,7 @@ def ingest_items(
     if per_host < 1:
         raise IngestError("per_host must be a positive integer")
     accepted: list[dict] = []
-    rejected: list[Rejection] = []
+    records, rejected = split_unusable_local(records, cache)
     seen_ids: set[str] = set()
     seen_hashes: dict[str, str] = {}
 
@@ -458,10 +488,11 @@ def positive_int(value: str) -> int:
     return parsed
 
 
-def _select_fetcher(records: list[dict], token_file: Path | None) -> Fetcher:
-    """Plain downloads, or authorized ones when any item is a Freesound original."""
+def _select_fetcher(records: list[dict], args: argparse.Namespace) -> Fetcher:
+    """Plain downloads, or authorized and rate-limited ones when any item is a Freesound original."""
     import freesound  # freesound imports this module
-    return freesound.fetcher_for_records(records, token_file)
+    budget = freesound.DownloadBudget(args.freesound_interval, args.freesound_max_downloads)
+    return freesound.fetcher_for_records(records, args.freesound_token_file, budget)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -479,6 +510,10 @@ def main(argv: list[str] | None = None) -> int:
                           help="write the manifest from accepted items even if some were rejected")
     p_ingest.add_argument("--freesound-token-file", type=Path,
                           help="OAuth2 token file from `freesound.py exchange` (default: the per-user location)")
+    p_ingest.add_argument("--freesound-interval", type=float, default=2.2,
+                          help="seconds between Freesound original downloads; Freesound allows 30 a minute (default 2.2)")
+    p_ingest.add_argument("--freesound-max-downloads", type=positive_int, default=450,
+                          help="most Freesound original downloads to make in this run; the daily limit is 500 (default 450)")
 
     p_verify = sub.add_parser("verify", help="re-check a manifest against the cache")
     p_verify.add_argument("--manifest", type=Path, required=True)
@@ -496,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         records = read_jsonl(args.items)
-        fetch = _select_fetcher(records, args.freesound_token_file)
+        fetch = _select_fetcher(records, args)
     except IngestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -332,6 +332,40 @@ class CoverageTests(unittest.TestCase):
         _, gaps = coverage.check(items, min_groups=1)
         self.assertTrue(any(g.startswith("A6 dialogue") for g in gaps))
 
+    def language_items(self, language, per_split=8):
+        items = self.items_for(f"lang-{language}", "dialogue", [], per_split=per_split)
+        return [{**i, "language": language} for i in items]
+
+    def test_a13_is_not_checked_when_every_dialogue_item_is_english(self):
+        rows, gaps = coverage.check(self.full_set(), min_groups=3)
+        self.assertNotIn("A13", {r["recipe"] for r in rows})
+        self.assertFalse(any(g.startswith("A13") for g in gaps))
+
+    def test_non_english_dialogue_activates_a13_and_asks_for_five_languages(self):
+        items = self.full_set() + [i for lang in ("ar", "pt", "ru") for i in self.language_items(lang)]
+        rows, gaps = coverage.check(items, min_groups=3)
+        self.assertIn("A13", {r["recipe"] for r in rows})
+        self.assertTrue(any(g.startswith("A13 [dev]: 3 non-English language(s) with 8+ speakers, need 5") for g in gaps))
+        self.assertTrue(any(g.startswith("A13 [test]: 3 non-English") for g in gaps))
+        self.assertFalse(any(g.startswith("A1 ") for g in gaps))
+
+    def test_five_languages_with_enough_speakers_close_the_a13_gap(self):
+        items = self.full_set() + [i for lang in ("ar", "pt", "ru", "ja", "tr") for i in self.language_items(lang)]
+        _, gaps = coverage.check(items, min_groups=3)
+        self.assertFalse(any(g.startswith("A13") for g in gaps))
+
+    def test_a_language_with_too_few_speakers_does_not_count(self):
+        items = self.full_set() + [i for lang in ("ar", "pt", "ru", "ja") for i in self.language_items(lang)]
+        items += self.language_items("tr", per_split=3)
+        _, gaps = coverage.check(items, min_groups=3)
+        self.assertTrue(any(g.startswith("A13 [dev]: 4 non-English") for g in gaps))
+
+    def test_english_recipes_ignore_non_english_dialogue(self):
+        english_gone = [i for i in self.full_set() if i["role"] != "dialogue"]
+        items = english_gone + [i for lang in ("ar", "pt", "ru") for i in self.language_items(lang)]
+        _, gaps = coverage.check(items, min_groups=3)
+        self.assertTrue(any(g.startswith("A1 dialogue [dev]") for g in gaps))
+
     def test_main_exit_codes(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "items.jsonl"

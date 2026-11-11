@@ -4,7 +4,8 @@
 Discovers sounds with the Freesound APIv2 text search (API-key auth) and lets `ingest.py` download the
 original files, which Freesound only serves to OAuth2 clients. Credentials come from FREESOUND_CLIENT_ID and
 FREESOUND_CLIENT_SECRET, read from the process environment or, on Windows, the per-user environment. The
-OAuth2 token is stored per user, outside the repository, and is never printed.
+OAuth2 token is stored per user, outside the repository, and is never printed. Freesound requires PKCE (S256):
+`authorize` keeps its code verifier in a pending file beside the token, and `exchange` sends it and removes it.
 
 Check the Freesound API terms of use for the intended use before running any command that calls the API.
 
@@ -19,12 +20,15 @@ Check the Freesound API terms of use for the intended use before running any com
 from __future__ import annotations
 
 import argparse
+import base64
 import collections
+import hashlib
 import json
 import os
 import re
 import secrets
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -76,6 +80,11 @@ class FreesoundError(ingest.IngestError):
 class Credentials(NamedTuple):
     client_id: str
     secret: str
+
+
+class AuthorizationGrant(NamedTuple):
+    code: str
+    code_verifier: str
 
 
 class SearchContext(NamedTuple):
@@ -144,8 +153,32 @@ def read_token(path: Path) -> dict:
 
 # ---- OAuth2 -------------------------------------------------------------------------------------------------
 
-def authorize_url(client_id: str, state: str) -> str:
-    return AUTHORIZE_URL + "?" + urllib.parse.urlencode({"client_id": client_id, "response_type": "code", "state": state})
+def pkce_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def authorize_url(client_id: str, state: str, challenge: str) -> str:
+    return AUTHORIZE_URL + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "response_type": "code", "state": state,
+        "code_challenge": challenge, "code_challenge_method": "S256"})
+
+
+def pending_file_for(token_file: Path) -> Path:
+    return token_file.with_name("freesound-pending-authorization.json")
+
+
+def read_pending_verifier(path: Path) -> str:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FreesoundError(f"no pending authorization at {path}; run `freesound.py authorize` first") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FreesoundError(f"cannot read the pending authorization at {path}: {exc}") from exc
+    verifier = record.get("code_verifier") if isinstance(record, dict) else None
+    if not isinstance(verifier, str) or not verifier:
+        raise FreesoundError(f"the pending authorization at {path} is malformed; run `freesound.py authorize` again")
+    return verifier
 
 
 def http_post_form(url: str, fields: dict) -> dict:
@@ -174,10 +207,10 @@ def _token_record(response: dict, now: float) -> dict:
             "expires_at": now + expires_in, "scope": response.get("scope")}
 
 
-def exchange_code(code: str, creds: Credentials, *, post: Post = http_post_form,
+def exchange_code(grant: AuthorizationGrant, creds: Credentials, *, post: Post = http_post_form,
                   now: Callable[[], float] = time.time) -> dict:
     fields = {"client_id": creds.client_id, "client_secret": creds.secret,
-              "grant_type": "authorization_code", "code": code}
+              "grant_type": "authorization_code", "code": grant.code, "code_verifier": grant.code_verifier}
     return _token_record(post(TOKEN_URL, fields), now())
 
 
@@ -213,18 +246,62 @@ def is_download_url(url: str) -> bool:
     return on_freesound and DOWNLOAD_PATH.fullmatch(parts.path) is not None
 
 
-def authorized_fetcher(access_token: str, fetch: Callable[..., None] = ingest.http_fetch) -> ingest.Fetcher:
-    """An ingest fetcher that sends the token to Freesound download URLs only."""
+class DownloadBudget:
+    """Spaces Freesound download starts apart, caps how many are made, and stops for good after a 429.
+
+    Freesound allows 30 original-file downloads a minute and 500 a day; the caller picks an interval and a
+    cap that stay under those."""
+
+    def __init__(self, min_interval_s: float, max_requests: int,
+                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep):
+        self.min_interval_s, self.max_requests = min_interval_s, max_requests
+        self._clock, self._sleep = clock, sleep
+        self._lock = threading.Lock()
+        self._next_start, self.used, self._stopped = 0.0, 0, ""
+
+    def acquire(self) -> None:
+        with self._lock:
+            if self._stopped:
+                raise FreesoundError(self._stopped)
+            if self.used >= self.max_requests:
+                raise FreesoundError(f"download budget of {self.max_requests} requests used; rerun later")
+            wait = self._next_start - self._clock()
+            if wait > 0:
+                self._sleep(wait)
+            self._next_start = max(self._next_start, self._clock()) + self.min_interval_s
+            self.used += 1
+
+    def stop(self, reason: str) -> None:
+        self._stopped = reason
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    return getattr(exc.__cause__, "code", None) == 429
+
+
+def authorized_fetcher(access_token: str, fetch: Callable[..., None] = ingest.http_fetch,
+                       budget: DownloadBudget | None = None) -> ingest.Fetcher:
+    """An ingest fetcher that sends the token to Freesound download URLs only, within the budget."""
     def fetch_one(url: str, dest: Path, range_bytes: int | None = None) -> None:
-        fetch(url, dest, range_bytes, bearer_token=access_token if is_download_url(url) else None)
+        if not is_download_url(url):
+            return fetch(url, dest, range_bytes, bearer_token=None)
+        if budget:
+            budget.acquire()
+        try:
+            fetch(url, dest, range_bytes, bearer_token=access_token)
+        except ingest.IngestError as exc:
+            if budget and _is_rate_limited(exc):
+                budget.stop("Freesound answered 429 Too Many Requests; downloads stopped, rerun later")
+            raise
     return fetch_one
 
 
-def fetcher_for_records(records: Iterable[object], token_file: Path | None = None) -> ingest.Fetcher:
+def fetcher_for_records(records: Iterable[object], token_file: Path | None = None,
+                        budget: DownloadBudget | None = None) -> ingest.Fetcher:
     """Plain downloads, unless some item is a Freesound original, which needs the stored token."""
     if not any(isinstance(r, dict) and is_download_url(str(r.get("url", ""))) for r in records):
         return ingest.http_fetch
-    return authorized_fetcher(load_access_token(token_file))
+    return authorized_fetcher(load_access_token(token_file), budget=budget)
 
 
 # ---- Search specs -------------------------------------------------------------------------------------------
@@ -434,7 +511,8 @@ def read_excluded_ids(paths: Iterable[Path]) -> set[int]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("authorize", help="print the URL that grants this tool access to original files")
+    p_authorize = sub.add_parser("authorize", help="print the URL that grants this tool access to original files")
+    p_authorize.add_argument("--token-file", type=Path)
     p_exchange = sub.add_parser("exchange", help="trade the code Freesound showed for a stored token")
     p_exchange.add_argument("--code", required=True)
     p_exchange.add_argument("--token-file", type=Path)
@@ -453,15 +531,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_authorize(args: argparse.Namespace) -> None:
-    print(authorize_url(credentials().client_id, secrets.token_urlsafe(16)))
+    client_id = credentials().client_id
+    verifier, state = secrets.token_urlsafe(64), secrets.token_urlsafe(16)
+    save_token(pending_file_for(args.token_file or default_token_file()), {"state": state, "code_verifier": verifier})
+    print(authorize_url(client_id, state, pkce_challenge(verifier)))
     print("Open the URL, sign in, approve access, then run "
           "`freesound.py exchange --code <code>` within 10 minutes.", file=sys.stderr)
 
 
 def _cmd_exchange(args: argparse.Namespace) -> None:
     path = args.token_file or default_token_file()
-    record = exchange_code(args.code, credentials())
+    pending = pending_file_for(path)
+    record = exchange_code(AuthorizationGrant(args.code, read_pending_verifier(pending)), credentials())
     save_token(path, record)
+    pending.unlink(missing_ok=True)
     expires = datetime.fromtimestamp(record["expires_at"], timezone.utc)
     print(f"saved token to {path}; expires {expires:%Y-%m-%d %H:%M} UTC")
 
