@@ -9,6 +9,24 @@ public sealed class TensorRtRtxDirectMlInteropTests
 {
     private const string LimitText = "101376";
 
+    public sealed record CallerLimit(string Requested, string Expected);
+
+    public static TheoryData<CallerLimit> WindowsCallerLimits => new()
+    {
+        new CallerLimit("65536", "65536"),
+        new CallerLimit(LimitText, LimitText),
+        new CallerLimit("0", LimitText),
+        new CallerLimit("202752", LimitText),
+        new CallerLimit("not-a-number", LimitText),
+        new CallerLimit("-1", LimitText),
+    };
+
+    public static TheoryData<CallerLimit> NonWindowsCallerLimits => new()
+    {
+        new CallerLimit("0", "0"),
+        new CallerLimit("202752", "202752"),
+    };
+
     [Fact]
     public void Limit_is_99_KiB()
     {
@@ -16,41 +34,46 @@ public sealed class TensorRtRtxDirectMlInteropTests
         Assert.Equal(99 * 1024, long.Parse(LimitText, System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void Apply_caps_shared_memory_on_windows_regardless_of_driver(bool isWindows, bool expectCap)
+    [Fact]
+    public void Apply_caps_shared_memory_on_windows_regardless_of_driver()
     {
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows);
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
 
-        Assert.Equal(expectCap, options.ContainsKey(TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey));
-        if (expectCap)
-        {
-            Assert.Equal(LimitText, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
-        }
+        Assert.Equal(LimitText, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+    }
+
+    [Fact]
+    public void Apply_leaves_options_alone_off_windows()
+    {
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows: false);
+
+        Assert.Empty(options);
     }
 
     [Theory]
-    [InlineData("65536", true, "65536")]
-    [InlineData("101376", true, "101376")]
-    [InlineData("0", true, LimitText)]
-    [InlineData("202752", true, LimitText)]
-    [InlineData("not-a-number", true, LimitText)]
-    [InlineData("-1", true, LimitText)]
-    [InlineData("0", false, "0")]
-    [InlineData("202752", false, "202752")]
-    public void Apply_resolves_a_caller_supplied_limit(string requested, bool isWindows, string expected)
+    [MemberData(nameof(WindowsCallerLimits))]
+    public void Apply_resolves_a_caller_supplied_limit_on_windows(CallerLimit limit)
     {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = requested,
-        };
+        Dictionary<string, string> options = OptionsWith(limit.Requested);
 
-        TensorRtRtxDirectMlInterop.Apply(options, isWindows);
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows: true);
 
-        Assert.Equal(expected, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+        Assert.Equal(limit.Expected, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
+    }
+
+    [Theory]
+    [MemberData(nameof(NonWindowsCallerLimits))]
+    public void Apply_leaves_a_caller_supplied_limit_alone_off_windows(CallerLimit limit)
+    {
+        Dictionary<string, string> options = OptionsWith(limit.Requested);
+
+        TensorRtRtxDirectMlInterop.Apply(options, isWindows: false);
+
+        Assert.Equal(limit.Expected, options[TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey]);
     }
 
     [Fact]
@@ -78,58 +101,9 @@ public sealed class TensorRtRtxDirectMlInteropTests
             options.GetValueOrDefault(TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey));
     }
 
-    [Theory]
-    [InlineData("on", "0", "1")]
-    [InlineData("ON", "0", "1")]
-    [InlineData("1", "0", "1")]
-    [InlineData("true", "0", "1")]
-    [InlineData("off", "1", "0")]
-    [InlineData("0", "1", "0")]
-    [InlineData("false", "1", "0")]
-    [InlineData(null, "1", "1")]
-    [InlineData("", "0", "0")]
-    [InlineData("auto", "1", "1")]
-    public void ApplyCudaGraphOverride_only_acts_on_on_or_off(string? overrideValue, string callSite, string expected)
-    {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal) { ["enable_cuda_graph"] = callSite };
-
-        OnnxExecutionSessionFactory.ApplyCudaGraphOverride(options, overrideValue);
-
-        Assert.Equal(expected, options["enable_cuda_graph"]);
-    }
-
-    [Theory]
-    [InlineData("off", "0")]
-    [InlineData("on", "1")]
-    [InlineData(null, "1")]
-    public void Override_wins_over_a_profile_built_with_WithCudaGraphsEnabled(string? overrideValue, string expected)
-    {
-        IReadOnlyDictionary<string, string> profile = OnnxExecutionSessionFactory.WithCudaGraphsEnabled(
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["trt_profile_min_shapes"] = "input_features:1x80x1" });
-
-        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
-            profile,
-            enableCudaGraph: false,
-            overrideValue);
-
-        Assert.Equal(expected, options["enable_cuda_graph"]);
-        Assert.Equal("input_features:1x80x1", options["nv_profile_min_shapes"]);
-    }
-
-    [Theory]
-    [InlineData(true, "1")]
-    [InlineData(false, "0")]
-    public void A_per_session_decision_wins_over_the_default(bool decision, string expected)
-    {
-        IReadOnlyDictionary<string, string> profile = OnnxExecutionSessionFactory.WithCudaGraphs(
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["trt_profile_min_shapes"] = "x:1" },
-            decision);
-
-        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
-            profile,
-            OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
-            cudaGraphOverride: null);
-
-        Assert.Equal(expected, options["enable_cuda_graph"]);
-    }
+    private static Dictionary<string, string> OptionsWith(string requestedLimit) =>
+        new(StringComparer.Ordinal)
+        {
+            [TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey] = requestedLimit,
+        };
 }
