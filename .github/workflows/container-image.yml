@@ -308,6 +308,8 @@ jobs:
             --build-arg SERVER_IMAGE=trackdub-ci:server \
             -t trackdub-cloud-worker-ci:server \
             --load .
+          # --entrypoint sh below bypasses the image entrypoint, so check the configured one separately.
+          test "$(docker image inspect trackdub-cloud-worker-ci:server --format '{{json .Config.Entrypoint}}')" = '["dotnet","/app/adapter/Trackdub.CloudJobAdapter.dll"]'
           docker run --rm --entrypoint sh trackdub-cloud-worker-ci:server -c '
             set -e
             test -f /app/adapter/Trackdub.CloudJobAdapter.dll

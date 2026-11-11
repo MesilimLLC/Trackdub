@@ -92,8 +92,11 @@ There is no separate allow-list configuration file. The allow-list is the provid
 | vad | CPU (Silero fails TensorRT import; CPU costs nothing) |
 | asr, translation, tts, diarization, separation, speech-enhancement | CUDA |
 
-Classic TensorRT is available in the image and is used only for the graphs in
-`docker/poc-warm-models.server.txt` (DeepFilterNet3, SortFormer, Spleeter, Parakeet). Constraints from the runbook:
+Classic TensorRT is available in the image, and `seed-and-warm-gpu-worker.sh` compiles engines for the graphs in
+`docker/poc-warm-models.server.txt` (DeepFilterNet3, SortFormer, Spleeter, Parakeet). Both cloud presets pin
+those stages to CUDA, so preset runs do not use the warmed engines; the warm step adds build time and EBS storage
+without speeding up `poc-server-v1` or `poc-server-zh-v1`. Decide whether to skip it or to change the presets'
+provider pins after measuring on L4/L40S. Constraints from the runbook:
 
 - MADLAD `quantized` is not classic-TensorRT qualified; the `trt-fp16` export is, but needs a 24 GiB-class GPU
   (about 12.7 GB session bundle) and is not in the accepted preset.
@@ -117,6 +120,10 @@ trackdub run pipeline --media in.mp4 --output ./project --source-language en --t
 
 Provisioning a GPU host: `TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh` with
 `TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml` (see the runbook for the EBS mount and UID 10001 ownership).
+The script seeds the Spanish set (`docker/poc-server-models.txt`) by default. To accept `poc-server-zh-v1` jobs,
+the host also needs the Qwen3-TTS weights; seed them before scheduling Chinese jobs, for example
+`TRACKDUB_MODEL_SET=docker/poc-server-zh-models.txt ./scripts/docker/seed-model-volume.sh` (same compose override).
+Keep Kokoro seeded for `poc-server-v1`; the two lists share every other model.
 
 Build and test without AWS or a GPU:
 
