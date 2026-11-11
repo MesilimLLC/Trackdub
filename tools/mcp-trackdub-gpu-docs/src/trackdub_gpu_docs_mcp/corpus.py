@@ -52,6 +52,11 @@ def load_manifest() -> dict[str, Any]:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
+def _docs_rag_corpus() -> dict[str, Any]:
+    path = find_repo_root() / "tools" / "docs-rag" / "corpus.v1.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def load_sources() -> list[CorpusSource]:
     manifest = load_manifest()
     sources: list[CorpusSource] = []
@@ -68,6 +73,23 @@ def load_sources() -> list[CorpusSource]:
                 pin_warning=raw.get("pinWarning"),
             )
         )
+    # Remote pages live once, in the docs-rag corpus; a vendor source opts in with a "gpu" block.
+    for vendor in _docs_rag_corpus()["vendors"]:
+        for entry in vendor["sources"]:
+            gpu = entry.get("gpu") if isinstance(entry, dict) else None
+            if gpu is None:
+                continue
+            sources.append(
+                CorpusSource(
+                    id=gpu["id"],
+                    kind="url",
+                    title=gpu["title"],
+                    tags=tuple(gpu.get("tags", [])),
+                    priority=int(gpu.get("priority", 0)),
+                    url=entry["url"],
+                    pin_warning=gpu.get("pinWarning"),
+                )
+            )
     return sources
 
 
