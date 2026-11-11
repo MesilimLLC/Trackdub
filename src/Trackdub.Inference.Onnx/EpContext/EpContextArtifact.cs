@@ -274,7 +274,9 @@ public static class EpContextArtifact
 
     /// <summary>
     /// Stable identity of the compile/provider options that affect the engine.
-    /// Path-valued options such as the runtime cache directory are omitted.
+    /// Path-valued options such as the runtime cache directory are omitted, and so is
+    /// <c>enable_cuda_graph</c>: capture is a runtime session setting, not an engine-build option, so an
+    /// artifact is valid whichever capture mode the session that loads it uses.
     /// </summary>
     public static string BuildCompileOptionsIdentity(
         IReadOnlyDictionary<string, string>? providerOptions,
@@ -282,14 +284,14 @@ public static class EpContextArtifact
     {
         var pairs = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
-            ["enable_cuda_graph"] = "0",
             ["ep_context_embed_mode"] = embedEpContext ? "1" : "0",
         };
         if (providerOptions is not null)
         {
             foreach ((string key, string value) in providerOptions)
             {
-                if (key.EndsWith("_path", StringComparison.OrdinalIgnoreCase))
+                if (key.EndsWith("_path", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(key, "enable_cuda_graph", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

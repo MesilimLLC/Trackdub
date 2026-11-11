@@ -74,4 +74,25 @@ public sealed class MadladTrtProfilesTests
     private static Dictionary<string, int[]> Parse(string profile) => profile.Split(',')
         .Select(static entry => entry.Split(':'))
         .ToDictionary(static parts => parts[0], static parts => parts[1].Split('x').Select(int.Parse).ToArray());
+
+    [Fact]
+    public void Compile_and_warmup_sessions_switch_off_capture_even_for_profiles_that_enable_it()
+    {
+        Assert.Equal("1", MadladTrtProfiles.Encoder["enable_cuda_graph"]);
+
+        foreach (var profile in new[] { MadladTrtProfiles.Encoder, MadladTrtProfiles.Decoder })
+        {
+            var options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
+                OnnxExecutionSessionFactory.ForEngineBuild(profile),
+                OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
+                cudaGraphOverride: null);
+
+            Assert.Equal("0", options["enable_cuda_graph"]);
+            Assert.Equal(profile["trt_profile_max_shapes"], options["nv_profile_max_shapes"]);
+        }
+    }
+
+    [Fact]
+    public void Engine_build_options_accept_a_missing_profile() =>
+        Assert.Equal("0", OnnxExecutionSessionFactory.ForEngineBuild(null)["enable_cuda_graph"]);
 }

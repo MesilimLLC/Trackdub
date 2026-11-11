@@ -36,25 +36,21 @@ internal static class NemotronAsrEncoderTrtProfiles
         };
     }
 
-    // Profile options deliberately stay free of enable_cuda_graph: EpContextTrtProfiles.Resolve
-    // hands this dict to the benchmark path where the session flag must follow the benchmark's own
-    // cuda-graph mode. Production and smoke both use these profiles without opting into capture:
-    // the decoder can fall back to managed feeds when shared device allocators are unavailable,
-    // and its bound buffers are scoped to a decode rather than the pooled session lifetime.
+    // Profile options stay free of enable_cuda_graph so each caller chooses: production and smoke follow
+    // the session default (capture on), and EpContextTrtProfiles.Resolve hands this dict to the
+    // benchmark path where the session flag must follow the benchmark's own cuda-graph mode.
+    // Earlier notes here kept capture off because the decoder can fall back to managed feeds when
+    // shared device allocators are unavailable and its bound buffers are scoped to a decode. NVIDIA's
+    // native capture recaptures when buffer locations change, so that is a performance question, not a
+    // correctness one; add enable_cuda_graph = 0 to opt this model out if a measurement shows a loss.
 
     internal static SessionOptions BuildRuntimeOptions(string encoderModelPath) =>
         BuildRuntimeOptions(EncoderHasPromptInput(encoderModelPath));
 
     internal static SessionOptions BuildRuntimeOptions(bool hasPromptInput) =>
         new(
-            new Dictionary<string, string>(BuildOptions(hasPromptInput), StringComparer.Ordinal)
-            {
-                ["enable_cuda_graph"] = "0",
-            },
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["enable_cuda_graph"] = "0",
-            });
+            new Dictionary<string, string>(BuildOptions(hasPromptInput), StringComparer.Ordinal),
+            new Dictionary<string, string>(StringComparer.Ordinal));
 
     internal sealed record SessionOptions(
         IReadOnlyDictionary<string, string> Encoder,

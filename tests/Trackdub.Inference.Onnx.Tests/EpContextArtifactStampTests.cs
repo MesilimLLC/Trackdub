@@ -114,6 +114,19 @@ public sealed class EpContextArtifactStampTests
         }
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    public void Compile_option_identity_ignores_the_cuda_graph_capture_mode(string captureMode)
+    {
+        var baseOptions = new Dictionary<string, string> { ["nv_profile_min_shapes"] = "x:1" };
+        var withCapture = new Dictionary<string, string>(baseOptions) { ["enable_cuda_graph"] = captureMode };
+
+        Assert.Equal(
+            EpContextArtifact.BuildCompileOptionsIdentity(baseOptions, embedEpContext: true),
+            EpContextArtifact.BuildCompileOptionsIdentity(withCapture, embedEpContext: true));
+    }
+
     [Fact]
     public void Compile_option_identity_mismatch_is_a_cache_miss()
     {
@@ -142,7 +155,7 @@ public sealed class EpContextArtifactStampTests
             Assert.Null(EpContextArtifact.TryResolveValidLoadPath(
                 sourcePath,
                 stamp.EnvironmentFingerprint,
-                identity + "\nenable_cuda_graph=1"));
+                identity + "\nnv_profile_max_shapes=x:2"));
         }
         finally
         {

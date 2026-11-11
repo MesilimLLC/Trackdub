@@ -405,7 +405,7 @@ internal static partial class OnnxExecutionSessionFactory
         public string? DecoderLogId { get; init; }
         public string? OptionsEncoderModelPath { get; init; }
         public string? OptionsDecoderModelPath { get; init; }
-        public bool EnableEncoderCudaGraph { get; init; }
+        public bool EnableEncoderCudaGraph { get; init; } = DefaultEnableCudaGraph;
     }
 
     private static async Task<DualPooledLeasePair> AcquirePooledWhisperPairAsync(
@@ -491,19 +491,17 @@ internal static partial class OnnxExecutionSessionFactory
             [paths.Encoder, paths.Decoder],
             out _);
 
-        // CUDA graph replay requires every binding to stay at a fixed address across runs.
-        // This flag must stay off here: the dual-session factory is shared with callers whose
-        // callsites rebind fresh OrtValues (ParakeetTdtGreedyDecoder, smoke probes), and Nemotron
-        // can fall back to managed feeds when shared device allocators are unavailable.
-        // Explicit per-caller graph options also flow into the pool-key fingerprint so capture
-        // modes cannot collide.
+        // The encoder flag follows OnnxExecutionSessionFactory.DefaultEnableCudaGraph. Callers that
+        // rebind fresh OrtValues (ParakeetTdtGreedyDecoder, smoke probes) rely on TensorRT-RTX
+        // recapturing when buffer locations change. A caller opts out with enable_cuda_graph = 0
+        // in its TRT options (a caller profile wins over the default). Explicit per-caller graph
+        // options also flow into the pool-key fingerprint so capture modes cannot collide.
         DualPooledLeasePair pair = await AcquirePooledDualPairAsync(new PooledDualCreate
         {
             Request = request,
             Provider = provider,
             EncoderModelPath = paths.Encoder,
             DecoderModelPath = paths.Decoder,
-            EnableEncoderCudaGraph = false,
         }).ConfigureAwait(false);
 
         return new NemotronAsrSessionLease(

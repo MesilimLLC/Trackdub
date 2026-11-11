@@ -230,12 +230,8 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
             bool enableCudaGraphs = ShouldEnableTrtRtxCudaGraphs(
                 provider,
                 GetDecoderTrtConfiguration(decoderModelPath).InputNames);
-            encoderOptions = enableCudaGraphs
-                ? OnnxExecutionSessionFactory.WithCudaGraphsEnabled(encoderProfile)
-                : encoderProfile;
-            decoderOptions = enableCudaGraphs
-                ? OnnxExecutionSessionFactory.WithCudaGraphsEnabled(decoderProfile)
-                : decoderProfile;
+            encoderOptions = OnnxExecutionSessionFactory.WithCudaGraphs(encoderProfile, enableCudaGraphs);
+            decoderOptions = OnnxExecutionSessionFactory.WithCudaGraphs(decoderProfile, enableCudaGraphs);
         }
 
         OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory

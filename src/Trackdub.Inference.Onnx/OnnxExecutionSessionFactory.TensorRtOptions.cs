@@ -35,25 +35,49 @@ internal static partial class OnnxExecutionSessionFactory
     {
         public string Value { get; init; }
 
+        public string[] Parts => Value.Split('|');
+
         public static implicit operator ClassicTensorRtCacheIdentity(string value) => new() { Value = value };
     }
+
+    /// <summary>
+    /// TensorRT-RTX sessions capture CUDA graphs unless a call site opts out. NVIDIA's native capture
+    /// recaptures when input sizes or buffer locations change and falls back to normal execution for
+    /// graphs it cannot capture (TensorRT-RTX "Working with RTX CUDA Graphs"), so a call site does not
+    /// need stable buffers to be correct. Measured on an RTX 5070 with graphs forced on: identical
+    /// stage output for Whisper (tiny, small, medium), Parakeet, Sortformer and Spleeter, and 57-87%
+    /// lower per-graph median latency in device-bound benchmarks. To opt a model out, put
+    /// <c>enable_cuda_graph = 0</c> in that call site's TRT options; to turn graphs off everywhere for a
+    /// run, set <c>TRACKDUB_TRT_RTX_CUDA_GRAPHS=off</c>.
+    /// </summary>
+    internal const bool DefaultEnableCudaGraph = true;
 
     /// <summary>
     /// Builds TensorRT-RTX provider options.
     /// </summary>
     /// <param name="enableCudaGraph">
-    /// CUDA graph capture replays a fixed sequence of GPU kernel launches against fixed device
-    /// memory addresses (see ONNX Runtime's TensorRT-RTX EP docs: "Avoid enabling CUDA Graph ...
-    /// if input shapes or device bindings frequently change"). Defaults to <see langword="false"/>
-    /// because most call sites build fresh input tensors on every <c>Run()</c>, which violates that
-    /// precondition and can silently replay stale device buffers. Pass <see langword="true"/> only
-    /// for a session whose call site is verified to feed stable, IoBinding-backed device buffers
-    /// across iterations. An <c>enable_cuda_graph</c> key in <paramref name="additionalTrtOptions"/>
-    /// overrides this argument, so a caller-supplied profile value takes precedence.
+    /// Whether the session captures CUDA graphs. Defaults to <see cref="DefaultEnableCudaGraph"/>.
+    /// An <c>enable_cuda_graph</c> key in <paramref name="additionalTrtOptions"/> overrides this
+    /// argument, so a caller-supplied profile value takes precedence, and the
+    /// <c>TRACKDUB_TRT_RTX_CUDA_GRAPHS</c> override wins over both.
     /// </param>
     internal static IReadOnlyDictionary<string, string> BuildTensorRtRtxOptions(
         IReadOnlyDictionary<string, string>? additionalTrtOptions,
-        bool enableCudaGraph = false)
+        bool enableCudaGraph = DefaultEnableCudaGraph) =>
+        BuildTensorRtRtxOptionsWithOverride(
+            additionalTrtOptions,
+            enableCudaGraph,
+            Environment.GetEnvironmentVariable(CudaGraphsOverrideEnvironmentVariable));
+
+    /// <summary>
+    /// Builds the options with an explicit <c>enable_cuda_graph</c> override value. The override is
+    /// applied after the call site's flag and every caller profile (including the ones from
+    /// <see cref="WithCudaGraphsEnabled"/>) have been merged, so it wins over all of them.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BuildTensorRtRtxOptionsWithOverride(
+        IReadOnlyDictionary<string, string>? additionalTrtOptions,
+        bool enableCudaGraph,
+        string? cudaGraphOverride)
     {
         var trtOptions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -61,8 +85,7 @@ internal static partial class OnnxExecutionSessionFactory
             ["nv_runtime_cache_path"] = ResolveTensorRtRtxRuntimeCachePath(),
         };
 
-        // Always write the flag explicitly: the TensorRT RTX EP defaults enable_cuda_graph to
-        // true, so omitting it leaves capture on rather than off.
+        // Always write the flag explicitly so the setting never depends on the EP's own default.
         trtOptions["enable_cuda_graph"] = enableCudaGraph ? "1" : "0";
 
         if (additionalTrtOptions is not null)
@@ -70,12 +93,39 @@ internal static partial class OnnxExecutionSessionFactory
             MergeAdditionalTensorRtRtxOptions(trtOptions, additionalTrtOptions);
         }
 
-        TensorRtRtxDriverWorkarounds.Apply(
-            trtOptions,
-            EpContextLoadPathResolver.CurrentHardware.DriverVersion,
-            OperatingSystem.IsWindows());
+        TensorRtRtxDirectMlInterop.Apply(trtOptions, OperatingSystem.IsWindows());
+        ApplyCudaGraphOverride(trtOptions, cudaGraphOverride);
         return trtOptions;
     }
+
+    /// <summary>
+    /// Diagnostic and A/B override for <c>enable_cuda_graph</c>: <c>on</c>, <c>1</c> or <c>true</c>, and
+    /// <c>off</c>, <c>0</c> or <c>false</c> (case-insensitive), win over the call site and any caller
+    /// profile; anything else leaves the call site's choice alone. The variable is read each time
+    /// options are built, including for pool-key fingerprints, so set it before the process starts
+    /// rather than changing it mid-run.
+    /// </summary>
+    internal static void ApplyCudaGraphOverride(IDictionary<string, string> trtOptions, string? overrideValue)
+    {
+        string? flag = ParseCudaGraphOverride(overrideValue);
+        if (flag is not null)
+        {
+            trtOptions["enable_cuda_graph"] = flag;
+        }
+    }
+
+    /// <summary>The <c>enable_cuda_graph</c> value an override string selects, or null when it selects nothing.</summary>
+    internal static string? ParseCudaGraphOverride(string? overrideValue) =>
+        overrideValue?.Trim().ToLowerInvariant() switch
+        {
+            "on" or "1" or "true" => "1",
+            "off" or "0" or "false" => "0",
+            _ => null,
+        };
+
+    /// <summary>True when <c>TRACKDUB_TRT_RTX_CUDA_GRAPHS</c> is set to a value that overrides capture.</summary>
+    internal static bool IsCudaGraphOverrideSet() =>
+        ParseCudaGraphOverride(Environment.GetEnvironmentVariable(CudaGraphsOverrideEnvironmentVariable)) is not null;
 
     private static void MergeAdditionalTensorRtRtxOptions(
         Dictionary<string, string> trtOptions,
@@ -247,28 +297,27 @@ internal static partial class OnnxExecutionSessionFactory
 
     internal static bool HasCompleteClassicTensorRtCacheIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        string[] parts = environmentFingerprint.Value.Split('|');
-        if (parts.Length != 5)
+        if (environmentFingerprint.Parts.Length != 5)
         {
             return false;
         }
 
-        if (!HasKnownFingerprintParts(parts))
+        if (!HasKnownFingerprintParts(environmentFingerprint))
         {
             return false;
         }
 
-        if (!HasValidTensorRtBinaryIdentity(parts))
+        if (!HasValidTensorRtBinaryIdentity(environmentFingerprint))
         {
             return false;
         }
 
-        return HasValidOrtIdentity(parts);
+        return HasValidOrtIdentity(environmentFingerprint);
     }
 
-    private static bool HasKnownFingerprintParts(string[] parts)
+    private static bool HasKnownFingerprintParts(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        foreach (string part in parts)
+        foreach (string part in environmentFingerprint.Parts)
         {
             if (string.IsNullOrWhiteSpace(part))
             {
@@ -284,10 +333,10 @@ internal static partial class OnnxExecutionSessionFactory
         return true;
     }
 
-    private static bool HasValidTensorRtBinaryIdentity(string[] parts)
+    private static bool HasValidTensorRtBinaryIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
         const string tensorRtHashPrefix = "trt-sha256-";
-        string identity = parts[3];
+        string identity = environmentFingerprint.Parts[3];
         if (!identity.StartsWith(tensorRtHashPrefix, StringComparison.Ordinal))
         {
             return false;
@@ -301,9 +350,9 @@ internal static partial class OnnxExecutionSessionFactory
         return identity.AsSpan(tensorRtHashPrefix.Length).ToArray().All(Uri.IsHexDigit);
     }
 
-    private static bool HasValidOrtIdentity(string[] parts)
+    private static bool HasValidOrtIdentity(ClassicTensorRtCacheIdentity environmentFingerprint)
     {
-        string identity = parts[4];
+        string identity = environmentFingerprint.Parts[4];
         if (!identity.StartsWith("ort-", StringComparison.Ordinal))
         {
             return false;
@@ -420,11 +469,27 @@ internal static partial class OnnxExecutionSessionFactory
     /// stay free of the flag so benchmark/AOT consumers keep explicit control of the session mode.
     /// </summary>
     internal static IReadOnlyDictionary<string, string> WithCudaGraphsEnabled(
-        IReadOnlyDictionary<string, string> options)
+        IReadOnlyDictionary<string, string> options) =>
+        WithCudaGraphs(options, enabled: true);
+
+    /// <summary>
+    /// Options for a session that only compiles or warms engines: capture is never useful there, so it
+    /// is switched off even when the model's runtime profile turns it on (MADLAD's does).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> ForEngineBuild(IReadOnlyDictionary<string, string>? options) =>
+        WithCudaGraphs(options ?? new Dictionary<string, string>(StringComparer.Ordinal), enabled: false);
+
+    /// <summary>
+    /// Copies <paramref name="options"/> with <c>enable_cuda_graph</c> written explicitly, so a call
+    /// site that decides per session (rather than taking the default) always wins over the default.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> WithCudaGraphs(
+        IReadOnlyDictionary<string, string> options,
+        bool enabled)
     {
         var merged = new Dictionary<string, string>(options, StringComparer.Ordinal)
         {
-            ["enable_cuda_graph"] = "1",
+            ["enable_cuda_graph"] = enabled ? "1" : "0",
         };
         return merged;
     }

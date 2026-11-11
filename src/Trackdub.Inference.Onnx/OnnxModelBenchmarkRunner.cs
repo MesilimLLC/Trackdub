@@ -83,7 +83,7 @@ public sealed class OnnxModelBenchmarkRunner : IModelBenchmarkRunner
             cancellationToken.ThrowIfCancellationRequested();
 
             BenchmarkExecutionSettings settings = request.Execution ?? BenchmarkExecutionSettings.Default;
-            settings.Validate(request.RunCount);
+            BenchmarkRunGuards.Validate(request, settings);
             bool deviceBound = settings.IoMode is BenchmarkIoMode.DeviceBound;
             if (deviceBound && request.ProviderPreference is not BenchmarkProviderPreference.TensorRtRtx)
             {
