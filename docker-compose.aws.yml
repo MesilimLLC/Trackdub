@@ -10,7 +10,7 @@ services:
     # EC2 workers use the strict classic TensorRT + CUDA server profile.
     # Compose pulls the published server image; the build target stays so a
     # worker can still build it locally if the pull is unavailable.
-    image: "${TRACKDUB_IMAGE:-ghcr.io/mesililm-llc/trackdub:main-server}"
+    image: "${TRACKDUB_IMAGE:-ghcr.io/mesilimllc/trackdub:main-server}"
     build:
       target: server
     volumes:

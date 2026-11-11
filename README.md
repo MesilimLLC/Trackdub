@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Mesililm-LLC/Trackdub/actions">CI</a>
+  <a href="https://github.com/MesilimLLC/Trackdub/actions">CI</a>
   &middot; <a href="docs/index.md">Docs</a>
   &middot; <a href="docs/strategy/investor-deck-brief.md">Investor Brief</a>
   &middot; <a href="LICENSE">Apache-2.0 License</a>
