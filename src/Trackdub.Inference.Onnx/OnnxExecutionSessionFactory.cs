@@ -37,6 +37,7 @@ internal static partial class OnnxExecutionSessionFactory
     private const string DataRootEnvironmentVariable = "TRACKDUB_DATA_ROOT";
     private const string CacheRootEnvironmentVariable = "TRACKDUB_CACHE_ROOT";
     private const string EngineCacheRootEnvironmentVariable = "TRACKDUB_ENGINE_CACHE_ROOT";
+    internal const string CudaGraphsOverrideEnvironmentVariable = "TRACKDUB_TRT_RTX_CUDA_GRAPHS";
 
     private static readonly object InitializeLock = new();
     private static int initializeCompleted;

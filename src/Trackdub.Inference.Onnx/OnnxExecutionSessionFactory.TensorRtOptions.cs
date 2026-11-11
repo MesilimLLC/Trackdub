@@ -70,11 +70,30 @@ internal static partial class OnnxExecutionSessionFactory
             MergeAdditionalTensorRtRtxOptions(trtOptions, additionalTrtOptions);
         }
 
-        TensorRtRtxDriverWorkarounds.Apply(
+        TensorRtRtxDirectMlInterop.Apply(trtOptions, OperatingSystem.IsWindows());
+        ApplyCudaGraphOverride(
             trtOptions,
-            EpContextLoadPathResolver.CurrentHardware.DriverVersion,
-            OperatingSystem.IsWindows());
+            Environment.GetEnvironmentVariable(CudaGraphsOverrideEnvironmentVariable));
         return trtOptions;
+    }
+
+    /// <summary>
+    /// Diagnostic and A/B override for <c>enable_cuda_graph</c>: <c>on</c> or <c>off</c> wins over
+    /// the call site and any caller profile; anything else leaves the call site's choice alone.
+    /// </summary>
+    internal static void ApplyCudaGraphOverride(IDictionary<string, string> trtOptions, string? overrideValue)
+    {
+        string? flag = overrideValue?.Trim().ToLowerInvariant() switch
+        {
+            "on" or "1" or "true" => "1",
+            "off" or "0" or "false" => "0",
+            _ => null,
+        };
+
+        if (flag is not null)
+        {
+            trtOptions["enable_cuda_graph"] = flag;
+        }
     }
 
     private static void MergeAdditionalTensorRtRtxOptions(

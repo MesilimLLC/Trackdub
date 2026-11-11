@@ -131,6 +131,32 @@ Provider bundle (installed by Model Manager or `Fetch-TrtRtxEp.ps1`):
 
 Manifest: `runtime/trt-rtx-ep.manifest.json` (pinned NVIDIA GitHub release URLs + checksums).
 
+### DirectML interop and the engine-build limit (Windows)
+
+TensorRT-RTX inference launched after a DirectML dispatch in the same process fails with
+`CUDA_ERROR_INVALID_VALUE` (`cuKernelSetAttribute returned error invalid argument`), which ONNX
+Runtime reports as `ShapeInferenceNotRegistered`. Trackdub mixes DirectML and TensorRT-RTX stages in one
+process, so every Windows engine is built with `nv_max_shared_mem_size = 101376` (99 KiB), NVIDIA's
+documented workaround (TensorRT-RTX 1.7 release notes, known issues).
+
+- NVIDIA scopes the issue to "CUDA driver R615 or earlier", but it reproduced on driver 621.14
+  (RTX 5070, EP ABI 0.5.0, TensorRT-RTX 1.7.1), so the limit is not gated on the driver version.
+- The limit is part of `BundledFingerprintVersion` on Windows (`...+smem99k`). Engines and runtime-cache
+  kernels built without it keep failing after the limit is added, so the fingerprint change moves the
+  runtime cache directory and invalidates smoke verdicts and EP-context stamps.
+- A smaller caller-supplied `nv_max_shared_mem_size` is kept. Zero, larger, or unparsable values are
+  clamped to the limit.
+- The effect on kernel performance has not been measured.
+
+### CUDA graph override
+
+`enable_cuda_graph` is chosen per call site (Whisper's device-bound path, MADLAD and the Nemotron encoder
+turn it on; everything else leaves it off). `TRACKDUB_TRT_RTX_CUDA_GRAPHS=on|off` overrides every call
+site and caller profile for diagnosis and A/B runs; any other value leaves the call site's choice alone.
+Per-graph `Trackdub.Benchmarks --cuda-graphs compare` runs on RTX 5070 (device-bound I/O, source graphs)
+showed 57-87% lower median latency on most single-graph models, with identical stage outputs for Whisper
+(tiny, small, medium), Parakeet, Sortformer and Spleeter when forced on.
+
 Compiled TRT RTX runtime cache:
 
 ```text
