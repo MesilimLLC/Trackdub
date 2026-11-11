@@ -1,4 +1,5 @@
 import inspect
+import json
 import subprocess
 import sys
 import tempfile
@@ -407,6 +408,82 @@ class HtmlToTextTests(unittest.TestCase):
         html = f"<body><main><div>{card}</div><div class='model-card'>{body}</div></main></body>"
         text = sync_corpus.html_to_text(html, base_url="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/")
         self.assertIn("Streaming ASR model card", text)
+
+
+class PinAndProvenanceTests(unittest.TestCase):
+    def write_runtime_manifest(self, directory: Path, win: str, linux: str, trt: str = "1.7.1") -> Path:
+        base = "https://github.com/NVIDIA/TensorRT-RTX-EP-ABI/releases/download"
+        path = directory / "trt-rtx-ep.manifest.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": win,
+                    "cudaVariant": "cu13",
+                    "trtRtxRuntimeVersion": trt,
+                    "packages": {
+                        "win-x64": {"archiveUrl": f"{base}/v{win}/EP-v{win}-cu13.zip"},
+                        "linux-x64": {"archiveUrl": f"{base}/v{linux}/EP-v{linux}-cu13-linux.zip"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_pin_text_follows_the_runtime_manifest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            manifest = self.write_runtime_manifest(Path(raw), "0.9.0", "0.9.0", trt="1.9.2")
+            text = sync_corpus.pin_text(sync_corpus.read_pin(manifest))
+        self.assertIn("version 0.9.0 on Windows and Linux", text)
+        self.assertIn("TensorRT-RTX 1.9.2", text)
+        self.assertIn("tensorrt_rtx_1_9.dll", text)
+        self.assertNotIn("0.5.0", text)
+
+    def test_pin_text_names_both_versions_when_platforms_differ(self):
+        with tempfile.TemporaryDirectory() as raw:
+            manifest = self.write_runtime_manifest(Path(raw), "0.5.0", "0.4.0")
+            text = sync_corpus.pin_text(sync_corpus.read_pin(manifest))
+        self.assertIn("version 0.5.0 on Windows and 0.4.0 on Linux", text)
+
+    def test_shipped_pin_text_matches_the_repository_manifest(self):
+        pin = sync_corpus.read_pin()
+        shipped = json.loads(sync_corpus.RUNTIME_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(pin["trt"], shipped["trtRtxRuntimeVersion"])
+        self.assertEqual(pin["cuda"], shipped["cudaVariant"])
+
+    def test_vendor_sources_accept_pairs_and_objects(self):
+        vendor = {"sources": [["a", "https://a"], {"id": "b", "url": "https://b", "gpu": {"id": "x"}}]}
+        self.assertEqual(sync_corpus.vendor_sources(vendor), [("a", "https://a"), ("b", "https://b")])
+
+    def test_sync_manifest_records_repo_commits(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "repo"
+            root.mkdir()
+            manifest = {"repos": [{"id": "demo", "rootEnv": "DEMO_ROOT", "defaultFromTrackdub": "."}]}
+            with patch.dict(sync_corpus.os.environ, {"DEMO_ROOT": str(root)}), patch.object(
+                sync_corpus, "git_state", return_value={"commit": "abc123", "dirty": False}
+            ):
+                sync_corpus.stage_sync_manifest(manifest, Path(raw))
+            payload = json.loads((Path(raw) / sync_corpus.SYNC_MANIFEST_KEY).read_text(encoding="utf-8"))
+        self.assertEqual(payload["repos"]["demo"], {"commit": "abc123", "dirty": False})
+        self.assertIn("syncedAt", payload)
+
+    def test_wait_returns_verifier_exit_code_once_job_is_done(self):
+        active = subprocess.CompletedProcess([], 1, stdout="Indexing job active; verification deferred", stderr="")
+        done = subprocess.CompletedProcess([], 0, stdout='{"ok": true}', stderr="")
+        with patch.object(sync_corpus.subprocess, "run", side_effect=[active, active, done]) as run, patch.object(
+            sync_corpus.time, "sleep"
+        ) as sleep:
+            self.assertEqual(sync_corpus.wait_and_verify(Path("api"), timeout_minutes=5), 0)
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_wait_gives_up_when_the_job_never_finishes(self):
+        active = subprocess.CompletedProcess([], 1, stdout="Indexing job active", stderr="")
+        with patch.object(sync_corpus.subprocess, "run", return_value=active), patch.object(
+            sync_corpus.time, "sleep"
+        ), patch.object(sync_corpus.time, "monotonic", side_effect=[0, 10_000]):
+            self.assertEqual(sync_corpus.wait_and_verify(Path("api"), timeout_minutes=1), 1)
 
 
 if __name__ == "__main__":

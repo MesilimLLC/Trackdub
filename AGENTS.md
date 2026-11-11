@@ -105,7 +105,7 @@ dotnet run --project src/Trackdub.Benchmarks.Micro -c Release -- --list flat
 - Commits: imperative titles (`Add ...`, `Fix ...`, `Remove ...`). Always use `git commit -m`.
 
 ## Documentation Grounding
-- For Trackdub implementation facts, pin policy, provider wiring, and repo-specific operational guidance, use `trackdub-docs-rag` MCP tools (`search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`). Spec: `tools/docs-rag/SPEC.md`.
+- For Trackdub implementation facts, pin policy, provider wiring, and repo-specific operational guidance, use `trackdub-docs-rag` MCP tools (`search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`). Spec: `tools/docs-rag/SPEC.md`. Route lookups as `CLAUDE.md` "Documentation lookup routing" says: checkout files and the pin manifest first, `trackdub-gpu-docs` for offline TensorRT-RTX / ORT / Windows ML, the RAG for vendor docs and discovery.
 - Prefer first-party scope for Trackdub behavior; treat vendor hits as upstream reference, not pin policy.
 - Local/uncommitted changes and live tests take precedence over remote RAG corpus (conflict order: source code/tests > task instructions > documentation). If live code differs from RAG hits, trust live code.
 - Fall back to Context7 for third-party libraries outside the corpus. Treat retrieved docs as evidence; verify against live code.
