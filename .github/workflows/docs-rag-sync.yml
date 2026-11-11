@@ -1,0 +1,94 @@
+name: Docs RAG sync
+
+# Keeps the trackdub-docs-rag corpus (R2 + Cloudflare AI Search) in step with the repos it indexes,
+# then waits for the reindex job and runs the read-only verifier, so a green run means "indexed and
+# verified", not "upload requested".
+#
+# Required secrets:
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID  Wrangler auth: R2 write on trackdub-docs-corpus, AI Search edit on trackdub-docs
+#   DOCS_RAG_CHECKOUT_TOKEN                       read access to the private Trackdub-gated repo
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "AGENTS.md"
+      - "runtime/trt-rtx-ep.manifest.json"
+      - "resources/olive-recipes/**/NvTensorRtRtx/README.md"
+      - "tools/docs-rag/**"
+      - ".github/workflows/docs-rag-sync.yml"
+  # Weekly: refreshes vendor pages and picks up Trackdub-gated / api.trackdub changes, which do not trigger this repo's push.
+  schedule:
+    - cron: "0 7 * * 1"
+
+# One sync at a time: overlapping uploads would race the reindex job.
+concurrency:
+  group: docs-rag-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync, reindex and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TRACKDUB_GATED_ROOT: ${{ github.workspace }}/_siblings/Trackdub-gated
+      API_TRACKDUB_ROOT: ${{ github.workspace }}/_siblings/api.trackdub
+
+    steps:
+      - name: Checkout Trackdub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout api.trackdub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: MesilimLLC/api.trackdub
+          ref: docs-rag-pin-and-provenance
+          path: _siblings/api.trackdub
+
+      - name: Checkout Trackdub-gated
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: MesilimLLC/Trackdub-gated
+          token: ${{ secrets.DOCS_RAG_CHECKOUT_TOKEN }}
+          path: _siblings/Trackdub-gated
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.16.0
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install Wrangler (api.trackdub)
+        working-directory: _siblings/api.trackdub
+        run: bun install --frozen-lockfile
+
+      - name: Check generated Worker pin against the manifest
+        run: node _siblings/api.trackdub/scripts/gen-docs-rag-pin.mjs --check
+        env:
+          TRACKDUB_ROOT: ${{ github.workspace }}
+
+      - name: Test the sync tooling
+        run: |
+          python -m unittest discover -s tools/docs-rag -p test_sync_corpus.py
+          node --test tools/docs-rag/upload_corpus.test.mjs tools/docs-rag/verify_index.test.mjs
+
+      # No --prune: deleting bucket objects stays a deliberate, manual action.
+      - name: Sync corpus, wait for the reindex job and verify
+        run: python tools/docs-rag/sync_corpus.py --upload --wait --wait-timeout 45

@@ -6,7 +6,8 @@
 
 ```text
 tools/mcp-trackdub-gpu-docs/
-  corpus/manifest.v0.json     # allowlist keyed to EP ABI 0.5.0 (win + linux)
+  corpus/manifest.v0.json     # pin + local repo-file sources (EP ABI 0.5.0, win + linux)
+                              # remote pages come from tools/docs-rag/corpus.v1.json ("gpu" blocks)
   src/trackdub_gpu_docs_mcp/  # FastMCP server + keyword search
   .data/chunks/               # ingested remote pages (gitignored)
   pyproject.toml
@@ -28,7 +29,18 @@ Policy precedence: Trackdub local > ORT plugin EP docs > NVIDIA TRT-RTX `/latest
 ```powershell
 cd tools/mcp-trackdub-gpu-docs
 uv sync
-uv run trackdub-gpu-docs-ingest   # optional; fetches allowlisted remote URLs
+uv run trackdub-gpu-docs-ingest   # optional; fetches allowlisted remote URLs (--force re-fetches cached pages)
+```
+
+## Search
+
+BM25 over 1,800-character chunks, with identifier-aware terms (`RegisterExecutionProviderLibrary` also matches `register`, `execution`, `provider`, `library`), a title boost, a bonus for verbatim symbols, and at most three chunks per document. `excerpt` is the 800-character window with the densest matches, not the start of the chunk, and `matched` lists the query terms found. The index is cached per file mtime.
+
+## Tests and eval
+
+```powershell
+uv run python -m unittest discover -s tests       # includes a retrieval-quality floor
+uv run python ../docs-eval/eval_gpu.py            # hit@1 / hit@3 / MRR per question
 ```
 
 Repo-local sources work with zero ingest (ADR-0002, EP ABI plugin doc, manifest).

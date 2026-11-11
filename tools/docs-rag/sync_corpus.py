@@ -6,11 +6,14 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
@@ -20,6 +23,8 @@ TOOL_ROOT = Path(__file__).resolve().parent
 TRACKDUB_ROOT = TOOL_ROOT.parents[1]
 STAGING = TOOL_ROOT / ".staging"
 MANIFEST_PATH = TOOL_ROOT / "corpus.v1.json"
+RUNTIME_MANIFEST = TRACKDUB_ROOT / "runtime" / "trt-rtx-ep.manifest.json"
+SYNC_MANIFEST_KEY = "first-party/_sync.json"
 USER_AGENT = "TrackdubDocsRag/0.1 (corpus sync)"
 
 
@@ -300,12 +305,24 @@ def fetch_url(url: str) -> str:
     return text.strip()
 
 
+def vendor_sources(vendor: dict) -> list[tuple[str, str]]:
+    """Vendor sources are [id, url] pairs or {"id", "url", ...} objects (e.g. carrying a "gpu" block)."""
+    pairs: list[tuple[str, str]] = []
+    for entry in vendor["sources"]:
+        if isinstance(entry, dict):
+            pairs.append((entry["id"], entry["url"]))
+        else:
+            source_id, url = entry
+            pairs.append((source_id, url))
+    return pairs
+
+
 def stage_vendors(manifest: dict, staging: Path) -> tuple[int, int]:
     ok = 0
     fail = 0
     max_bytes = int(manifest["maxBytes"])
     for vendor in manifest["vendors"]:
-        for source_id, url in vendor["sources"]:
+        for source_id, url in vendor_sources(vendor):
             dest = staging / vendor["prefix"] / f"{source_id}.md"
             try:
                 text = fetch_url(url)
@@ -327,24 +344,71 @@ def stage_vendors(manifest: dict, staging: Path) -> tuple[int, int]:
     return ok, fail
 
 
+def read_pin(runtime_manifest: Path = RUNTIME_MANIFEST) -> dict:
+    """Pin facts come from runtime/trt-rtx-ep.manifest.json so docs text cannot drift from the shipped bundle."""
+    data = json.loads(runtime_manifest.read_text(encoding="utf-8"))
+    packages = data.get("packages", {})
+
+    def package_version(platform: str) -> str:
+        match = re.search(r"/v(\d+\.\d+\.\d+)/", packages.get(platform, {}).get("archiveUrl", ""))
+        return match.group(1) if match else data["version"]
+
+    trt = data["trtRtxRuntimeVersion"]
+    major, minor = trt.split(".")[:2]
+    return {
+        "windows": package_version("win-x64"),
+        "linux": package_version("linux-x64"),
+        "cuda": data["cudaVariant"],
+        "trt": trt,
+        "dll": f"tensorrt_rtx_{major}_{minor}.dll",
+    }
+
+
+def pin_text(pin: dict) -> str:
+    if pin["windows"] == pin["linux"]:
+        version = f"version {pin['windows']} on Windows and Linux"
+    else:
+        version = f"version {pin['windows']} on Windows and {pin['linux']} on Linux"
+    return "\n".join(
+        [
+            "# Docs RAG pin",
+            "",
+            f"Trackdub ships TensorRT-RTX as the standalone ONNX Runtime EP ABI plugin, {version} (TensorRT-RTX {pin['trt']}; Linux installs through LinML.Catalog), CUDA {pin['cuda']}.",
+            f"Windows bundle includes {pin['dll']} (CUDA runtime statically linked). Do not treat Windows ML catalog NvTensorRtRtxExecutionProvider as the primary route.",
+            "Vendor /latest/ pages may describe a newer TensorRT-RTX than this pin. First-party docs win on disagreement.",
+            "",
+        ]
+    )
+
+
 def stage_pin(staging: Path) -> None:
     pin = staging / "first-party" / "trackdub" / "docs" / "reference" / "docs-rag-pin.md"
     pin.parent.mkdir(parents=True, exist_ok=True)
     if pin.exists():
         return
-    pin.write_text(
-        "\n".join(
-            [
-                "# Docs RAG pin",
-                "",
-                "Trackdub ships TensorRT-RTX as the standalone ONNX Runtime EP ABI plugin, version 0.5.0 on Windows and Linux (TensorRT-RTX 1.7.1; Linux installs through LinML.Catalog), CUDA cu13.",
-                "Windows bundle includes tensorrt_rtx_1_7.dll (CUDA runtime statically linked). Do not treat Windows ML catalog NvTensorRtRtxExecutionProvider as the primary route.",
-                "Vendor /latest/ pages may describe a newer TensorRT-RTX than this pin. First-party docs win on disagreement.",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    pin.write_text(pin_text(read_pin()), encoding="utf-8")
+
+
+def git_state(root: Path) -> dict:
+    def run(*args: str) -> str | None:
+        result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    commit = run("rev-parse", "--short=12", "HEAD")
+    status = run("status", "--porcelain", "--", "docs", "AGENTS.md", "runtime")
+    return {"commit": commit, "dirty": bool(status) if status is not None else None}
+
+
+def stage_sync_manifest(manifest: dict, staging: Path) -> None:
+    """Record which commit of each repo this corpus came from; the Worker stamps it onto first-party hits."""
+    repos = {}
+    for repo in manifest["repos"]:
+        root = repo_root(repo)
+        repos[repo["id"]] = git_state(root) if root is not None else {"commit": None, "dirty": None}
+    payload = {"syncedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "repos": repos}
+    dest = staging / SYNC_MANIFEST_KEY
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def wrangler_prefix(api_root: Path) -> list[str]:
@@ -380,6 +444,26 @@ def reindex(api_root: Path, instance: str) -> int:
     return result.returncode
 
 
+def job_pending(result: subprocess.CompletedProcess) -> bool:
+    """The verifier exits nonzero while a reindex job runs; only that case is worth polling again."""
+    return result.returncode != 0 and "Indexing job active" in result.stdout + result.stderr
+
+
+def wait_and_verify(api_root: Path, timeout_minutes: int, poll_seconds: int = 30) -> int:
+    """Poll the read-only verifier until the reindex job is done, then return its verdict."""
+    command = ["node", str(TOOL_ROOT / "verify_index.mjs"), "--api-root", str(api_root)]
+    deadline = time.monotonic() + timeout_minutes * 60
+    while True:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if not job_pending(result):
+            print(result.stdout + result.stderr, flush=True)
+            return result.returncode
+        if time.monotonic() >= deadline:
+            print(f"Indexing job still active after {timeout_minutes} minutes; re-run verify_index.mjs later.", flush=True)
+            return 1
+        time.sleep(poll_seconds)
+
+
 def refresh_staging(manifest: dict, staging: Path, skip_fetch: bool) -> None:
     previous = staging.with_name(staging.name + ".previous")
     if previous.exists():
@@ -389,6 +473,7 @@ def refresh_staging(manifest: dict, staging: Path, skip_fetch: bool) -> None:
         candidate.mkdir()
         copied, skipped = stage_repos(manifest, candidate)
         stage_pin(candidate)
+        stage_sync_manifest(manifest, candidate)
         vendor_ok, vendor_fail = (0, 0) if skip_fetch else stage_vendors(manifest, candidate)
         print(f"staged repo files={copied} skipped={skipped} vendor_ok={vendor_ok} vendor_fail={vendor_fail}")
         if vendor_fail:
@@ -405,7 +490,7 @@ def refresh_staging(manifest: dict, staging: Path, skip_fetch: bool) -> None:
             shutil.rmtree(previous)
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stage and optionally upload and reindex the Trackdub docs corpus")
     parser.add_argument("--upload", action="store_true", help="Put staged objects with metadata into R2, then request reindex")
     parser.add_argument("--skip-fetch", action="store_true", help="Stage repo files only")
@@ -420,7 +505,19 @@ def main() -> None:
         action="store_true",
         help="After a successful upload, delete bucket objects missing from staging; requires a full refresh",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="After the reindex request, poll until the job finishes, then run verify_index and use its exit code",
+    )
+    parser.add_argument("--wait-timeout", type=int, default=40, help="Minutes --wait polls before giving up")
+    return parser.parse_args()
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    if args.wait and not args.upload:
+        print("--wait needs --upload: there is no reindex job to wait for", flush=True)
+        raise SystemExit(2)
     blocking = [
         name
         for name, refused in (
@@ -433,25 +530,41 @@ def main() -> None:
     if args.prune and blocking:
         print(f"--prune deletes bucket objects missing from staging; refusing because of {', '.join(blocking)}", flush=True)
         raise SystemExit(2)
-    manifest = load_manifest()
-    if not args.reuse_staging:
-        try:
-            refresh_staging(manifest, STAGING, args.skip_fetch)
-        except (OSError, RuntimeError) as exc:
-            print(f"Refresh failed; previous staging preserved; nothing uploaded: {exc}", flush=True)
-            raise SystemExit(1) from exc
-    else:
+
+
+def prepare_staging(manifest: dict, args: argparse.Namespace) -> None:
+    if args.reuse_staging:
         if not STAGING.is_dir() or not any(path.is_file() for path in STAGING.rglob("*")):
             raise SystemExit(f"no staging tree at {STAGING}; run without --reuse-staging first")
         print(f"reusing staging at {STAGING}")
-    if not args.upload:
-        print(f"dry-run staging at {STAGING}")
         return
+    try:
+        refresh_staging(manifest, STAGING, args.skip_fetch)
+    except (OSError, RuntimeError) as exc:
+        print(f"Refresh failed; previous staging preserved; nothing uploaded: {exc}", flush=True)
+        raise SystemExit(1) from exc
+
+
+def publish(manifest: dict, args: argparse.Namespace) -> int:
     api_root = Path(os.environ.get("API_TRACKDUB_ROOT", TRACKDUB_ROOT.parent / "api.trackdub")).resolve()
     uploaded = upload(STAGING, manifest["bucket"], api_root, workers=args.workers, prune=args.prune)
     if uploaded:
-        raise SystemExit(uploaded)
-    raise SystemExit(reindex(api_root, manifest["aiSearchInstance"]))
+        return uploaded
+    reindexed = reindex(api_root, manifest["aiSearchInstance"])
+    if reindexed or not args.wait:
+        return reindexed
+    return wait_and_verify(api_root, args.wait_timeout)
+
+
+def main() -> None:
+    args = parse_args()
+    validate_args(args)
+    manifest = load_manifest()
+    prepare_staging(manifest, args)
+    if not args.upload:
+        print(f"dry-run staging at {STAGING}")
+        return
+    raise SystemExit(publish(manifest, args))
 
 
 if __name__ == "__main__":
