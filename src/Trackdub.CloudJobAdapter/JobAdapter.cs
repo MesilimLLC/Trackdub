@@ -73,7 +73,6 @@ public sealed class JobAdapter(IJobStore store, JobService jobs, IArtifactStore 
         }
     }
 
-
     private sealed record AttemptPaths(string Workspace)
     {
         public string Input => Path.Join(Workspace, "input.mp4");

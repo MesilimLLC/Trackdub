@@ -21,6 +21,16 @@ public sealed class CliMachineBoundaryTests
         Assert.Equal("cpu", PocServerPreset.Providers["vad"]);
     }
 
+    [Theory]
+    [InlineData("SPEAKER_00:ef_dora", "ef_dora")]
+    [InlineData("SPEAKER_00:qwen3:vivian", "qwen3:vivian")]
+    public void VoiceOverrideSplitsOnFirstColonOnly(string token, string expectedVoice)
+    {
+        var parsed = CliModelOverrides.ParseVoiceOverrides([token]);
+        Assert.NotNull(parsed);
+        Assert.Equal(expectedVoice, parsed!["SPEAKER_00"]);
+    }
+
     [Fact]
     public void ChinesePresetTargetsMandarinWithQwen3TtsAndResolvesBuiltIn()
     {
