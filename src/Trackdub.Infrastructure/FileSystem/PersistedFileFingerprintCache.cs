@@ -141,9 +141,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
             return null;
         }
 
-        if (entry.SizeBytes < 0 ||
-            entry.LastWriteTimeUtcTicks < 0 ||
-            entry.LastWriteTimeUtcTicks > DateTime.MaxValue.Ticks)
+        if (!HasValidStat(entry))
         {
             return null;
         }
@@ -156,6 +154,21 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
         {
             return null;
         }
+    }
+
+    private static bool HasValidStat(Entry entry)
+    {
+        if (entry.SizeBytes < 0)
+        {
+            return false;
+        }
+
+        if (entry.LastWriteTimeUtcTicks < 0)
+        {
+            return false;
+        }
+
+        return entry.LastWriteTimeUtcTicks <= DateTime.MaxValue.Ticks;
     }
 
     internal sealed record Entry(string Path, string Sha256, long SizeBytes, long LastWriteTimeUtcTicks);
