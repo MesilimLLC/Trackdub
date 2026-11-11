@@ -31,20 +31,31 @@ internal static class TensorRtRtxDirectMlInterop
             return;
         }
 
-        // A smaller caller limit is kept. Zero means "device maximum" and anything above the cap leaves
-        // the engine uncapped, so both (and unparsable values) are clamped to the workaround value.
-        if (!IsWithinCap(ReadCallerLimit(trtOptions)))
+        if (!KeepsCallerLimit(trtOptions))
         {
             trtOptions[MaxSharedMemSizeOptionKey] = LimitBytesText;
         }
     }
 
-    private static long? ReadCallerLimit(IDictionary<string, string> trtOptions) =>
-        trtOptions.TryGetValue(MaxSharedMemSizeOptionKey, out string? text) &&
-        long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long bytes)
-            ? bytes
-            : null;
+    // A smaller caller limit is kept. Zero means "device maximum" and anything above the cap leaves
+    // the engine uncapped, so both (and unparsable values) are clamped to the workaround value.
+    private static bool KeepsCallerLimit(IDictionary<string, string> trtOptions)
+    {
+        if (!trtOptions.TryGetValue(MaxSharedMemSizeOptionKey, out string? requested))
+        {
+            return false;
+        }
 
-    private static bool IsWithinCap(long? limitBytes) =>
-        limitBytes is > 0 and <= TensorRtRtxProviderConstants.WindowsDirectMlInteropSharedMemoryLimitBytes;
+        if (!long.TryParse(requested, NumberStyles.None, CultureInfo.InvariantCulture, out long requestedBytes))
+        {
+            return false;
+        }
+
+        if (requestedBytes <= 0)
+        {
+            return false;
+        }
+
+        return requestedBytes <= TensorRtRtxProviderConstants.WindowsDirectMlInteropSharedMemoryLimitBytes;
+    }
 }
