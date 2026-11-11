@@ -35,7 +35,26 @@ Default is `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (`AI_SEARCH_MODEL` in `wra
 ```powershell
 python tools/docs-rag/sync_corpus.py
 python tools/docs-rag/sync_corpus.py --upload
+python tools/docs-rag/sync_corpus.py --upload --wait   # also polls the reindex job, then runs verify_index
 ```
+
+`--wait` (with `--wait-timeout` minutes, default 40) replaces the manual upload, poll, verify loop: the exit code is the verifier's, so a zero means "indexed and verified". `.github/workflows/docs-rag-sync.yml` runs exactly this on pushes to the indexed paths, weekly, and on demand; it never passes `--prune`.
+
+### One allowlist
+
+Remote pages are listed once, in `corpus.v1.json`. A vendor source is `["id", "url"]` or `{"id", "url", "gpu": {"id", "title", "tags", "priority", "pinWarning"}}`; the `gpu` block makes the page part of the offline `tools/mcp-trackdub-gpu-docs` corpus too, which reads it from here. Local repo-file sources for gpu-docs stay in its own manifest.
+
+### Generated pin text
+
+`first-party/trackdub/docs/reference/docs-rag-pin.md` is generated from `runtime/trt-rtx-ep.manifest.json` on every sync (unless the repo ships its own copy). The Worker's agent instructions and answer prompt come from `api.trackdub/src/docs-rag/pin.generated.ts`, written by `scripts/gen-docs-rag-pin.mjs` before `dev:docs-rag` and `deploy:docs-rag`; `check:docs-rag-pin` (and the sync workflow) fail when it is stale.
+
+### Provenance
+
+Each sync stages `first-party/_sync.json` with the commit of every indexed repo. The Worker stamps first-party hits with `repo`, `localPath`, `syncedCommit` (`syncedDirty` when the tree was modified) and `syncedAt`, and hides the manifest itself from results. Agents with the checkout should read `localPath` instead of the indexed copy.
+
+### Eval
+
+`tools/docs-eval/questions.json` holds known-item questions with the documents that should come back. `uv run python ../docs-eval/eval_gpu.py` (from `tools/mcp-trackdub-gpu-docs`, offline) and `DOCS_RAG_TOKEN=... node tools/docs-eval/eval_rag.mjs` report hit@1, hit@3 and MRR. The gpu-docs unit tests enforce a floor; the Worker eval needs a live token and a synced corpus, so it is run by hand.
 
 Run from the Trackdub repo. Sibling checkouts `../Trackdub-gated` and `../api.trackdub` are picked up automatically. Override with `TRACKDUB_ROOT`, `TRACKDUB_GATED_ROOT`, `API_TRACKDUB_ROOT`.
 
