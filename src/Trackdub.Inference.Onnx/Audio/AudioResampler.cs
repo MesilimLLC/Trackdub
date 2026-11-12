@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 
 namespace Trackdub.Inference.Onnx.Audio;
 
@@ -354,16 +355,24 @@ internal static class AudioResampler
     {
         int halfLength = filter.Length / 2;
         var output = new float[input.Length];
-        for (int index = 0; index < input.Length; index++)
+        // Output indices in [interiorStart, interiorEnd) read only in-range source
+        // samples for every tap, so the per-tap clamp can be skipped and the window
+        // is a contiguous slice. Edge indices keep the clamped loop.
+        int interiorStart = Math.Min(halfLength, input.Length);
+        int interiorEnd = Math.Clamp(input.Length - filter.Length + halfLength + 1, interiorStart, input.Length);
+        for (int index = 0; index < interiorStart; index++)
         {
-            double sum = 0;
-            for (int tap = 0; tap < filter.Length; tap++)
-            {
-                int sourceIndex = Math.Clamp(index - halfLength + tap, 0, input.Length - 1);
-                sum += filter[tap] * input[sourceIndex];
-            }
+            output[index] = ClampedWindowDotProduct(filter, input, index - halfLength);
+        }
 
-            output[index] = (float)sum;
+        for (int index = interiorStart; index < interiorEnd; index++)
+        {
+            output[index] = DotProduct(filter, input.Slice(index - halfLength, filter.Length));
+        }
+
+        for (int index = interiorEnd; index < input.Length; index++)
+        {
+            output[index] = ClampedWindowDotProduct(filter, input, index - halfLength);
         }
 
         return output;
@@ -387,18 +396,28 @@ internal static class AudioResampler
             expandedSpan.Clear();
             read(expandedStart, expandedSpan);
             var filtered = new float[count];
-            for (int index = 0; index < count; index++)
+            // For output i the unclamped tap window is expandedSpan[(i - leftPad) .. +filter.Length).
+            // leftPad/rightLimit mark the outputs whose full tap window stays inside the expanded
+            // read; those take the contiguous dot product, boundary outputs keep the clamped loop.
+            long leftPadLong = expandedStart - startIndex + halfLength;
+            long rightLimitLong = expandedEnd - startIndex - halfLength;
+            int leftPad = (int)Math.Clamp(leftPadLong, 0, count);
+            int rightLimit = (int)Math.Clamp(rightLimitLong, -1, count - 1);
+            for (int index = 0; index < leftPad; index++)
             {
-                long globalIndex = startIndex + index;
-                double sum = 0;
-                for (int tap = 0; tap < filter.Length; tap++)
-                {
-                    long sourceGlobal = Math.Clamp(
-                        globalIndex - halfLength + tap, expandedStart, expandedEnd);
-                    sum += filter[tap] * expandedSpan[(int)(sourceGlobal - expandedStart)];
-                }
+                filtered[index] = ClampedWindowDotProduct(
+                    filter, expandedSpan, (int)(startIndex + index - expandedStart - halfLength));
+            }
 
-                filtered[index] = (float)sum;
+            for (int index = leftPad; index <= rightLimit; index++)
+            {
+                filtered[index] = DotProduct(filter, expandedSpan.Slice(index - leftPad, filter.Length));
+            }
+
+            for (int index = Math.Max(leftPad, rightLimit + 1); index < count; index++)
+            {
+                filtered[index] = ClampedWindowDotProduct(
+                    filter, expandedSpan, (int)(startIndex + index - expandedStart - halfLength));
             }
 
             return filtered;
@@ -407,5 +426,58 @@ internal static class AudioResampler
         {
             System.Buffers.ArrayPool<float>.Shared.Return(expanded);
         }
+    }
+
+    private static float ClampedWindowDotProduct(float[] filter, ReadOnlySpan<float> samples, int firstSampleIndex)
+    {
+        double sum = 0;
+        int lastIndex = samples.Length - 1;
+        for (int tap = 0; tap < filter.Length; tap++)
+        {
+            sum += filter[tap] * samples[Math.Clamp(firstSampleIndex + tap, 0, lastIndex)];
+        }
+
+        return (float)sum;
+    }
+
+    private static float DotProduct(float[] filter, ReadOnlySpan<float> input) =>
+        Vector.IsHardwareAccelerated
+            ? VectorDotProduct(filter, input)
+            : ScalarDotProduct(filter, input);
+
+    private static float VectorDotProduct(float[] filter, ReadOnlySpan<float> input)
+    {
+        var acc = Vector<float>.Zero;
+        int vectorLength = Vector<float>.Count;
+        int length = filter.Length;
+        int index = 0;
+        for (; index + vectorLength <= length; index += vectorLength)
+        {
+            acc += new Vector<float>(filter, index) * new Vector<float>(input.Slice(index, vectorLength));
+        }
+
+        float sum = 0;
+        for (int lane = 0; lane < vectorLength; lane++)
+        {
+            sum += acc[lane];
+        }
+
+        for (; index < length; index++)
+        {
+            sum += filter[index] * input[index];
+        }
+
+        return sum;
+    }
+
+    private static float ScalarDotProduct(float[] filter, ReadOnlySpan<float> input)
+    {
+        float sum = 0;
+        for (int index = 0; index < filter.Length; index++)
+        {
+            sum += filter[index] * input[index];
+        }
+
+        return sum;
     }
 }
