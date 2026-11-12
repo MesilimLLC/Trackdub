@@ -26,11 +26,11 @@ namespace Trackdub.Infrastructure.FileSystem;
 internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IApplicationLogger logger)
 {
     private const int SchemaVersion = 1;
-    private const int MaxEntries = 512;
+    internal const int MaxEntries = 512;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
     private readonly object sync = new();
-    private readonly HashSet<string> invalidatedPaths = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, long> invalidationGenerations = new(StringComparer.Ordinal);
+    private readonly HashSet<string> invalidatedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> invalidationGenerations = new(StringComparer.OrdinalIgnoreCase);
 
     public long CurrentInvalidationGeneration(string path)
     {
@@ -81,7 +81,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
             invalidationGenerations.AddOrUpdate(path, 1, (_, current) => current + 1);
             invalidatedPaths.Add(path);
             Snapshot current = new(SchemaVersion, ReadEntriesUnlocked().Where(entry =>
-                !string.Equals(entry.Path, path, StringComparison.Ordinal)).ToArray());
+                !string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray());
             WriteSnapshotUnlocked(current, "fingerprint invalidation");
         }
     }
@@ -98,7 +98,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
                 return false;
             }
 
-            invalidationGenerations.Remove(path);
+            invalidationGenerations.TryRemove(path, out _);
             invalidatedPaths.Remove(path);
             return true;
         }
@@ -138,7 +138,7 @@ internal sealed class PersistedFileFingerprintCache(string cacheFilePath, IAppli
             using (FileStream stream = new(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 JsonSerializer.Serialize(stream, snapshot, JsonOptions);
-                stream.Flush();
+                stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, cacheFilePath, overwrite: true);
         }

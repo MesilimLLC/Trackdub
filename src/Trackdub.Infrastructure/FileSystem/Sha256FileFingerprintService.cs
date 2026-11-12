@@ -7,12 +7,12 @@ namespace Trackdub.Infrastructure.FileSystem;
 
 public sealed class Sha256FileFingerprintService : IFileFingerprintService
 {
-    internal const int MaxCachedFingerprints = 512;
+    internal const int MaxCachedFingerprints = PersistedFileFingerprintCache.MaxEntries;
 
     private readonly object cacheTrimLock = new();
     private readonly IApplicationLogger logger;
     private readonly PersistedFileFingerprintCache? persistedCache;
-    private readonly ConcurrentDictionary<string, FingerprintCacheEntry> fingerprintCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, FingerprintCacheEntry> fingerprintCache = new(StringComparer.OrdinalIgnoreCase);
     private long cacheAccessSequence;
 
     public Sha256FileFingerprintService(IApplicationLogger? logger = null, string? cacheFilePath = null)
