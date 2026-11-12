@@ -1912,11 +1912,12 @@ public sealed class ModelManifestLoaderTests
         });
 
         // TensorRT RTX decodes with static shapes over the plain decoder, so the variant ships the
-        // encoder and decoder_model only (no decoder_with_past) and is reserved for trt-rtx.
+        // encoder and decoder_model only (no decoder_with_past). It is limited to the two TensorRT
+        // providers; classic TensorRT must be listed or the planner never offers the variant there.
         ModelVariantManifest trtVariant = Assert.Single(manifest.Variants, variant =>
             variant.Alias.Equals("trt-fp16", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("trt_rtx_mixed_fp16_fp32/encoder_model.onnx", trtVariant.EntryPath);
-        Assert.Equal(["trt-rtx"], trtVariant.SupportedProviders);
+        Assert.Equal(["trt-rtx", "tensorrt"], trtVariant.SupportedProviders);
         Assert.Contains("trt_rtx_mixed_fp16_fp32/encoder_model.onnx_data", trtVariant.DownloadFiles);
         Assert.Contains("trt_rtx_mixed_fp16_fp32/decoder_model.onnx", trtVariant.DownloadFiles);
         Assert.Contains("trt_rtx_mixed_fp16_fp32/decoder_model.onnx_data", trtVariant.DownloadFiles);

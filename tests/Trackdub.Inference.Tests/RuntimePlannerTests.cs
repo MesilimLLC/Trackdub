@@ -2218,6 +2218,39 @@ public sealed partial class RuntimePlannerTests
         Assert.Equal(ExecutionProviderKind.Cpu, plan.ExecutionProvider);
     }
 
+    [Fact]
+    public async Task PlanAsync_MadladTrtFp16_IsOfferedToClassicTensorRtWhenRequested()
+    {
+        using var workspace = new RuntimePlannerTestWorkspace();
+        BundledModelManifestRegistry registry = workspace.WriteManifest(CreateMadladTranslationSpec() with
+        {
+            BenchmarkEntry = "encoder_model_quantized.onnx",
+            Variants =
+            [
+                new ManifestVariantSpec("quantized", "encoder_model_quantized.onnx", ["cpu", "dml", "cuda"]),
+                new ManifestVariantSpec("trt-fp16", "trt_rtx_mixed_fp16_fp32/encoder_model.onnx", ["trt-rtx", "tensorrt"])
+            ]
+        });
+        string cacheRoot = workspace.CreateCacheRoot("google/madlad400-3b-mt");
+        workspace.WriteCacheFile(cacheRoot, "encoder_model_quantized.onnx");
+        workspace.WriteCacheFile(cacheRoot, "trt_rtx_mixed_fp16_fp32/encoder_model.onnx");
+        RuntimePlanner planner = CreatePlanner(registry,
+            [new("google/madlad400-3b-mt", cacheRoot, "main", ValidSha256, DateTimeOffset.UtcNow)],
+            [new(ExecutionProviderKind.TensorRt, true), new(ExecutionProviderKind.Cpu, true)],
+            _ => new ExecutionProviderSmokeTestResult(true));
+
+        StageRuntimePlan plan = await planner.PlanAsync(new StageRuntimePlanningRequest(RuntimeStage.Translation,
+            PreferredModelAlias: "madlad400-mt", RequirePreferredModelAlias: true,
+            SourceLanguage: "es", TargetLanguage: "en",
+            PreferredExecutionProvider: ExecutionProviderKind.TensorRt, RequirePreferredExecutionProvider: true,
+            PreferredModelVariantAlias: "trt-fp16"));
+
+        Assert.True(plan.IsRunnable(), $"Expected a runnable plan, got {plan.Status}: {plan.Fallback?.Detail}");
+        Assert.Equal(ExecutionProviderKind.TensorRt, plan.ExecutionProvider);
+        Assert.Equal("trt-fp16", plan.Variant);
+        Assert.Equal("madlad", plan.EngineFamily);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("default")]
