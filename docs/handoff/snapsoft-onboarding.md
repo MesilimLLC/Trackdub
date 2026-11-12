@@ -164,6 +164,16 @@ the host also needs the Qwen3-TTS weights, for example
 `TRACKDUB_MODEL_SET=docker/poc-server-zh-models.txt ./scripts/docker/seed-model-volume.sh` (same compose override).
 Keep Kokoro seeded for `poc-server-v1`; the two lists share every other model.
 
+Build and test without AWS or a GPU (the Cloud, Api and CloudJobAdapter tests cover the out-of-scope job stack in
+section 2, including the reusable CLI runner and preset code):
+
+```bash
+dotnet test tests/Trackdub.Cloud.Tests -c Release -m:1
+dotnet test tests/Trackdub.Api.Tests -c Release -m:1
+dotnet test tests/Trackdub.CloudJobAdapter.Tests -c Release -m:1
+dotnet test tests/Trackdub.Architecture.Tests -m:1
+```
+
 Registry: the server image publishes to `ghcr.io/mesilimllc/trackdub:<tag>-server` from `main`; the package may be
 private until its visibility is changed. Decide GHCR pull credentials or an ECR mirror in Design.
 `Dockerfile.cloud-worker` belongs to the out-of-scope job stack in section 2 and is built, not published, by CI.

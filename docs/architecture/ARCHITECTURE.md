@@ -440,7 +440,7 @@ warnings
 Rules:
 
 - Stem separation should not be mandatory for all workflows.
-- Demucs/HTDemucs is non-commercial only (lane: non-commercial, commercial_allowed: false) and must never be routed in any commercial pipeline path. CommercialSafeEvaluator enforces this at manifest evaluation time, not via a runtime toggle.
+- Demucs/HTDemucs is non-commercial only (lane: non-commercial, commercial_allowed: false) and must never be routed in any commercial pipeline path. This is enforced from the manifest fields (see section 10), not via a runtime toggle.
 - Non-commercial mode may prefer Demucs while output quality is being evaluated.
 - Never promise perfect dialogue removal.
 - Label outputs as estimated stems.
@@ -541,7 +541,7 @@ Rules:
 
 - Direct language-pair models are preferred where available.
 - Pivot routing must be visible when used.
-- Non-commercial translation models (commercial_allowed: false) must never be routed in the bundled pipeline. CommercialSafeEvaluator enforces this at manifest evaluation time.
+- Non-commercial translation models (commercial_allowed: false) must never be routed in the bundled pipeline. This is enforced from the manifest fields (see section 10).
 - Translation output is draft material.
 
 ---
