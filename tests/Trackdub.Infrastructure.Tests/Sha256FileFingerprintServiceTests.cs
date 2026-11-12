@@ -323,17 +323,35 @@ public sealed class Sha256FileFingerprintServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ComputeAsync_ignores_persisted_entry_with_out_of_range_write_time()
+    public async Task ComputeAsync_ignores_persisted_entry_with_out_of_range_timestamp()
     {
         string path = CreateTempFile("valid content");
         string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
         tempFiles.Add(cachePath);
-        File.WriteAllText(cachePath, "{\"Version\":1,\"Entries\":[{\"Path\":\"" + path + "\",\"Sha256\":\"abc\",\"SizeBytes\":13,\"LastWriteTimeUtcTicks\":9223372036854775807}]}");
+        tempFiles.Add(cachePath + ".tmp");
+        string json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Version = 1,
+            Entries = new[]
+            {
+                new
+                {
+                    Path = path,
+                    Sha256 = new string('f', 64),
+                    SizeBytes = new FileInfo(path).Length,
+                    LastWriteTimeUtcTicks = long.MaxValue
+                }
+            }
+        });
+        File.WriteAllText(cachePath, json);
+
         var service = new Sha256FileFingerprintService(cacheFilePath: cachePath);
 
         FileFingerprint result = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
 
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("valid content"))).ToLowerInvariant(), result.Sha256);
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("valid content"))).ToLowerInvariant(),
+            result.Sha256);
     }
 
     [Fact]
