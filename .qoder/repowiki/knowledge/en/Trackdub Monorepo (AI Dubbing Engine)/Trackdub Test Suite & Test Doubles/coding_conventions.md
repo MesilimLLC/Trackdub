@@ -1,5 +1,0 @@
-- Each test project mirrors a production layer and ships a `README.md` documenting purpose, what belongs, and what is excluded to enforce scope boundaries.
-- Fakes in `Trackdub.TestDoubles` implement the exact production interfaces (e.g. `ITtsEngine`, `IStemSeparationEngine`) and expose last-call state via properties like `LastInputText`, `SynthesizeCallCount` for assertions.
-- Conditional/integration tests use custom `[Fact]` attributes whose constructor computes a `Skip` string based on OS checks, environment variables, and runtime readiness probes rather than throwing exceptions.
-- Cross-project test imports are centralized through a `GlobalUsings.cs` file listing all `global using` directives instead of repeating them per test file.
-- Every test project includes a `packages.lock.json` to pin NuGet package versions deterministically across CI and local runs.

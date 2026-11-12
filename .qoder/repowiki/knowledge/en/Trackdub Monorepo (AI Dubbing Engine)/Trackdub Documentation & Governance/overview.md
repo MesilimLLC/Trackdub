@@ -1,1 +1,0 @@
-Centralized documentation repository for Trackdub covering architecture decisions, technical specs, audits, operations, development guides, legal notices, strategy roadmaps, and active implementation plans.

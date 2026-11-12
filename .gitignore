@@ -287,18 +287,8 @@ output/unused-code-audit/
 /.vibe
 /.vibe
 /.terramind
-/.qoder/*
-# Track generated wiki pages + knowledge cards (shared AI/code context) and the
-# wiki_plan.yaml steering config; keep meta and better-harness reports ignored.
-!/.qoder/repowiki
-/.qoder/repowiki/*
-!/.qoder/repowiki/wiki_plan.yaml
-!/.qoder/repowiki/en
-!/.qoder/repowiki/knowledge
-/.qoder/repowiki/en/*
-!/.qoder/repowiki/en/content
-/.qoder/repowiki/knowledge/*
-!/.qoder/repowiki/knowledge/en
+/.qoder/
+/tools/sidecar-evidence/
 /.neovate
 /.tinycloud
 /.moxby
