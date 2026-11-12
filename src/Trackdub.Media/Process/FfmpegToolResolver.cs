@@ -25,6 +25,7 @@ internal sealed class FfmpegToolResolver(
     : IFfmpegToolResolver
 {
     private readonly IFfmpegAutoDownloader autoDownloader = autoDownloader ?? FfmpegAutoDownloader.Shared;
+    // Deliberately unlocked: racing callers may both resolve, but each writes an equivalent path.
     private string? resolvedFfmpegPath;
     private string? resolvedFfprobePath;
 

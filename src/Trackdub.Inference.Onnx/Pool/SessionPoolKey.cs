@@ -484,6 +484,11 @@ internal sealed record SessionPoolKey
     /// while the file's length and write time still match the metadata the caller observed,
     /// so a same-path replacement never reuses a stale digest.
     /// </summary>
+    /// <remarks>
+    /// The shared hasher is awaited synchronously here, so this path blocks on file I/O and must
+    /// never be called from a UI dispatcher. Callers on a UI thread must use
+    /// <see cref="TryResolveContentHashAsync"/> instead.
+    /// </remarks>
     private static (ContentHashLookup Lookup, string? Hash) TryResolveContentHash(
         string modelPath,
         string cacheKey,
