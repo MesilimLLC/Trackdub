@@ -2,7 +2,7 @@
 
 Repo root: the current checkout (`git rev-parse --show-toplevel`). Solution `Trackdub.slnx` (plus `Trackdub.Sdk.slnx`, `Trackdub.Inference.slnx`). .NET 10, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`, central package management in `Directory.Packages.props`.
 
-Canonical sources: `AGENTS.md` (graph + commands), `docs/repository-policy.md` (org + doc taxonomy), `docs/architecture/ARCHITECTURE-source.md` (design rationale), `docs/decisions/ADR-0011-contracts-domain-coupling.md` (the one sanctioned coupling).
+Canonical sources: `AGENTS.md` (graph + commands), `docs/repository-policy.md` (org + doc taxonomy), `docs/architecture/ARCHITECTURE.md` (design rationale), `docs/decisions/ADR-0011-contracts-domain-coupling.md` (the one sanctioned coupling).
 
 ## Dependency graph (verbatim from `AGENTS.md`)
 

@@ -27,7 +27,7 @@ Rules:
 - `ReadinessState.Unverified` (model metadata checked, provider path not verified) is non-blocking and must be surfaced, not silently promoted to `Ready`.
 - A manifest entry existing is not a working model.
 - A prior green run is not evidence about the current tree.
-- **Rung 7 is documented but not code-enforced.** `CommercialSafeEvaluator` is named in `docs/architecture/ARCHITECTURE-source.md` and `docs/legal/MODEL_LICENSE_POLICY.md` as the enforcement point, but no such type exists under `src/` or `tests/` at this revision — verify with `grep -rn "CommercialSafeEvaluator" src/ tests/`. The manifest fields (`commercial_allowed`, `commercial_use_verified`) are the only thing that is actually readable today, so a rung-7 pass is a **data** claim, not an enforced gate. If that grep comes back empty, say so rather than reporting commercial safety as enforced by code.
+- **Rung 7 is documented but not code-enforced.** `CommercialSafeEvaluator` is named in `docs/legal/MODEL_LICENSE_POLICY.md` as the enforcement point, but no such type exists under `src/` or `tests/` at this revision — verify with `grep -rn "CommercialSafeEvaluator" src/ tests/`. The manifest fields (`commercial_allowed`, `commercial_use_verified`) are the only thing that is actually readable today, so a rung-7 pass is a **data** claim, not an enforced gate. If that grep comes back empty, say so rather than reporting commercial safety as enforced by code.
 
 Anything not climbed is stated in the report as `NOT VERIFIED`. Missing evidence is reported in those words.
 

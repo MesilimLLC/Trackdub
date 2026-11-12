@@ -18,7 +18,6 @@
         "group": "Architecture",
         "pages": [
           "architecture/ARCHITECTURE",
-          "architecture/ARCHITECTURE-source",
           "architecture/P0-pipeline-audit-2026-06-01",
           "architecture/local-pipeline-audit-unified-2026-07-08",
           "architecture/pipeline-principles-review-grok-2026-07-08"
