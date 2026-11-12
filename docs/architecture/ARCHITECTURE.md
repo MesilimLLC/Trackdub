@@ -795,7 +795,7 @@ Rules:
 - `commercial_allowed: true` alone is not enough for commercial-safe routing.
 - Voice-cloning models require explicit consent flow.
 - Model licenses are independent from the app license.
-- Commercial safety must be enforceable by code, not just documentation. Today it is read from the manifest fields (`commercial_allowed`, `commercial_use_verified`) by the model inventory, starter-pack and translation provisioning code. There is no `CommercialSafeEvaluator` type and no runtime CommercialSafeMode flag.
+- Commercial safety must be enforceable by code, not just documentation. Today it is read from the manifest fields (`commercial_allowed`, `commercial_use_verified`) by the model inventory, starter-pack and translation provisioning code. `ModelManifest.CommercialSafeMode` is a read-only property computed from `commercial_use_verified`; there is no user-settable commercial-safe mode and no `CommercialSafeEvaluator` type.
 - The live manifest is `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json`; `revision` may be `cache-installed` when no upstream revision is pinned.
 
 ---
