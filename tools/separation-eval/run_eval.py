@@ -83,6 +83,11 @@ CANDIDATE_PROFILES: dict[str, dict] = {
     # then measures the model's own additivity), `residual` is mixture - dialogue computed in the separator domain.
     "bandit-v2-multi-sum": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
     "bandit-v2-multi-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # KUIELab MDX-Net vocals network (candidates/mdxnet_runner.py): the network keeps 2048 of the 3073 bins of a 6144-point
+    # FFT, so its estimate stops at 44100 * 2048 / 6144 = 14.7 kHz. Float32 stems; the bed is the residual.
+    "mdxnet-vocals-residual": {"band_limit_hz": 14700.0, "output_bits": 32, "output_rounding": "nearest"},
+    # MossFormer2_SE_48K (candidates/mossformer2_runner.py): full band, float32 stems, bed = mixture - enhanced speech.
+    "mossformer2-se-48k-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
 }
 
 
