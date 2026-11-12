@@ -130,7 +130,7 @@ Do not make unsupported acceleration a hard blocker. If the app cannot use a GPU
 Trackdub caches compiled inference engines to reduce startup latency. The default desktop cache location for TensorRT is:
 `%LOCALAPPDATA%\Trackdub\EngineCache`
 
-`TRACKDUB_ENGINE_CACHE_ROOT` overrides the location; the Linux container sets it to `/data/engine-cache`. Classic TensorRT engines (server profile) are stored under `classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver, TensorRT binary and ONNX Runtime identity. On a server, build engines on the target instance type with `trackdub cache warm` and persist them; never copy a cache between GPU models or driver versions.
+`TRACKDUB_ENGINE_CACHE_ROOT` overrides the location; the Linux container sets it to `/data/engine-cache`. Classic TensorRT engines (server profile) are stored under `classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver, TensorRT binary and ONNX Runtime identity. On a server, build engines on the target instance type with `trackdub cache warm --provider tensorrt` (the default provider is `tensorrt-rtx`) and persist them; never copy a cache between GPU models or driver versions.
 
 - **Automatic Invalidation**: TensorRT verifies environment metadata embedded in the cached `.engine` files. It automatically invalidates the cache and triggers recompilation if it detects a mismatch in GPU architecture, NVIDIA Display Driver version, or specific ONNX model shapes/profiles.
 - **Manual Cache Clearing Rules**: If persistent inference crashes occur (especially following unexpected shutdowns or driver updates), or if the hardware is changed, users should manually delete all files in `%LOCALAPPDATA%\Trackdub\EngineCache`. The engines will automatically rebuild on their next use.
@@ -205,7 +205,7 @@ trackdub run pipeline --media in.mp4 --output ./project --preset <preset> \
   --result-file result.json --progress-file progress.jsonl
 ```
 
-It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` cover health checks, hash-verified model provisioning and engine builds.
+It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` (with `--provider tensorrt` on the server profile, see 3.2.1) cover health checks, hash-verified model provisioning and engine builds.
 
 Cloud presets fix the models, variants and per-stage providers for server runs (`src/Trackdub.Cli/PocServerPreset.cs`, `src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1` (English to Spanish) and `poc-server-zh-v1` (English to Chinese). Clients pick a preset name; they never supply commands, model IDs or paths.
 
