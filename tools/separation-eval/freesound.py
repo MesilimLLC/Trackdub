@@ -259,36 +259,66 @@ class DownloadBudget:
         self._lock = threading.Lock()
         self._next_start, self.used, self._stopped = 0.0, 0, ""
 
-    def acquire(self) -> None:
+    def _reserve_slot(self) -> float:
+        """Claims the next start time and returns how long to wait for it. The wait happens outside the lock."""
         with self._lock:
             if self._stopped:
                 raise FreesoundError(self._stopped)
             if self.used >= self.max_requests:
                 raise FreesoundError(f"download budget of {self.max_requests} requests used; rerun later")
-            wait = self._next_start - self._clock()
-            if wait > 0:
-                self._sleep(wait)
-            self._next_start = max(self._next_start, self._clock()) + self.min_interval_s
+            now = self._clock()
+            start = max(self._next_start, now)
+            self._next_start = start + self.min_interval_s
             self.used += 1
+            return start - now
+
+    def _release_if_stopped(self) -> None:
+        with self._lock:
+            if self._stopped:
+                self.used -= 1
+                raise FreesoundError(self._stopped)
+
+    def acquire(self) -> None:
+        wait = self._reserve_slot()
+        if wait > 0:
+            self._sleep(wait)
+            self._release_if_stopped()
 
     def stop(self, reason: str) -> None:
-        self._stopped = reason
+        with self._lock:
+            self._stopped = reason
 
 
 def _is_rate_limited(exc: BaseException) -> bool:
     return getattr(exc.__cause__, "code", None) == 429
 
 
-def authorized_fetcher(access_token: str, fetch: Callable[..., None] = ingest.http_fetch,
+class LazyToken:
+    """Loads the access token on first use, so runs that never download from Freesound never need it."""
+
+    def __init__(self, load: Callable[[], str]):
+        self._load, self._value, self._lock = load, "", threading.Lock()
+
+    def __call__(self) -> str:
+        with self._lock:
+            if not self._value:
+                self._value = self._load()
+            return self._value
+
+
+def authorized_fetcher(access_token: str | Callable[[], str], fetch: Callable[..., None] = ingest.http_fetch,
                        budget: DownloadBudget | None = None) -> ingest.Fetcher:
     """An ingest fetcher that sends the token to Freesound download URLs only, within the budget."""
+    token_of = access_token if callable(access_token) else (lambda: access_token)
+
     def fetch_one(url: str, dest: Path, range_bytes: int | None = None) -> None:
         if not is_download_url(url):
             return fetch(url, dest, range_bytes, bearer_token=None)
+        token = token_of()
         if budget:
             budget.acquire()
         try:
-            fetch(url, dest, range_bytes, bearer_token=access_token)
+            fetch(url, dest, range_bytes, bearer_token=token)
         except ingest.IngestError as exc:
             if budget and _is_rate_limited(exc):
                 budget.stop("Freesound answered 429 Too Many Requests; downloads stopped, rerun later")
@@ -298,10 +328,12 @@ def authorized_fetcher(access_token: str, fetch: Callable[..., None] = ingest.ht
 
 def fetcher_for_records(records: Iterable[object], token_file: Path | None = None,
                         budget: DownloadBudget | None = None) -> ingest.Fetcher:
-    """Plain downloads, unless some item is a Freesound original, which needs the stored token."""
+    """Plain downloads, unless some item is a Freesound original, whose download needs the stored token.
+
+    The token is read when the first Freesound download starts, so cached items never need it."""
     if not any(isinstance(r, dict) and is_download_url(str(r.get("url", ""))) for r in records):
         return ingest.http_fetch
-    return authorized_fetcher(load_access_token(token_file), budget=budget)
+    return authorized_fetcher(LazyToken(lambda: load_access_token(token_file)), budget=budget)
 
 
 # ---- Search specs -------------------------------------------------------------------------------------------

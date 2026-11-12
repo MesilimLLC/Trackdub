@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.parse
@@ -260,10 +261,24 @@ class FetcherTests(unittest.TestCase):
         plain = [{"url": "https://archive.org/download/x/y.mp3"}, "not-a-record"]
         self.assertIs(freesound.fetcher_for_records(plain, Path("missing-token.json")), ingest.http_fetch)
 
-    def test_freesound_items_need_the_stored_token(self):
+    def test_a_freesound_download_needs_the_stored_token(self):
         originals = [{"url": "https://freesound.org/apiv2/sounds/12/download/"}]
-        with tempfile.TemporaryDirectory() as td, self.assertRaisesRegex(freesound.FreesoundError, "no Freesound token"):
-            freesound.fetcher_for_records(originals, Path(td) / "missing.json")
+        with tempfile.TemporaryDirectory() as td:
+            fetch = freesound.fetcher_for_records(originals, Path(td) / "missing.json")
+            with self.assertRaisesRegex(freesound.FreesoundError, "no Freesound token"):
+                fetch("https://freesound.org/apiv2/sounds/12/download/", Path(td) / "a", None)
+
+    def test_the_token_is_not_read_until_a_freesound_download_starts(self):
+        loads = []
+        fetched = []
+        token = freesound.LazyToken(lambda: loads.append(1) or "tok")
+        fetch = freesound.authorized_fetcher(token, fetch=lambda url, dest, rb=None, *, bearer_token=None:
+                                             fetched.append(bearer_token))
+        fetch("https://archive.org/download/x/y.mp3", Path("a"), None)
+        self.assertEqual(loads, [])
+        fetch(DOWNLOAD, Path("b"), None)
+        fetch(DOWNLOAD, Path("c"), None)
+        self.assertEqual((loads, fetched), ([1], [None, "tok", "tok"]))
 
     def test_token_is_sent_to_freesound_downloads_only(self):
         calls = []
@@ -324,6 +339,34 @@ class BudgetTests(unittest.TestCase):
         for _ in range(31):
             budget.acquire()
         self.assertLess(30 / ((clock.now - start) / 60), 30)
+
+    def test_a_stop_during_the_wait_is_honoured_and_gives_the_slot_back(self):
+        budget, clock = self.budget(interval=2.0)
+        budget.acquire()
+
+        def sleep_then_stop(seconds):
+            clock.sleep(seconds)
+            budget.stop("quota hit")
+
+        budget._sleep = sleep_then_stop
+        with self.assertRaisesRegex(freesound.FreesoundError, "quota hit"):
+            budget.acquire()
+        self.assertEqual(budget.used, 1)
+
+    def test_other_workers_can_stop_the_budget_while_one_is_waiting(self):
+        budget, _ = self.budget(interval=2.0)
+        budget.acquire()
+        stopped = []
+
+        def sleep_while_another_thread_stops(seconds):
+            worker = threading.Thread(target=lambda: (budget.stop("quota hit"), stopped.append(True)))
+            worker.start()
+            worker.join(timeout=5)
+
+        budget._sleep = sleep_while_another_thread_stops
+        with self.assertRaises(freesound.FreesoundError):
+            budget.acquire()
+        self.assertEqual(stopped, [True])
 
     def test_budget_stops_after_the_cap(self):
         budget, _ = self.budget(cap=2)
