@@ -35,5 +35,4 @@ public sealed partial class RuntimePlannerTests
         Assert.NotEqual("opus-mt", strictPlan.EngineFamily);
         Assert.False(strictPlan.IsRunnable());
     }
-
 }
