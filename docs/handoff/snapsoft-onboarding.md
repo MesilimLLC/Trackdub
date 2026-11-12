@@ -1,65 +1,97 @@
 # SnapSoft onboarding: Trackdub cloud render POC
 
-Audience: the SnapSoft delivery team (Solution Architect, Cloud Engineer). The SOW is signed. This page maps each
-SOW prerequisite to the file that satisfies it, states where the repository already differs from the SOW's
-assumptions, and lists the decisions left for the Design phase. Nothing here claims AWS readiness: no AWS resource
-has been created and no GPU run on G6/G6e has happened.
+Audience: the SnapSoft delivery team (Solution Architect, Cloud Engineer). The SOW ("Infrastructure Setup POC",
+signed 2026-10-30) is the contract. This page maps each SOW prerequisite to the file that satisfies it, states
+where the repository differs from the SOW, and lists the decisions left for the Design phase. Where the repository
+and the SOW disagree, the SOW is the POC target unless both parties agree a change order. Nothing here claims AWS
+readiness: no AWS resource has been created and no GPU run on G6/G6e has happened.
 
 ## 1. SOW prerequisites and where to find them
 
 | SOW prerequisite | Location |
 |---|---|
-| Technical Overview documentation | [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md), [docs/index.md](../index.md) |
-| Application integration contract (API, DynamoDB, S3, scheduler, IAM) | [docs/operations/snapsoft-poc-acceptance.md](../operations/snapsoft-poc-acceptance.md) |
-| What was verified locally and what was not | [docs/operations/snapsoft-poc-validation.md](../operations/snapsoft-poc-validation.md) |
-| Container build, seed and warm runbook | [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) |
+| Technical Overview documentation | [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) (section 3.6 covers headless and cloud execution), [docs/index.md](../index.md) |
 | Premium model manifest (license + hash status) | Section 3 below; source `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json` |
 | Provider allow-list for Linux NVIDIA workers | Section 4 below |
 | `trackdub` CLI and SDK source | `src/Trackdub.Cli`, `src/Trackdub.Sdk` |
-| Container build scripts / CI | `Dockerfile`, `Dockerfile.cloud-worker`, `Dockerfile.api`, `docker-compose.aws.yml`, `scripts/docker/`, `.github/workflows/container-image.yml` |
-| Test fixture | `tests/Fixtures/cloud-poc/en-speech.mp4` (single speaker, EN) and `create-job-v1.json` |
+| Container build scripts / CI | `Dockerfile` (`server` target), `scripts/docker/`, `.github/workflows/container-image.yml` |
+| Container build, seed and warm runbook | [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) |
+| What was verified locally and what was not | [docs/operations/snapsoft-poc-validation.md](../operations/snapsoft-poc-validation.md) |
+| Smoke fixture | `tests/Fixtures/cloud-poc/en-speech.mp4` (single speaker, EN) |
 
-The 10-clip EN->ES / EN->ZH test set with RTX 5070 reference output is Trackdub's deliverable (SOW: end of Day 5)
-and is not in the repository.
+The 10-clip test set (English-to-Spanish and English-to-Chinese) with reference output from a local RTX 5070 run
+is Mesilim's deliverable, due by the end of Day 5 (SOW, Customer Responsibilities). It is not in the repository.
 
-## 2. Where the repository differs from the SOW text
+## 2. POC target architecture (SOW)
 
-Read these before Design. They change what "containerize and wire up" means.
+The SOW job path is:
 
-1. **No SQS, no Cloudflare in the job path.** SOW p4 describes Cloudflare API -> SQS -> EC2 worker. The repository
-   was built to an AWS-only requirement: a CPU ASP.NET API (`src/Trackdub.Api`, Cognito JWT), DynamoDB for job,
-   idempotency and outbox state (`src/Trackdub.Cloud.Aws`), S3 for versioned artifacts, and a scheduler seam
-   (`IJobScheduler`). `AWSSDK.SQS` is pinned in `Directory.Packages.props` but unused. Align on this at kickoff.
-2. **The scheduler adapter does not exist.** Intake returns 503 until one is registered. Someone has to write
-   the concrete Batch or ECS adapter in C# against `IJobScheduler` (contract: acceptance doc, "Durable state and
-   scheduler contract"). The SOW lists IaC and a worker job loop, not this adapter. Decide the owner.
-3. **The worker is already a container.** `Dockerfile` has `rtx` and `server` targets; `Dockerfile.cloud-worker`
-   wraps the one-shot CLI with `Trackdub.CloudJobAdapter` (claim, lease heartbeat, upload, fenced outcome write)
-   and takes the server image as `SERVER_IMAGE`. CI now builds both the worker image (on the server image) and the
-   CPU API image. What is missing is a registry path from your account (see section 5).
-4. **Classic TensorRT + CUDA, not TensorRT-RTX, on AWS.** The `server` image carries CUDA 13, cuDNN and
-   TensorRT 10.13.3.9. The TensorRT-RTX pin in `runtime/trt-rtx-ep.manifest.json` is for the desktop `rtx`
-   profile and does not apply to G6/G6e.
-5. **Engine caches cannot be built in CI.** CI runners have no GPU. Classic TensorRT caches are keyed to
-   GPU, driver and TensorRT binary hash, so they are created on the target host with `trackdub cache warm`
-   and then persisted (EBS volume or snapshot). Never copy a cache between GPU models or drivers.
-6. **Languages and limits.** Cloud presets (`src/Trackdub.Cloud/Jobs/CloudPresets.cs`):
-   `poc-server-v1` (en->es, Kokoro, voice `ef_dora`) is the accepted baseline; `poc-server-zh-v1` (en->zh,
-   Qwen3-TTS `qwen3:vivian`) is accepted by the API but not qualified. Uploads: MP4, up to 1 GiB, up to 600 s,
-   up to 1920x1080. Both presets run on CUDA with only the engines in `docker/poc-warm-models.server.txt`
-   pre-compiled.
-7. **S3 lifecycle vs versioning.** The bucket is versioned and DynamoDB stores S3 version IDs. A 7-day expiry must
-   cover noncurrent versions, and artifact listing after expiry must be defined. The acceptance doc leaves
-   retention to a separately deployed policy.
-8. **Benchmark and cost-per-minute** are not delivered by anyone under the signed scope. Local diagnostic
-   timings in the runbook come from an RTX 5070 and are not throughput or cost evidence for L4/L40S.
+```text
+Cloudflare API (existing; auth and job record)
+  -> SQS (job message)
+  -> EC2 GPU worker (container: trackdub run pipeline)
+  -> S3 (source media in, per-stage artifacts out; KMS SSE; presigned URLs; 7-day lifecycle)
+```
 
-## 3. Premium model manifest (cloud presets)
+- SnapSoft writes IaC for SQS, S3, KMS and the EC2 GPU worker, plus the chosen orchestrator (AWS Batch or ECS).
+- SnapSoft implements the worker job loop: read the SQS message, fetch source media from S3, run
+  `trackdub run pipeline`, parse the structured result (`--result-file`, `--progress-file`), and write artifacts to S3.
+- SnapSoft defines the Cloudflare-to-SQS/S3 interface contract. Mesilim makes the Cloudflare-side changes.
+- Status wiring back into the Cloudflare job API, Spot capacity and autoscaling are deferred to the follow-on phase.
 
-Union of `docker/poc-server-models.txt` (es) and `docker/poc-server-zh-models.txt` (zh). Values are copied from
-`bundled-models.manifest.json`; `commercial_use_verified` is the manifest's own flag, not a legal review.
-Hashes are the manifest `sha256` for the pinned model files (first 12 hex digits shown; the CLI verifies the full
-value at download).
+### AWS job code already in the repository (outside POC scope)
+
+The repository also contains an AWS-only job stack built before the SOW: a CPU ASP.NET API with Cognito JWT
+(`src/Trackdub.Api`), DynamoDB job, idempotency and outbox state (`src/Trackdub.Cloud.Aws`), a scheduler
+interface with no concrete adapter (`IJobScheduler` in `src/Trackdub.Cloud`), and a one-shot worker wrapper
+(`src/Trackdub.CloudJobAdapter`, image `Dockerfile.cloud-worker`) that reads its job identity from environment
+variables and its state from DynamoDB. `AWSSDK.SQS` is pinned in `Directory.Packages.props` but unused.
+
+This stack is not part of the POC. Do not build IaC for DynamoDB, Cognito or the CPU API, and do not write an
+`IJobScheduler` adapter, unless a change order adds them. Pieces that can be reused in the SQS job loop if
+useful: the CLI process supervision in `src/Trackdub.CloudJobAdapter/CliProcessRunner.cs`, the fixed-preset
+argument building in `src/Trackdub.CloudJobAdapter/JobAdapter.cs` (which never accepts client-supplied commands,
+paths or model IDs), and the cloud preset list in `src/Trackdub.Cloud/Jobs/CloudPresets.cs`.
+Reference contract for that stack: [docs/operations/snapsoft-poc-acceptance.md](../operations/snapsoft-poc-acceptance.md).
+
+## 3. Where the repository differs from the SOW text
+
+1. **Classic TensorRT + CUDA, not TensorRT-RTX, on AWS.** The `server` image is based on
+   `nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04` and carries TensorRT 10.13.3.9. The TensorRT-RTX pin in
+   `runtime/trt-rtx-ep.manifest.json` is for the desktop `rtx` profile and does not apply to G6/G6e.
+2. **Engine caches cannot be built in CI.** CI runners have no GPU. Classic TensorRT caches live under
+   `$TRACKDUB_ENGINE_CACHE_ROOT/classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver,
+   TensorRT binary and ONNX Runtime identity. Build them on the target instance type with `trackdub cache warm`,
+   then bake them into the image or an EBS snapshot as the SOW describes. Never copy a cache between GPU models or
+   drivers.
+3. **Model weights at build time vs a seeded volume.** The SOW has models downloaded and hash-verified at image
+   build time. The runbook instead seeds a persistent model volume (`scripts/docker/seed-model-volume.sh`). Both
+   use `trackdub models download` and `trackdub models verify`; which one the POC uses is a Design decision.
+4. **Languages and limits.** Cloud presets (`src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1`
+   (en->es, Kokoro, voice `ef_dora`) and `poc-server-zh-v1` (en->zh, Qwen3-TTS `qwen3:vivian`). Both are in POC
+   scope. `poc-server-v1` is the qualified baseline; `poc-server-zh-v1` has not yet passed an end-to-end EN->ZH
+   run, and Mesilim is qualifying it before the Build phase. Media limits enforced by the repository's validator:
+   MP4, up to 1 GiB, up to 600 s, up to 1920x1080.
+5. **S3 versioning.** If the artifact bucket is versioned, the 7-day lifecycle rule must also expire noncurrent
+   versions.
+6. **Benchmarks and parity.** The SOW says the final instance type is selected from self-guided benchmark results
+   completed by Mesilim, and the readout includes a recommended instance type and a monthly run-rate estimate.
+   The SOW lists parity test results and parity pass/fail under Deliverables, but its Out of Scope section says
+   SnapSoft will not produce a per-stage benchmark report or measure parity against the RTX 5070 run. Agree at
+   kickoff who runs the parity comparison. Local timings in the runbook come from an RTX 5070 and are not
+   throughput or cost evidence for L4/L40S.
+
+## 4. Premium model pack for the POC
+
+For this POC, "Premium model pack" means the model sets of the two cloud presets: the union of
+`docker/poc-server-models.txt` (es) and `docker/poc-server-zh-models.txt` (zh). The desktop Premium starter pack
+(`src/Trackdub.Composition/StarterPacks/premium.json`: Whisper or Qwen3-ASR, Chatterbox voice-cloning TTS) is a
+different model set and is not part of the POC image. The RTX 5070 reference output is produced with the same
+presets, so the parity comparison runs the same pipeline on both sides.
+
+Values are copied from `bundled-models.manifest.json`; `commercial_use_verified` is the manifest's own flag, not a
+legal review. Hashes are the manifest `sha256` (first 12 hex digits shown; the CLI verifies the full value at
+download).
 
 | Model | Task | License | Commercial | Verified | Attribution | Revision | sha256 |
 |---|---|---|---|---|---|---|---|
@@ -74,44 +106,48 @@ value at download).
 
 Notes:
 
-- Sortformer's revision is `cache-installed`, meaning no upstream revision is pinned in the manifest. The
-  SOW assumes every model is downloadable and hash-verified at image build time; confirm Sortformer's download
-  path before relying on it.
+- Sortformer has a manifest download URL and sha256, but its revision is `cache-installed`, meaning no upstream
+  revision is pinned. Mesilim will pin it so every model in the pack is downloadable and hash-verified at build
+  time, as the SOW assumes.
 - Seven of the eight entries require attribution. Keep each model's license and attribution notice next to the
   seeded weights (runbook: "Curated POC model volume").
 - Preserve the full preset pin files: `docker/poc-server-preset.json`, `docker/poc-server-quality-preset.json`,
   `docker/poc-server-zh-preset.json`.
 
-## 4. Provider allow-list for Linux NVIDIA workers (server profile)
+## 5. Provider allow-list for Linux NVIDIA workers (server profile)
 
-There is no separate allow-list configuration file. The allow-list is the provider pin of each preset in
+There is no separate allow-list configuration file. The allow-list is the per-stage provider pin of each preset in
 `src/Trackdub.Cli/PocServerPreset.cs`:
 
 | Stage | Provider |
 |---|---|
-| vad | CPU (Silero fails TensorRT import; CPU costs nothing) |
+| vad | CPU (Silero is excluded from TensorRT; CPU cost is negligible) |
 | asr, translation, tts, diarization, separation, speech-enhancement | CUDA |
 
-Classic TensorRT is available in the image, and `seed-and-warm-gpu-worker.sh` compiles engines for the graphs in
-`docker/poc-warm-models.server.txt` (DeepFilterNet3, SortFormer, Spleeter, Parakeet). Both cloud presets pin
-those stages to CUDA, so preset runs do not use the warmed engines; the warm step adds build time and EBS storage
-without speeding up `poc-server-v1` or `poc-server-zh-v1`. Decide whether to skip it or to change the presets'
-provider pins after measuring on L4/L40S. Constraints from the runbook:
+TensorRT engines. The SOW includes building TensorRT engines once per instance type with `trackdub cache warm` and
+baking them into the image or an EBS snapshot. `docker/poc-warm-models.server.txt` lists the classic-TensorRT
+graphs to warm (DeepFilterNet3, Sortformer, Spleeter, Parakeet), and `scripts/docker/seed-and-warm-gpu-worker.sh`
+builds them. The presets currently pin those stages to CUDA, so preset runs do not yet use the warmed engines. On a
+local RTX 5070, diarization (Sortformer) and ASR (Parakeet) have run end-to-end on classic TensorRT. Whether the
+presets move those stages to TensorRT is decided in Design after measuring on L4/L40S.
 
-- MADLAD `quantized` is not classic-TensorRT qualified; the `trt-fp16` export is, but needs a 24 GiB-class GPU
-  (about 12.7 GB session bundle) and is not in the accepted preset.
-- Qwen3-TTS is excluded from TensorRT by planner policy and runs on CUDA. CosyVoice `int8` runs on CUDA only.
+Constraints:
+
+- MADLAD `quantized` (the preset variant) is not classic-TensorRT qualified and runs on CUDA. The `trt-fp16`
+  export is listed for classic TensorRT in the manifest and passed an isolated smoke test, but a full pipeline run
+  with it has not completed. It needs a 24 GiB-class GPU (about 12.7 GB session bundle) and is not in either preset.
+- Qwen3-TTS and Kokoro are excluded from TensorRT by planner policy and run on CUDA.
 - Required stages must not fall back to CPU: acceptance fails on unexplained CPU fallback.
 - VRAM admission auto-scales (75% up to 16 GiB, 85% above, floor 4096 MB). Check the `accelerator-vram-budget`
   row of `trackdub doctor`.
 
-## 5. Commands you will use
+## 6. Commands you will use
 
 ```bash
 trackdub doctor                       # health check; checks manifest, ffmpeg/ffprobe, model cache, VRAM budget
 trackdub providers list               # CUDA and TensorRT must both report available on the GPU host
 trackdub models download <model-id>   # hash-verified download (use scripts/docker/seed-model-volume.sh for the set)
-trackdub models verify                # integrity check of the seeded volume
+trackdub models verify                # integrity check of the seeded models
 trackdub cache warm --provider tensorrt   # per-GPU engine build; see docker/poc-warm-models.server.txt
 trackdub run pipeline --media in.mp4 --output ./project --source-language en --target-language es \
   --preset poc-server-v1 --voice SPEAKER_00:ef_dora --subtitle-format srt \
@@ -121,43 +157,33 @@ trackdub run pipeline --media in.mp4 --output ./project --source-language en --t
 To run a specific model variant without editing a preset, add `--variant <stage>:<variant>` (for example
 `--variant translation:trt-fp16`); see [gpu-execution-providers.md](../reference/gpu-execution-providers.md#choosing-a-variant-explicitly-run-pipeline---variant).
 
-Provisioning a GPU host: `TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh` with
-`TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml` (see the runbook for the EBS mount and UID 10001 ownership).
-The script seeds the Spanish set (`docker/poc-server-models.txt`) by default. To accept `poc-server-zh-v1` jobs,
-the host also needs the Qwen3-TTS weights; seed them before scheduling Chinese jobs, for example
+Provisioning a GPU host with the runbook scripts: `TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh`
+with `TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml` (see the runbook for the EBS mount and UID 10001
+ownership). The script seeds the Spanish set (`docker/poc-server-models.txt`) by default. For `poc-server-zh-v1`
+the host also needs the Qwen3-TTS weights, for example
 `TRACKDUB_MODEL_SET=docker/poc-server-zh-models.txt ./scripts/docker/seed-model-volume.sh` (same compose override).
 Keep Kokoro seeded for `poc-server-v1`; the two lists share every other model.
 
-Build and test without AWS or a GPU:
+Registry: the server image publishes to `ghcr.io/mesilimllc/trackdub:<tag>-server` from `main`; the package may be
+private until its visibility is changed. Decide GHCR pull credentials or an ECR mirror in Design.
+`Dockerfile.cloud-worker` belongs to the out-of-scope job stack in section 2 and is built, not published, by CI.
 
-```bash
-dotnet test tests/Trackdub.Cloud.Tests -c Release -m:1
-dotnet test tests/Trackdub.Api.Tests -c Release -m:1
-dotnet test tests/Trackdub.CloudJobAdapter.Tests -c Release -m:1
-dotnet test tests/Trackdub.Architecture.Tests -m:1
-docker build -f Dockerfile.api -t trackdub-cloud-api:local .
-```
+## 7. Decisions for the Design phase
 
-Registry: images publish to `ghcr.io/mesilimllc/trackdub:<tag>-server` from `main`; the package may be private
-until its visibility is changed. The worker image is not published by CI; build it from an approved server digest
-with `docker build -f Dockerfile.cloud-worker --build-arg SERVER_IMAGE=<digest> .`. Decide GHCR pull credentials or
-an ECR mirror in Design.
+- Orchestrator: AWS Batch or ECS on EC2 GPU, driven by the SQS job loop.
+- Instance: G6 (L4, 24 GB) or G6e (L40S, 48 GB); AMI and NVIDIA driver level for CUDA 13.
+- Model storage: download at image build time (SOW) or a seeded volume (runbook), section 3 item 3.
+- Engine-cache persistence: baked into the image or an EBS snapshot, rebuilt on driver, TensorRT or model change.
+- Provider pins: keep CUDA for diarization and ASR, or move them to TensorRT after L4/L40S measurement (section 5).
+- Capacity policy for the under-2-minute cold start: scale to zero or keep one host warm. Container exit alone
+  does not stop instance billing.
+- Registry path and pull credentials.
+- S3 bucket layout, versioning and the 7-day lifecycle rule; target US region.
 
-## 6. Decisions for the Design phase
+To agree at kickoff: who runs the parity comparison against the RTX 5070 reference (section 3 item 6).
 
-- Orchestrator: AWS Batch or ECS on EC2 GPU, and who writes the `IJobScheduler` adapter. Batch `SubmitJob` has no
-  idempotency token; ECS `RunTask` has `clientToken`. Dispatch discovery must find all executions for a dispatch ID.
-- Instance: G6 (L4, 24 GB) or G6e (L40S, 48 GB); AMI and NVIDIA driver level for CUDA 13 (the server image is based
-  on `nvidia/cuda:13.0.0`).
-- Model and engine-cache persistence: per-host EBS, snapshot or AMI; rebuild on driver, TensorRT or model change.
-- Capacity policy: scale to zero or keep one host warm; container exit alone does not stop instance billing, and the
-  SOW's under-2-minute cold-start target depends on this choice.
-- Registry path and pull credentials; CPU API hosting; Cognito app client and exact portal origins.
-- S3 retention (section 2, item 7); region (single US region per SOW).
-- Whether to qualify `poc-server-zh-v1` in this engagement, using the Trackdub-supplied EN->ZH clips.
+## 8. Not verified
 
-## 7. Not verified
-
-No G6/G6e execution, no real IAM/S3/DynamoDB/Cognito behavior, no native-Linux datacenter-GPU visibility in the
-container, no full-pipeline quality or timing on L4/L40S, no Mandarin audio quality. GPU evidence in the runbook is
-from an RTX 5070 (WSL2).
+No G6/G6e execution, no real IAM/S3/SQS/KMS behavior, no native-Linux datacenter-GPU visibility in the container,
+no full-pipeline quality or timing on L4/L40S, no end-to-end EN->ZH run with `poc-server-zh-v1`, no Mandarin audio
+quality review. GPU evidence in the runbook is from an RTX 5070 (WSL2).

@@ -4,6 +4,8 @@
 
 Trackdub is a cross-platform, local-first AI dubbing workstation for Windows, macOS, and Linux.
 
+The same pipeline also runs headless through the `trackdub` CLI and the SDK, including on Linux GPU servers in a container. That headless path is the basis of the opt-in cloud render tier (section 3.6).
+
 The product is designed around a staged editorial workflow:
 
 ```text
@@ -48,7 +50,7 @@ Trackdub is not trying to be:
 - a general-purpose nonlinear video editor
 - a full DAW
 - a one-click magic dubbing service
-- a web-first SaaS product
+- a web-first SaaS product (the opt-in cloud render tier in section 3.6 runs the same pipeline on a rented GPU; the desktop app stays local-first)
 - a voice-cloning toy
 - a Python environment manager for end users
 - a perfect lip-sync engine
@@ -66,7 +68,7 @@ Recommended desktop framework:
 
 ```text
 Avalonia
-.NET 10
+.NET 11
 C#
 ```
 
@@ -81,7 +83,7 @@ Why:
 
 ### 3.2 Inference runtime
 
-Recommended inference stack:
+Recommended inference stack for the desktop app:
 
 ```text
 Windows ML
@@ -89,6 +91,13 @@ ONNX Runtime
 DirectML
 TensorRT-RTX where supported
 CPU fallback
+```
+
+The Linux container is one runtime image (based on `nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04`, with classic TensorRT 10.13) published as two Dockerfile targets. They differ only in `TRACKDUB_GPU_PROFILE`, which tells provisioning (`scripts/docker/seed-and-warm-gpu-worker.sh`) which route to set up:
+
+```text
+rtx     consumer RTX GPUs: installs the TensorRT-RTX plugin during provisioning
+server  datacenter GPUs (for example AWS G6/L4, G6e/L40S): CUDA and classic TensorRT, no TensorRT-RTX
 ```
 
 The runtime layer should not assume every model works with every execution provider.
@@ -118,8 +127,10 @@ Do not make unsupported acceleration a hard blocker. If the app cannot use a GPU
 
 #### 3.2.1 Engine Caching & Invalidation (TensorRT)
 
-Trackdub caches compiled inference engines to reduce startup latency. The default cache location for TensorRT is:
+Trackdub caches compiled inference engines to reduce startup latency. The default desktop cache location for TensorRT is:
 `%LOCALAPPDATA%\Trackdub\EngineCache`
+
+`TRACKDUB_ENGINE_CACHE_ROOT` overrides the location; the Linux container sets it to `/data/engine-cache`. Classic TensorRT engines (server profile) are stored under `classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver, TensorRT binary and ONNX Runtime identity. On a server, build engines on the target instance type with `trackdub cache warm` and persist them; never copy a cache between GPU models or driver versions.
 
 - **Automatic Invalidation**: TensorRT verifies environment metadata embedded in the cached `.engine` files. It automatically invalidates the cache and triggers recompilation if it detects a mismatch in GPU architecture, NVIDIA Display Driver version, or specific ONNX model shapes/profiles.
 - **Manual Cache Clearing Rules**: If persistent inference crashes occur (especially following unexpected shutdowns or driver updates), or if the hardware is changed, users should manually delete all files in `%LOCALAPPDATA%\Trackdub\EngineCache`. The engines will automatically rebuild on their next use.
@@ -182,6 +193,29 @@ End users should not need:
 - WSL
 - CUDA Toolkit
 - manual PATH edits
+
+This applies to the desktop app. The Linux GPU worker is an operator artifact, not an end-user install: it ships as a container image built from the `Dockerfile` `server` target.
+
+### 3.6 Headless and cloud render execution
+
+The `trackdub` CLI (`src/Trackdub.Cli`) runs the full pipeline without the desktop UI:
+
+```text
+trackdub run pipeline --media in.mp4 --output ./project --preset <preset> \
+  --result-file result.json --progress-file progress.jsonl
+```
+
+It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` cover health checks, hash-verified model provisioning and engine builds.
+
+Cloud presets fix the models, variants and per-stage providers for server runs (`src/Trackdub.Cli/PocServerPreset.cs`, `src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1` (English to Spanish) and `poc-server-zh-v1` (English to Chinese). Clients pick a preset name; they never supply commands, model IDs or paths.
+
+The cloud render tier is opt-in per project and requires explicit user consent before source media leaves the device (see the Stage 0 rule "Do not silently switch to cloud"). The proof of concept with SnapSoft targets this job path:
+
+```text
+Cloudflare API (auth, job record) -> SQS -> EC2 GPU worker (trackdub run pipeline) -> S3 (KMS encryption, presigned URLs, 7-day lifecycle)
+```
+
+The repository also contains an earlier AWS-only job stack (`Trackdub.Api`, `Trackdub.Cloud.Aws`, `Trackdub.CloudJobAdapter`, plus the `IJobScheduler` interface in `Trackdub.Cloud`) that uses Cognito, DynamoDB and a scheduler interface instead of Cloudflare and SQS. It is outside the POC scope. See [docs/handoff/snapsoft-onboarding.md](../handoff/snapsoft-onboarding.md) for the POC mapping.
 
 ---
 
@@ -749,7 +783,6 @@ Example:
   "requires_attribution": false,
   "requires_user_consent": false,
   "voice_cloning": false,
-  "commercial_allowed": true,
   "commercial_use_verified": true,
   "source_url": "",
   "revision": "",
@@ -765,7 +798,8 @@ Rules:
 - `commercial_allowed: true` alone is not enough for commercial-safe routing.
 - Voice-cloning models require explicit consent flow.
 - Model licenses are independent from the app license.
-- Commercial safety must be enforceable by code (CommercialSafeEvaluator, manifest fields), not just documentation. There is no runtime CommercialSafeMode flag.
+- Commercial safety must be enforceable by code, not just documentation. Today it is read from the manifest fields (`commercial_allowed`, `commercial_use_verified`) by the model inventory, starter-pack and translation provisioning code. There is no `CommercialSafeEvaluator` type and no runtime CommercialSafeMode flag.
+- The live manifest is `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json`; `revision` may be `cache-installed` when no upstream revision is pinned.
 
 ---
 
@@ -775,26 +809,32 @@ Rules:
 
 ```text
 Trackdub/
-├── docs/
+├── docs/                  (legal policies live in docs/legal/, e.g. MODEL_LICENSE_POLICY.md, THIRD_PARTY_NOTICES.md)
 ├── src/
 ├── tests/
-├── samples/
+├── tools/
 ├── assets/
-├── scripts/
-├── packaging/
+├── resources/
+├── scripts/               (scripts/docker/ holds the GPU worker seed and warm scripts)
+├── docker/                (cloud preset pins, model lists and TensorRT warm lists for the Linux worker)
+├── runtime/               (pinned runtime manifests, e.g. trt-rtx-ep.manifest.json)
+├── workers/
+├── build/
 ├── .github/
 ├── .claude/
-├── .codex/
+├── Dockerfile             (Linux GPU worker image: targets rtx and server)
+├── Dockerfile.api
+├── Dockerfile.cloud-worker
+├── docker-compose.yml
+├── docker-compose.aws.yml
 ├── Directory.Build.props
 ├── Directory.Packages.props
+├── global.json
+├── Trackdub.slnx
 ├── README.md
-├── AGENT_CONTEXT.md
-├── MILESTONE.md
+├── CONTRIBUTING.md
 ├── LICENSE
-├── COMMERCIAL-LICENSE.md
-├── CONTRIBUTOR-LICENSE-AGREEMENT.md
-├── MODEL_LICENSE_POLICY.md
-├── THIRD_PARTY_NOTICES.md
+├── NOTICE
 └── AGENTS.md
 ```
 
@@ -1053,6 +1093,20 @@ What should not go here:
 - domain invariants
 - concrete persistence code
 - UI classes
+
+### 12.11 Headless and cloud projects
+
+| Project | Purpose |
+|---|---|
+| `src/Trackdub.Composition` | Composition root shared by the desktop app, CLI and SDK; starter packs (`StarterPacks/*.json`). |
+| `src/Trackdub.Sdk` | Headless engine API: run stages, resume, batch processing. |
+| `src/Trackdub.Cli` | The `trackdub` CLI: `run pipeline`, `doctor`, `models`, `providers`, `cache warm`, cloud presets. Used in the Linux GPU container. |
+| `src/Trackdub.Cloud` | Cloud job contracts, cloud preset list, media validation, the `IJobScheduler` interface. |
+| `src/Trackdub.Cloud.Aws` | DynamoDB job store and S3 artifact store. |
+| `src/Trackdub.Api` | CPU ASP.NET job API (Cognito JWT). |
+| `src/Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (claim, lease heartbeat, artifact upload, outcome write); image `Dockerfile.cloud-worker`. |
+
+`Trackdub.Cloud.Aws`, `Trackdub.Api` and `Trackdub.CloudJobAdapter` form the earlier AWS-only job stack described in section 3.6. It is not part of the SnapSoft POC job path.
 
 ---
 
