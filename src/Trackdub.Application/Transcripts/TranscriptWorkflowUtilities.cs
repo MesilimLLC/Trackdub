@@ -28,14 +28,13 @@ public static class TranscriptWorkflowUtilities
     private const double DiarizedTranscriptMergeGapSeconds = 1.5d;
     private const double MaxDiarizedTranscriptRegionSeconds = 28d;
     private const double DiarizedTranscriptRegionPaddingSeconds = 0.5d;
-    private const string DemucsV4StemProvenance = "generated-demucs-v4";
     private const string HushDialogueStemProvenance = "generated-hush-dialogue";
     private const string SpleeterStemProvenance = "generated-spleeter";
     private const string DialogueIsolationUnavailableCode = "DIALOGUE_ISOLATION_UNAVAILABLE";
     private const string DialogueIsolationUnavailableMessage =
         "Dialogue isolation model unavailable; no clean ambiance track was generated.";
     private const string LegacyStemWarning =
-        "Existing Demucs or Hush stems were created by an older/non-current separator and should be regenerated with the current separation engine.";
+        "Existing Hush stems were created by an older/non-current separator and should be regenerated with the current separation engine.";
 
     public static MediaAsset GetRequiredMediaAsset(TranscriptProjectState state) =>
         state.ProjectState.MediaAsset
@@ -376,10 +375,7 @@ public static class TranscriptWorkflowUtilities
     private static bool IsLegacySeparatorStem(ProjectArtifact artifact) =>
         (artifact.Kind is ArtifactKind.Vocals or ArtifactKind.Ambiance) &&
         !string.IsNullOrWhiteSpace(artifact.Provenance) &&
-        (artifact.Provenance.Contains(DemucsV4StemProvenance, StringComparison.OrdinalIgnoreCase) ||
-            artifact.Provenance.Contains("engine_family=demucs-v4", StringComparison.OrdinalIgnoreCase) ||
-            artifact.Provenance.Contains("model=demucs-v4", StringComparison.OrdinalIgnoreCase) ||
-            artifact.Provenance.Contains(HushDialogueStemProvenance, StringComparison.OrdinalIgnoreCase) ||
+        (artifact.Provenance.Contains(HushDialogueStemProvenance, StringComparison.OrdinalIgnoreCase) ||
             artifact.Provenance.Contains("model=hush-dialogue", StringComparison.OrdinalIgnoreCase));
 
     // A producer is accepted only after all required metadata was saved. Select that
