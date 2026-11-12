@@ -80,6 +80,7 @@ def verified_weights(model_directory: Path) -> tuple[bytes, str, str]:
 def reference_hashes(repo: Path) -> dict:
     if rc.git_head(repo) != REPO_REVISION:
         raise rc.RunnerError(f"{repo} is not at the pinned revision {REPO_REVISION}")
+    rc.require_unmodified(repo, REFERENCE_FILES)
     return {name: rc.file_hash(repo / name, "sha256") for name in REFERENCE_FILES}
 
 

@@ -70,6 +70,15 @@ def git_head(repo: Path) -> str:
     return out.stdout.strip()
 
 
+def require_unmodified(repo: Path, paths: list[str]) -> None:
+    """The listed files must match the checked-out revision, so a pinned revision cannot carry local edits."""
+    import subprocess
+
+    out = subprocess.run(["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", *paths], check=False)
+    if out.returncode != 0:
+        raise RunnerError(f"{repo} has local changes to files the runner imports")
+
+
 def _memory_counters():
     """Memory counters of this process. Returns (peak, current) bytes."""
     return _windows_counters() if sys.platform == "win32" else _posix_counters()
@@ -145,14 +154,11 @@ def _new_record(job: dict, index: int, ctx: RunContext) -> dict:
             "selected_provider": ctx.meta.get("selected_provider", ctx.device_type), "bootstrap_detail": None, "metadata": dict(ctx.meta)}
 
 
-def _write_stems(job: dict, stems: dict, mix, torch) -> list[str]:
-    written = []
+def _write_stems(job: dict, stems: dict, mix, torch) -> None:
     for name, stem in stems.items():
         if stem.shape != mix.shape or not bool(torch.isfinite(stem).all()):
             raise RunnerError(f"{name} is not finite or not the input's shape")
         write_wav_float(job[name], stem)
-        written.append(job[name])
-    return written
 
 
 def _finish_record(record: dict, started: float, ctx: RunContext) -> None:
@@ -169,17 +175,16 @@ def _finish_record(record: dict, started: float, ctx: RunContext) -> None:
 def run_job(estimate: Callable, job: dict, index: int, ctx: RunContext) -> dict:
     record = _new_record(job, index, ctx)
     started = time.perf_counter()
-    written: list[str] = []
     try:
         mix = read_wav_float(job["input"])
         record["audio_seconds"] = mix.shape[1] / SEPARATOR_SR
         dialogue, bed = estimate(mix)
-        written = _write_stems(job, {"vocals_output": dialogue, "bed_output": bed}, mix, ctx.torch)
+        _write_stems(job, {"vocals_output": dialogue, "bed_output": bed}, mix, ctx.torch)
         record["ok"] = True
     except Exception as exc:  # noqa: BLE001 - every failure is recorded per job, never as silent output
         record["error"] = f"{type(exc).__name__}: {exc}"
-        for path in written:
-            Path(path).unlink(missing_ok=True)
+        for key in ("vocals_output", "bed_output"):
+            Path(job[key]).unlink(missing_ok=True)  # also a stem left by an earlier run in a reused work directory
     _finish_record(record, started, ctx)
     return record
 

@@ -1,5 +1,10 @@
 import math
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 try:
     import torch
@@ -45,6 +50,55 @@ class PortabilityTests(unittest.TestCase):
         self.assertEqual(mdx.padding_for(2 * mdx.GEN_SIZE), 0)
         self.assertEqual(mdx.padding_for(1), mdx.GEN_SIZE - 1)
         self.assertEqual((1000 + mdx.padding_for(1000)) % mdx.GEN_SIZE, 0)
+
+
+class DecoderPaddingTests(unittest.TestCase):
+    def test_a_long_input_that_fits_the_windows_exactly_gets_one_extra_sample(self):
+        for seconds in (22, 25, 28, 31):
+            with self.subTest(seconds):
+                self.assertEqual(mf2.decoder_padding(seconds * 48000), 1)
+
+    def test_other_lengths_are_left_alone(self):
+        for n in (10 * 48000, 20 * 48000, 30 * 48000, 22 * 48000 + 1, 1200 * 48000):
+            with self.subTest(n):
+                self.assertEqual(mf2.decoder_padding(n), 0)
+
+
+class FailedJobTests(unittest.TestCase):
+    def test_a_failed_job_removes_both_outputs_including_ones_from_an_earlier_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            voc, bed = Path(td) / "v.wav", Path(td) / "b.wav"
+            voc.write_bytes(b"old")
+            bed.write_bytes(b"old")
+            job = {"id": "x", "input": "missing.wav", "vocals_output": str(voc), "bed_output": str(bed)}
+            ctx = rc.RunContext(None, "cpu", "cpu", {})
+            with mock.patch.object(rc, "read_wav_float", side_effect=rc.RunnerError("unreadable")):
+                record = rc.run_job(lambda mix: (mix, mix), job, 0, ctx)
+            self.assertFalse(record["ok"])
+            self.assertIn("unreadable", record["error"])
+            self.assertFalse(voc.exists() or bed.exists())
+
+
+@unittest.skipIf(shutil.which("git") is None, "git not installed")
+class UnmodifiedCheckoutTests(unittest.TestCase):
+    def git(self, repo, *args):
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
+                       check=True, capture_output=True)
+
+    def test_local_edits_to_a_listed_file_are_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            self.git(repo, "init", "-q")
+            (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+            (repo / "other.py").write_text("y = 1\n", encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "commit", "-q", "-m", "c")
+            rc.require_unmodified(repo, ["a.py"])
+            (repo / "other.py").write_text("y = 2\n", encoding="utf-8")
+            rc.require_unmodified(repo, ["a.py"])
+            (repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+            with self.assertRaisesRegex(rc.RunnerError, "local changes"):
+                rc.require_unmodified(repo, ["a.py"])
 
 
 class CommandLineTests(unittest.TestCase):

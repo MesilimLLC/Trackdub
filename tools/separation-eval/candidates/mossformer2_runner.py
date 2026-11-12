@@ -42,14 +42,27 @@ CHECKPOINT_NAME = "last_best_checkpoint.pt"
 CHECKPOINT_SHA256 = "03692b9f773bbd6bb43b9c5a41f96b1e28affd66e13796b7bec66ad3d8b227c6"  # Hugging Face file page
 HF_REVISION = "2b49ae38eaf136f3104cc1f7addb684b63c2d984"
 CODE_REVISION = "6b3774dc79c46ae8bed2a4fa5f706f0ac8c75c61"  # modelscope/ClearerVoice-Studio
-SOURCE_FILES = ["utils/decode.py", "utils/misc.py", "models/mossformer2_se/mossformer2_se_wrapper.py",
-                "models/mossformer2_se/mossformer2.py", "config/inference/MossFormer2_SE_48K.yaml"]
+SOURCE_FILES = ["utils/decode.py", "utils/misc.py", "utils/bandwidth_sub.py", "dataloader/meldataset.py",
+                "config/inference/MossFormer2_SE_48K.yaml",
+                *(f"models/mossformer2_se/{name}.py" for name in ("__init__", "conv_module", "fsmn", "layer_norm", "mossformer2",
+                                                                  "mossformer2_block", "mossformer2_se_wrapper"))]
 MODELS = {"mossformer2-se-48k-residual": "residual"}
 NATIVE_SR = 48000
 # config/inference/MossFormer2_SE_48K.yaml
 DECODER_ARGS = dict(sampling_rate=NATIVE_SR, one_time_decode_length=20, decode_window=4, network="MossFormer2_SE_48K",
                     win_type="hamming", win_len=1920, win_inc=384, fft_len=1920, num_mels=60)
 DITHER_SEED = 1234
+DECODER_WINDOW = DECODER_ARGS["decode_window"] * NATIVE_SR
+DECODER_STRIDE = DECODER_WINDOW * 3 // 4
+DECODER_ONE_PASS = DECODER_ARGS["one_time_decode_length"] * NATIVE_SR
+
+
+def decoder_padding(n: int) -> int:
+    """One zero sample for a long input whose length fits the decoder's windows exactly. The official long-input path
+    leaves the last (window - stride) / 2 output samples unfilled in that case; any other length is padded by the
+    decoder itself and filled, so the extra sample (cut off again afterwards) moves it onto that path."""
+    aligned = n >= DECODER_WINDOW + DECODER_STRIDE and (n - DECODER_WINDOW) % DECODER_STRIDE == 0
+    return 1 if n > DECODER_ONE_PASS and aligned else 0
 
 
 def load_clearvoice_modules(inner: Path):
@@ -100,6 +113,7 @@ def verified_checkpoint(model_directory: Path) -> tuple[Path, str]:
 def source_hashes(repo: Path, inner: Path) -> dict:
     if rc.git_head(repo) != CODE_REVISION:
         raise rc.RunnerError(f"{repo} is not at the pinned revision {CODE_REVISION}")
+    rc.require_unmodified(repo, [str((inner / name).relative_to(repo)).replace("\\", "/") for name in SOURCE_FILES])
     return {name: rc.file_hash(inner / name, "sha256") for name in SOURCE_FILES}
 
 
@@ -140,9 +154,9 @@ class Separator:
         """channel_48k: float32 (n,) tensor at 48 kHz -> enhanced float32 (n,) tensor."""
         torch = self.torch
         n = channel_48k.shape[0]
+        padded = torch.nn.functional.pad(channel_48k.cpu(), (0, decoder_padding(n)))
         with torch.inference_mode():
-            out = self.decode.decode_one_audio_mossformer2_se_48k(self.model, self.device, channel_48k.cpu().numpy()[None, :],
-                                                                  self.args)
+            out = self.decode.decode_one_audio_mossformer2_se_48k(self.model, self.device, padded.numpy()[None, :], self.args)
         out = torch.from_numpy(out).float().reshape(-1)
         if out.shape[0] < n or not bool(torch.isfinite(out).all()):
             raise rc.RunnerError(f"enhanced channel is not finite or too short ({out.shape[0]} of {n} samples)")
