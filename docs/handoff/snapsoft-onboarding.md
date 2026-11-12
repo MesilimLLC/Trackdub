@@ -11,8 +11,8 @@ readiness: no AWS resource has been created and no GPU run on G6/G6e has happene
 | SOW prerequisite | Location |
 |---|---|
 | Technical Overview documentation | [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) (section 3.6 covers headless and cloud execution), [docs/index.md](../index.md) |
-| Premium model manifest (license + hash status) | Section 3 below; source `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json` |
-| Provider allow-list for Linux NVIDIA workers | Section 4 below |
+| Premium model manifest (license + hash status) | Section 4 below; source `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json` |
+| Provider allow-list for Linux NVIDIA workers | Section 5 below |
 | `trackdub` CLI and SDK source | `src/Trackdub.Cli`, `src/Trackdub.Sdk` |
 | Container build scripts / CI | `Dockerfile` (`server` target), `scripts/docker/`, `.github/workflows/container-image.yml` |
 | Container build, seed and warm runbook | [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) |
@@ -61,7 +61,7 @@ Reference contract for that stack: [docs/operations/snapsoft-poc-acceptance.md](
    `runtime/trt-rtx-ep.manifest.json` is for the desktop `rtx` profile and does not apply to G6/G6e.
 2. **Engine caches cannot be built in CI.** CI runners have no GPU. Classic TensorRT caches live under
    `$TRACKDUB_ENGINE_CACHE_ROOT/classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver,
-   TensorRT binary and ONNX Runtime identity. Build them on the target instance type with `trackdub cache warm`,
+   TensorRT binary and ONNX Runtime identity. Build them on the target instance type with `trackdub cache warm --provider tensorrt`,
    then bake them into the image or an EBS snapshot as the SOW describes. Never copy a cache between GPU models or
    drivers.
 3. **Model weights at build time vs a seeded volume.** The SOW has models downloaded and hash-verified at image
@@ -124,7 +124,7 @@ There is no separate allow-list configuration file. The allow-list is the per-st
 | vad | CPU (Silero is excluded from TensorRT; CPU cost is negligible) |
 | asr, translation, tts, diarization, separation, speech-enhancement | CUDA |
 
-TensorRT engines. The SOW includes building TensorRT engines once per instance type with `trackdub cache warm` and
+TensorRT engines. The SOW includes building TensorRT engines once per instance type with `trackdub cache warm --provider tensorrt` and
 baking them into the image or an EBS snapshot. `docker/poc-warm-models.server.txt` lists the classic-TensorRT
 graphs to warm (DeepFilterNet3, Sortformer, Spleeter, Parakeet), and `scripts/docker/seed-and-warm-gpu-worker.sh`
 builds them. The presets currently pin those stages to CUDA, so preset runs do not yet use the warmed engines. On a
