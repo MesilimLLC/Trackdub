@@ -21,6 +21,49 @@ public sealed class CliMachineBoundaryTests
         Assert.Equal("cpu", PocServerPreset.Providers["vad"]);
     }
 
+    [Fact]
+    public void VariantOverridesParseStageAndVariantAliases()
+    {
+        var parsed = CliModelOverrides.ParseVariantOverrides(["translation:trt-fp16", "TTS:int8"]);
+        Assert.Equal("trt-fp16", parsed!["translation"]);
+        Assert.Equal("int8", parsed["tts"]);
+    }
+
+    [Fact]
+    public void NoVariantTokensParseToAnEmptyMap()
+    {
+        Assert.Empty(CliModelOverrides.ParseVariantOverrides([])!);
+    }
+
+    [Theory]
+    [InlineData("trt-fp16")]
+    [InlineData("translation:")]
+    [InlineData(":trt-fp16")]
+    [InlineData("export:fp16")]
+    [InlineData("nonsense:fp16")]
+    public void VariantOverridesRejectMalformedOrUnsupportedStages(string token)
+    {
+        Assert.Null(CliModelOverrides.ParseVariantOverrides([token]));
+    }
+
+    [Fact]
+    public void ExplicitVariantsOverridePresetVariantsAndLeaveOthersUntouched()
+    {
+        var merged = CliModelOverrides.MergeVariants(
+            PocServerPreset.Variants,
+            new Dictionary<string, string> { ["translation"] = "trt-fp16" });
+        Assert.Equal("trt-fp16", merged!["translation"]);
+        Assert.Equal(PocServerPreset.Variants["tts"], merged["tts"]);
+        Assert.Equal("quantized", PocServerPreset.Variants["translation"]);
+    }
+
+    [Fact]
+    public void MergeWithoutExplicitVariantsReturnsPresetUnchangedAndWorksWithoutPreset()
+    {
+        Assert.Same(PocServerPreset.Variants, CliModelOverrides.MergeVariants(PocServerPreset.Variants, null));
+        Assert.Equal("int8", CliModelOverrides.MergeVariants(null, new Dictionary<string, string> { ["tts"] = "int8" })!["tts"]);
+    }
+
     [Theory]
     [InlineData("SPEAKER_00:ef_dora", "ef_dora")]
     [InlineData("SPEAKER_00:qwen3:vivian", "qwen3:vivian")]

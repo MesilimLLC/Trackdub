@@ -9,6 +9,11 @@ internal static class MadladTrtProfiles
     internal static readonly IReadOnlyDictionary<string, string> Encoder = Build(decoder: false);
     internal static readonly IReadOnlyDictionary<string, string> Decoder = Build(decoder: true);
 
+    // The classic TensorRT EP's CUDA graph replay needs IoBinding; the plain Run the greedy decoder uses
+    // returns null outputs under it (ONNX_TYPE_UNKNOWN). TensorRT-RTX captures graphs natively and is unaffected.
+    internal static readonly IReadOnlyDictionary<string, string> ClassicEncoder = WithoutCudaGraph(Encoder);
+    internal static readonly IReadOnlyDictionary<string, string> ClassicDecoder = WithoutCudaGraph(Decoder);
+
     internal static IReadOnlyDictionary<string, string>? Resolve(string modelPath) =>
         string.Equals(Path.GetFileName(Path.GetDirectoryName(modelPath)), ExportDirectory, StringComparison.OrdinalIgnoreCase)
             ? Path.GetFileName(modelPath).ToLowerInvariant() switch
@@ -46,6 +51,9 @@ internal static class MadladTrtProfiles
         ["trt_profile_opt_shapes"] = Shapes(decoder, 16),
         ["trt_profile_max_shapes"] = Shapes(decoder, MaximumSequenceLength)
     };
+
+    private static IReadOnlyDictionary<string, string> WithoutCudaGraph(IReadOnlyDictionary<string, string> profile) =>
+        new Dictionary<string, string>(profile, StringComparer.Ordinal) { ["enable_cuda_graph"] = "0" };
 
     private static string Shapes(bool decoder, int length) => decoder
         ? $"input_ids:1x{length},encoder_attention_mask:1x{length},encoder_hidden_states:1x{length}x1024"

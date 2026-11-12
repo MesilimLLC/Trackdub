@@ -37,6 +37,56 @@ public sealed class MadladFallbackTests
         Assert.Null(planner.Request.PreferredModelVariantAlias);
         Assert.Equal(ExecutionProviderKind.Cpu, planner.Request.PreferredExecutionProvider);
         Assert.True(planner.Request.RequirePreferredExecutionProvider);
+        Assert.True(planner.Request.RequirePreferredModelAlias);
+    }
+
+    [Fact]
+    public async Task Translate_requires_the_routed_alias_so_the_planner_cannot_substitute_another_model()
+    {
+        var planner = new Planner(StageRuntimePlanStatus.Blocked);
+        var engine = new MadladTranslationEngine(planner, BenchmarkModelPathResolver.CreateDefault());
+        var request = new TranslationRequest("es", "en", [], PreferredModelAlias: "madlad400-mt",
+            PreferredModelVariantAlias: "trt-fp16", PreferredExecutionProvider: "tensorrt",
+            RequirePreferredExecutionProvider: true);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => engine.TranslateAsync(request, CancellationToken.None));
+
+        Assert.NotNull(planner.Request);
+        Assert.Equal("madlad400-mt", planner.Request.NormalizedPreferredModelAlias);
+        Assert.Equal("trt-fp16", planner.Request.NormalizedPreferredModelVariantAlias);
+        Assert.True(planner.Request.RequirePreferredModelAlias);
+    }
+
+    [Fact]
+    public async Task Stream_requires_the_routed_alias_so_the_planner_cannot_substitute_another_model()
+    {
+        var planner = new Planner(StageRuntimePlanStatus.Blocked);
+        var engine = new MadladTranslationEngine(planner, BenchmarkModelPathResolver.CreateDefault());
+        var request = new TranslationRequest("es", "en", [], PreferredModelAlias: "madlad400-mt",
+            PreferredModelVariantAlias: "trt-fp16");
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await foreach (var _ in engine.TranslateStreamAsync(request, Guid.NewGuid(), "snapshot", Guid.NewGuid(), CancellationToken.None))
+            {
+            }
+        });
+
+        Assert.NotNull(planner.Request);
+        Assert.True(planner.Request.RequirePreferredModelAlias);
+    }
+
+    [Fact]
+    public async Task Translate_without_a_routed_alias_leaves_model_choice_to_the_planner()
+    {
+        var planner = new Planner(StageRuntimePlanStatus.Blocked);
+        var engine = new MadladTranslationEngine(planner, BenchmarkModelPathResolver.CreateDefault());
+        var request = new TranslationRequest("es", "en", []);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => engine.TranslateAsync(request, CancellationToken.None));
+
+        Assert.NotNull(planner.Request);
+        Assert.False(planner.Request.RequirePreferredModelAlias);
     }
 
     private sealed class Planner(StageRuntimePlanStatus status) : IRuntimePlanner
