@@ -270,6 +270,31 @@ Quantized model variants (int8 / int4 / fp16) are selected per stage by the runt
 already; see "Provider order". A `trackdub serve` process can additionally opt in with
 `--ecoqos`.
 
+### Choosing a variant explicitly: `run pipeline --variant`
+
+`trackdub run pipeline --variant <stage>:<variant>` (repeatable) pins a model variant for one stage,
+for example `--variant translation:trt-fp16`. It works with and without `--preset`:
+
+- Without a preset, the pin applies to that stage and every other stage keeps the planner's choice.
+- With a preset (`poc-server-v1`, `poc-server-quality-v1`, `poc-server-zh-v1`), the pin overrides the
+  preset's variant for that stage only; the preset's other variants and its provider pins stay.
+- `<stage>` is one of `vad`, `asr`, `diarization`, `translation`, `tts`, `separation`, `audio-preparation`,
+  `speech-enhancement`, `overlap-rescue`, `text-refinement-asr`, `lip-sync`, `lip-synthesis`. A malformed token or an
+  unsupported stage exits with an argument error before any model loads.
+- `<variant>` is the variant alias from `bundled-models.manifest.json` (`trackdub models status` shows what is
+  installed). The variant must be installed for the selected model; seed it first with
+  `trackdub models download <model-id> --variant <variant>`.
+- If the variant exists but its files are missing from the model cache, the stage fails with a cache error
+  (for example `Machine-local cache does not contain 'trt_rtx_mixed_fp16_fp32\encoder_model.onnx'`). An alias
+  that matches no variant of the chosen model is ignored: the planner keeps its default choice and reports no
+  error, so confirm the model and variant actually used in the run output.
+- Variants are not provider pins. Combine with `--execution-provider` / `--require-execution-provider` when the
+  variant only works on one provider (for instance MADLAD `trt-fp16` on TensorRT or TensorRT-RTX).
+
+```bash
+trackdub run pipeline --media in.mp4 --source-language es --target-language en   --execution-provider tensorrt --require-execution-provider   --variant translation:trt-fp16
+```
+
 ## References
 
 - [tensorrt-rtx-ep-abi-plugin.md](tensorrt-rtx-ep-abi-plugin.md): plugin bundle, install, license, smoke

@@ -204,6 +204,68 @@ public sealed class DubbingPipelineEngineTests
     }
 
     [Fact]
+    public void BuildModelPreferences_rejects_variant_names_that_map_to_the_same_runtime_stage()
+    {
+        // audio-preparation and speech-enhancement both map to RuntimeStage.SpeechEnhancement
+        var options = new DubbingSessionOptions
+        {
+            SourceMediaPath = "source.mp4",
+            TargetLanguageCode = "es",
+            ModelVariantPreferences = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [StageNames.AudioPreparation] = "foo", // maps to SpeechEnhancement
+                [StageNames.SpeechEnhancement] = "bar", // also maps to SpeechEnhancement
+            },
+        };
+
+        Assert.Throws<ArgumentException>(
+            () => DubbingModelPreferences.BuildModelPreferences(options));
+    }
+
+    [Fact]
+    public void BuildModelPreferences_maps_distinct_stage_names_to_runtime_stages_correctly()
+    {
+        var options = new DubbingSessionOptions
+        {
+            SourceMediaPath = "source.mp4",
+            TargetLanguageCode = "es",
+            ModelVariantPreferences = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [StageNames.AudioPreparation] = "foo", // maps to SpeechEnhancement
+                [StageNames.Separation] = "bar",    // maps to OverlapRescue
+                [StageNames.Translation] = "baz",   // maps to Translation
+            },
+        };
+
+        InferenceModelPreferences? preferences = DubbingModelPreferences.BuildModelPreferences(options);
+
+        Assert.NotNull(preferences);
+        Assert.Equal("foo", preferences!.GetPreferredModelVariantAlias(RuntimeStage.SpeechEnhancement));
+        Assert.Equal("bar", preferences.GetPreferredModelVariantAlias(RuntimeStage.Separation));
+        Assert.Equal("baz", preferences.GetPreferredModelVariantAlias(RuntimeStage.Translation));
+    }
+
+    [Fact]
+    public void BuildModelPreferences_maps_single_alias_to_correct_runtime_stage()
+    {
+        var options = new DubbingSessionOptions
+        {
+            SourceMediaPath = "source.mp4",
+            TargetLanguageCode = "es",
+            ModelVariantPreferences = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [StageNames.AudioPreparation] = "model-variant", // maps to SpeechEnhancement
+            },
+        };
+
+        InferenceModelPreferences? preferences = DubbingModelPreferences.BuildModelPreferences(options);
+
+        Assert.NotNull(preferences);
+        Assert.Equal("model-variant", preferences!.GetPreferredModelVariantAlias(RuntimeStage.SpeechEnhancement));
+        Assert.Null(preferences.GetPreferredModelVariantAlias(RuntimeStage.Separation));
+    }
+
+    [Fact]
     public void BuildModelPreferences_provider_pins_are_preferences_only_without_require_flag()
     {
         var options = new DubbingSessionOptions

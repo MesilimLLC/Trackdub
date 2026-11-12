@@ -123,6 +123,30 @@ internal static class DubbingModelPreferences
         options.ModelVariantPreferences is { Count: > 0 } ||
         options.EnableAsrTextRefinement;
 
+    private static Dictionary<RuntimeStage, string>? BuildVariantAliases(
+        IReadOnlyDictionary<string, string>? variants)
+    {
+        if (variants is null)
+        {
+            return null;
+        }
+
+        var aliases = new Dictionary<RuntimeStage, string>();
+        foreach ((string stageName, string alias) in variants)
+        {
+            RuntimeStage stage = DubbingPipelineEngine.MapStageNameToRuntimeStage(stageName)
+                ?? throw new ArgumentException("Unknown variant stage.", nameof(variants));
+            if (!aliases.TryAdd(stage, alias))
+            {
+                throw new ArgumentException(
+                    $"Variant stages for runtime stage '{stage}' conflict: '{stageName}' duplicates an earlier entry.",
+                    nameof(variants));
+            }
+        }
+
+        return aliases;
+    }
+
     /// <summary>
     /// Builds <see cref="InferenceModelPreferences"/> from the dubbing session options.
     /// Per-stage provider pins in <see cref="DubbingSessionOptions.ExecutionProviderPreferences"/>
@@ -155,8 +179,7 @@ internal static class DubbingModelPreferences
             LipSynthesisModelAlias: modelPreferences.GetValueOrDefault(StageNames.LipSynthesis),
             EnableAsrTextRefinement: options.EnableAsrTextRefinement,
             PreferredExecutionProviders: providerPins,
-            PreferredModelVariantAliases: options.ModelVariantPreferences?.ToDictionary(
-                pair => DubbingPipelineEngine.MapStageNameToRuntimeStage(pair.Key) ?? throw new ArgumentException("Unknown variant stage."), pair => pair.Value),
+            PreferredModelVariantAliases: BuildVariantAliases(options.ModelVariantPreferences),
             RequiredExecutionProviderStages:
                 providerPins is { Count: > 0 } && options.RequireExecutionProviderPreferences
                     ? new HashSet<RuntimeStage>(providerPins.Keys)

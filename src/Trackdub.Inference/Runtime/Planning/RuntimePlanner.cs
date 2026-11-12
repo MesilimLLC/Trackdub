@@ -99,7 +99,7 @@ public sealed class RuntimePlanner : IRuntimePlanner
         // Check the plan cache before performing the expensive ranking/resolution work.
         PlanCacheKey cacheKey = new(
             Stage: request.Stage,
-            ModelAlias: request.NormalizedPreferredModelAlias,
+            ModelAlias: request.NormalizedPreferredModelAlias, RequireModelAlias: request.RequirePreferredModelAlias,
             VariantAlias: request.NormalizedPreferredModelVariantAlias,
             PreferredEp: request.PreferredExecutionProvider,
             RequireEp: request.RequirePreferredExecutionProvider,
@@ -500,9 +500,12 @@ public sealed class RuntimePlanner : IRuntimePlanner
 /// entries computed under a different device ordering or GPU architecture.
 /// </para>
 /// </summary>
+// RequireModelAlias is part of the key: a soft-alias request may fall through to a different
+// model, and that plan must never be served to a request that requires the alias.
 internal sealed record PlanCacheKey(
     RuntimeStage Stage,
     string? ModelAlias,
+    bool RequireModelAlias,
     string? VariantAlias,
     ExecutionProviderKind? PreferredEp,
     bool RequireEp,

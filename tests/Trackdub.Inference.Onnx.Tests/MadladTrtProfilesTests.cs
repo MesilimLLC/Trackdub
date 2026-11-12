@@ -93,6 +93,27 @@ public sealed class MadladTrtProfilesTests
     }
 
     [Fact]
+    public void Classic_tensorrt_profiles_disable_cuda_graph_capture_and_keep_the_shape_ranges()
+    {
+        // Classic TensorRT's CUDA graph replay returns null outputs for plain Run (ONNX_TYPE_UNKNOWN).
+        Assert.Equal("0", MadladTrtProfiles.ClassicEncoder["enable_cuda_graph"]);
+        Assert.Equal("0", MadladTrtProfiles.ClassicDecoder["enable_cuda_graph"]);
+        Assert.Equal("1", MadladTrtProfiles.Encoder["enable_cuda_graph"]);
+
+        foreach ((var classic, var shared) in new[]
+        {
+            (MadladTrtProfiles.ClassicEncoder, MadladTrtProfiles.Encoder),
+            (MadladTrtProfiles.ClassicDecoder, MadladTrtProfiles.Decoder),
+        })
+        {
+            foreach (string key in new[] { "trt_profile_min_shapes", "trt_profile_opt_shapes", "trt_profile_max_shapes" })
+            {
+                Assert.Equal(shared[key], classic[key]);
+            }
+        }
+    }
+
+    [Fact]
     public void Engine_build_options_accept_a_missing_profile() =>
         Assert.Equal("0", OnnxExecutionSessionFactory.ForEngineBuild(null)["enable_cuda_graph"]);
 }

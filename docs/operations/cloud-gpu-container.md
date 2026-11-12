@@ -153,6 +153,20 @@ The GenAI retest also exposed a container packaging defect: publish output shipp
 
 One related question was evaluated and rejected: serving CosyVoice through TensorRT-LLM or vLLM. CosyVoice `int8` already runs on the CUDA execution provider in Trackdub; what fails is TensorRT engine building from the int8 ModelOpt graphs, which is an export problem. TensorRT-LLM and vLLM host PyTorch LLM weights in a separate Python runtime, which would break the single self-contained binary and container deployment model, and neither would accelerate the HiFT vocoder that stays on CPU either way. If TTS latency ever measures as the bottleneck, the in-architecture path is an fp16 TensorRT-qualified CosyVoice export, qualified by the same isolated retest.
 
+## Selecting a model variant at run time
+
+`trackdub run pipeline` takes `--variant <stage>:<variant>` (repeatable), which overrides the variant a preset selects
+for that stage. The seeded volume has to contain the variant (`trackdub models download <model-id> --variant <variant>`).
+For example, to run MADLAD's classic-TensorRT-qualified export instead of the preset's `quantized` files:
+
+```bash
+docker run --rm --gpus all -v trackdub-data:/data -v /in:/in:ro -v /out:/out <server-image> run pipeline   --media /in/clip.mp4 --source-language es --target-language en --output /out/project   --execution-provider cuda --preset poc-server-v1 --variant translation:trt-fp16
+```
+
+Note: `--preset poc-server-v1` pins the translation stage to the CUDA execution provider, so `--execution-provider tensorrt` is overridden to CUDA for that stage. The `--variant` only changes the model variant (e.g., `trt-fp16`), not the provider. Combine `--variant` with `--execution-provider tensorrt --require-execution-provider` when running without a preset, or use the preset's provider pins directly.
+
+Reference: [gpu-execution-providers.md](../reference/gpu-execution-providers.md#choosing-a-variant-explicitly-run-pipeline---variant).
+
 ## Server image contract
 
 The `server` stage is the deployable AWS worker base, not just a profile label:

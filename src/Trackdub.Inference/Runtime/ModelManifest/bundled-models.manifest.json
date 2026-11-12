@@ -4075,7 +4075,8 @@
             "cpu",
             "dml",
             "cuda",
-            "trt-rtx"
+            "trt-rtx",
+            "tensorrt"
           ]
         }
       },
@@ -4158,7 +4159,8 @@
             "trt_rtx_mixed_fp16_fp32/special_tokens_map.json"
           ],
           "supported_providers": [
-            "trt-rtx"
+            "trt-rtx",
+            "tensorrt"
           ]
         }
       ],

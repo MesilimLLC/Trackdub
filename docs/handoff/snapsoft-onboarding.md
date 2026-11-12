@@ -118,6 +118,9 @@ trackdub run pipeline --media in.mp4 --output ./project --source-language en --t
   --result-file result.json --progress-file progress.jsonl
 ```
 
+To run a specific model variant without editing a preset, add `--variant <stage>:<variant>` (for example
+`--variant translation:trt-fp16`); see [gpu-execution-providers.md](../reference/gpu-execution-providers.md#choosing-a-variant-explicitly-run-pipeline---variant).
+
 Provisioning a GPU host: `TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh` with
 `TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml` (see the runbook for the EBS mount and UID 10001 ownership).
 The script seeds the Spanish set (`docker/poc-server-models.txt`) by default. To accept `poc-server-zh-v1` jobs,

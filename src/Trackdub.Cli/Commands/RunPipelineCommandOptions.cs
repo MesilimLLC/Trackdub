@@ -9,6 +9,7 @@ internal sealed record PipelineCommandOptions(
     Option<string?> SourceLanguage,
     Option<string?> Output,
     Option<string[]> Model,
+    Option<string[]> Variant,
     Option<string?> ExportFormat,
     Option<string?> FromStage,
     Option<string[]> Only,
@@ -47,6 +48,7 @@ internal static class RunPipelineCommandOptions
         var sourceLanguage = CreateSourceLanguageOption();
         var output = CreateOutputOption();
         var model = CreateModelOption();
+        var variant = CreateVariantOption();
         var exportFormat = CreateExportFormatOption();
         var fromStage = CreateFromStageOption(acceptedStageNames);
         var only = CreateOnlyOption();
@@ -74,7 +76,7 @@ internal static class RunPipelineCommandOptions
         var ttsRubberband = CreateTtsRubberbandOptions(out Option<bool> noTtsRubberband, out Option<double?> ttsRubberbandThreshold, out Option<double?> ttsAutoStretchMaxOverrun);
 
         return new PipelineCommandOptions(
-            media, targetLanguage, sourceLanguage, output, model, exportFormat,
+            media, targetLanguage, sourceLanguage, output, model, variant, exportFormat,
             fromStage, only, lipSync, repairLips, forceRerun, refinement, voiceClone, timbre, noTimbre,
             restorePan, matchLoudness, voice, subtitleFormat, subtitleSource,
             burnIn, videoEncoder, preset, batch, inputGlob, recursive, continueOnError,
@@ -92,6 +94,7 @@ internal static class RunPipelineCommandOptions
         command.Add(options.SourceLanguage);
         command.Add(options.Output);
         command.Add(options.Model);
+        command.Add(options.Variant);
         command.Add(options.ExportFormat);
         command.Add(options.FromStage);
         command.Add(options.Only);
@@ -149,6 +152,19 @@ internal static class RunPipelineCommandOptions
         };
         model.Arity = System.CommandLine.ArgumentArity.ZeroOrMore;
         return model;
+    }
+
+    private static Option<string[]> CreateVariantOption()
+    {
+        var variant = new Option<string[]>("--variant")
+        {
+            Description = "Stage-specific model variant in format stage:variant, e.g. translation:trt-fp16 (repeatable). "
+                + "Overrides the variant a --preset selects; the variant must be installed for the chosen model",
+            AllowMultipleArgumentsPerToken = true,
+            HelpName = "stage:variant",
+        };
+        variant.Arity = System.CommandLine.ArgumentArity.ZeroOrMore;
+        return variant;
     }
 
     private static Option<string?> CreateExportFormatOption()
