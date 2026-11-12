@@ -4075,7 +4075,8 @@
             "cpu",
             "dml",
             "cuda",
-            "trt-rtx"
+            "trt-rtx",
+            "tensorrt"
           ]
         }
       },
