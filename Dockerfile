@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:11.0.100-rc.3@sha256:3a9175b6c54b2f076817af1360f691c9994447b192faa48a1a1f112a516844c7 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
 WORKDIR /src
 ENV NUGET_PACKAGES=/root/.nuget/packages
 
@@ -68,10 +68,10 @@ RUN \
     && cp "$GENAI_LIB" /app/publish/libonnxruntime-genai.so
 
 FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04@sha256:f2c12914cf4751e61073843724275aa35d4817e01dbdc87eac03905971628c6e AS cuda-runtime
-FROM mcr.microsoft.com/dotnet/runtime:11.0.0-rc.3@sha256:c3423b383c70062eeb078e04a6901affaebcfc5d4ed5ae1d76158feb5e04021a AS dotnet-runtime
+FROM mcr.microsoft.com/dotnet/runtime:11.0.0@sha256:3fe5f5495141c97986a49d3a4e76061f6225c3f93f94e8a7e522781376193863 AS dotnet-runtime
 
 # Ubuntu 24.04 (noble) matches the ubuntu2404 CUDA/TensorRT package repo used below.
-# MCR's default 11.0.0-rc.3 runtime tag is Ubuntu 26.04 (resolute), so keep the noble
+# MCR's default 11.0.0 runtime tag is Ubuntu 26.04 (resolute), so keep the noble
 # base OS image and layer the .NET 11 runtime over /usr/share/dotnet.
 FROM mcr.microsoft.com/dotnet/runtime:10.0-noble@sha256:a3f9f81954b9c810af2ed18849716c8dc74a4707bd0907fdbd69be81554c0f30 AS runtime-base
 # Docker COPY merges directories; remove the .NET 10 host/framework first.

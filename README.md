@@ -138,7 +138,7 @@ product carries tiered features, activation, and support.
 
 ## Requirements
 
-- .NET 11 SDK (11.0.100-rc.3.26522.148)
+- .NET 11 SDK (11.0.100)
 - FFmpeg (for audio/video processing)
 - libmpv or LibVLC (for playback)
 
