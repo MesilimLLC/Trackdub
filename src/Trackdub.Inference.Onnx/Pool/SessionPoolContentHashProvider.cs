@@ -15,17 +15,18 @@ public static class SessionPoolContentHashProvider
     /// service is configured. The delegate returns the model's SHA-256 hex digest, or
     /// <see langword="null"/> when the shared fingerprint is unavailable.
     /// </summary>
-    public static Func<string, CancellationToken, Task<string?>>? Current { get; private set; }
+    public static Func<string, CancellationToken, Task<string?>>? Current => Volatile.Read(ref _current);
+    private static Func<string, CancellationToken, Task<string?>>? _current;
 
     /// <summary>
     /// Installs <paramref name="fingerprintService"/> as the shared content-hash provider, or
     /// clears the provider when <paramref name="fingerprintService"/> is <see langword="null"/>.
     /// </summary>
     public static void Configure(IFileFingerprintService? fingerprintService) =>
-        Current = fingerprintService is null ? null : (path, cancellationToken) => HashCoreAsync(fingerprintService, path, cancellationToken);
+        Volatile.Write(ref _current, fingerprintService is null ? null : (path, cancellationToken) => HashCoreAsync(fingerprintService, path, cancellationToken));
 
     /// <summary>Removes the process-wide provider.</summary>
-    public static void Reset() => Current = null;
+    public static void Reset() => Volatile.Write(ref _current, null);
 
     private static async Task<string?> HashCoreAsync(
         IFileFingerprintService fingerprintService,

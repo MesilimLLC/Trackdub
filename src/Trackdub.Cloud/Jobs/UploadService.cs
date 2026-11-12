@@ -7,9 +7,9 @@ public sealed class UploadService(IJobStore store, IArtifactStore artifacts, Tim
 {
     public async Task<UploadReservation> CreateAsync(string owner, UploadRequest request, CancellationToken token)
     {
-        if (request.SizeBytes is <= 0 or > 104857600 || request.Sha256 is null || request.Sha256.Length != 64
+        if (request.SizeBytes is <= 0 or > CloudLimits.MaxUploadBytes || request.Sha256 is null || request.Sha256.Length != 64
             || !request.Sha256.All(Uri.IsHexDigit) || request.ContentType != "video/mp4")
-            throw new JobException("INVALID_INPUT", 400, "Expected an MP4 up to 100 MiB and a SHA256 checksum.");
+            throw new JobException("INVALID_INPUT", 400, "Expected an MP4 up to 1 GiB and a SHA256 checksum.");
         var id = Guid.NewGuid();
         var upload = new UploadRecord(id, owner, null, $"uploads/{JobService.OwnerKey(owner)}/{id}/input.mp4",
             request.SizeBytes, request.Sha256.ToLowerInvariant(), request.ContentType, clock.GetUtcNow().AddMinutes(15));

@@ -31,7 +31,8 @@ public sealed class RuntimeModelBootstrapService(
     private readonly IModelCacheRegistrar modelCacheRegistrar = modelCacheRegistrar ?? throw new ArgumentNullException(nameof(modelCacheRegistrar));
     private readonly IFileFingerprintService fingerprintService = fingerprintService ?? throw new ArgumentNullException(nameof(fingerprintService));
     private readonly TrackdubStoragePaths storagePaths = storagePaths ?? throw new ArgumentNullException(nameof(storagePaths));
-    private readonly IModelHashVerifier hashVerifier = hashVerifier ?? new ModelHashVerifier(fingerprintService);
+    private readonly IModelHashVerifier hashVerifier = hashVerifier ??
+        new ModelHashVerifier(fingerprintService);
 
     public async Task<RequiredRuntimeModelStatus?> GetRequiredModelStatusAsync(
         RuntimeModelRequest request,

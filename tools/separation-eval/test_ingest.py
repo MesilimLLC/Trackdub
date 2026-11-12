@@ -210,6 +210,44 @@ class RangeTests(unittest.TestCase):
         with self.assertRaisesRegex(ingest.IngestError, "non-HTTPS"):
             handler.redirect_request(None, None, 302, "Found", {}, "http://example.org/audio")
 
+    def test_https_redirect_handler_rejects_loopback_target_from_a_remote_request(self):
+        handler = ingest._HttpsRedirectHandler()
+        req = ingest.urllib.request.Request("https://example.org/audio")
+        with self.assertRaisesRegex(ingest.IngestError, "non-HTTPS"):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:9/audio")
+
+    def test_bearer_token_reaches_the_requested_url_but_not_its_redirect_target(self):
+        import http.server
+        seen = {}
+
+        class Target(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["target"] = self.headers.get("Authorization")
+                self.send_response(200)
+                self.send_header("Content-Length", "5")
+                self.end_headers()
+                self.wfile.write(b"audio")
+
+            def log_message(self, *a):
+                pass
+
+        with running_server(Target) as target:
+            class Origin(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    seen["origin"] = self.headers.get("Authorization")
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{target.server_port}/file")
+                    self.end_headers()
+
+                def log_message(self, *a):
+                    pass
+
+            with running_server(Origin) as origin, tempfile.TemporaryDirectory() as td:
+                dest = Path(td) / "a.bin"
+                ingest.http_fetch(f"http://127.0.0.1:{origin.server_port}/download", dest, bearer_token="tok")
+                self.assertEqual(dest.read_bytes(), b"audio")
+        self.assertEqual(seen, {"origin": "Bearer tok", "target": None})
+
     def test_plain_http_is_rejected_outside_loopback_fixtures(self):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaisesRegex(ingest.IngestError, "url must be https"):
@@ -340,6 +378,25 @@ class VerifyTests(unittest.TestCase):
     def test_missing_cache_detected(self):
         ingest.cache_path(self.cache, rec()).unlink()
         self.assertTrue(any("missing" in p for p in ingest.verify_manifest(self.manifest, self.cache)))
+
+
+class SplitPendingTests(unittest.TestCase):
+    def test_a_local_only_item_that_changed_is_never_queued_for_download(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "a.wav"
+            dest.write_bytes(b"changed")
+            local = {"id": "loc", "local_only": True, "sha256": "0" * 64, "url": "https://example.org/x.wav"}
+            remote = {"id": "rem", "sha256": "0" * 64, "url": "https://example.org/y.wav"}
+            pending, changed = ingest.split_pending([(local, dest), (remote, dest)])
+        self.assertEqual([rec["id"] for rec, _ in pending], ["rem"])
+        self.assertEqual(list(changed), ["loc"])
+
+    def test_matching_files_need_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "a.wav"
+            dest.write_bytes(b"abc")
+            rec = {"id": "x", "local_only": True, "sha256": ingest.sha256_file(dest), "url": "https://example.org/x"}
+            self.assertEqual(ingest.split_pending([(rec, dest)]), ([], {}))
 
 
 if __name__ == "__main__":

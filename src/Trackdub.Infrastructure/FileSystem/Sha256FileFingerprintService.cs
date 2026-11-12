@@ -41,6 +41,7 @@ public sealed class Sha256FileFingerprintService : IFileFingerprintService
             return new FileFingerprint(cached.Hash, cached.Size, cached.LastWriteTimeUtc);
         }
 
+        long captureGeneration = persistedCache?.CurrentInvalidationGeneration(fullPath) ?? 0;
         logger.LogDebug($"Computing fingerprint for file: '{fullPath}'");
 
         await using var stream = new FileStream(
@@ -59,14 +60,17 @@ public sealed class Sha256FileFingerprintService : IFileFingerprintService
         fileInfo.Refresh();
         logger.LogDebug($"Fingerprint computed: SHA256={hashHex} Size={fileInfo.Length} bytes");
 
-        CacheFingerprint(new FingerprintCacheEntry(
-            fullPath,
-            fileInfo.Length,
-            fileInfo.LastWriteTimeUtc,
-            hashHex,
-            NextCacheAccessSequence()));
+        bool shouldCache = persistedCache is null || persistedCache.TryClearInvalidation(fullPath, captureGeneration);
+        if (shouldCache)
+        {
+            CacheFingerprint(new FingerprintCacheEntry(
+                fullPath,
+                fileInfo.Length,
+                fileInfo.LastWriteTimeUtc,
+                hashHex,
+                NextCacheAccessSequence()));
+        }
 
-        persistedCache?.ClearInvalidation(fullPath);
         return new FileFingerprint(hashHex, fileInfo.Length, fileInfo.LastWriteTimeUtc);
     }
 

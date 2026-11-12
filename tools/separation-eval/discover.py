@@ -84,8 +84,19 @@ def creator_group_key(text: str) -> str:
     return re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE).strip("-") or "unknown"
 
 
-def cached_fetch_json(cache_dir: Path | None, pause_s: float, *, retries: int = 3) -> FetchJson:
-    """GET JSON with an on-disk response cache, a polite pause, and retries on transient errors."""
+def _json_request(url: str, auth_header: str | None) -> urllib.request.Request:
+    req = urllib.request.Request(url, headers={"User-Agent": "trackdub-separation-eval/1", "Accept": "application/json"})
+    if auth_header:
+        # urllib does not copy unredirected headers onto a redirected request.
+        req.add_unredirected_header("Authorization", auth_header)
+    return req
+
+
+def cached_fetch_json(cache_dir: Path | None, pause_s: float, *, retries: int = 3,
+                      auth_header: str | None = None) -> FetchJson:
+    """GET JSON with an on-disk response cache, a polite pause, and retries on transient errors.
+    `auth_header` is sent as `Authorization` to the requested URL only (never to a redirect target) and
+    is not part of the cache key, so it must not change what a URL returns."""
     last_call = [0.0]
 
     def fetch(url: str) -> dict:
@@ -102,7 +113,7 @@ def cached_fetch_json(cache_dir: Path | None, pause_s: float, *, retries: int = 
             last_call[0] = time.monotonic()
             if urllib.parse.urlsplit(url).scheme.lower() != "https" and not _is_loopback_http(url):
                 raise DiscoverError("url must be https")
-            req = urllib.request.Request(url, headers={"User-Agent": "trackdub-separation-eval/1", "Accept": "application/json"})
+            req = _json_request(url, auth_header)
             try:
                 opener = urllib.request.build_opener(_HttpsRedirectHandler())
                 with opener.open(req, timeout=60) as resp:

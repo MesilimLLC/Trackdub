@@ -91,14 +91,29 @@ public sealed class TensorRtRtxDirectMlInteropTests
     [Fact]
     public void Built_options_carry_the_limit_and_a_cache_scoped_to_the_fingerprint_on_windows()
     {
-        IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(null);
+        // Isolate process-wide cache environment variables so the test does not depend on shared mutable state.
+        string? previousEngineCacheRoot = Environment.GetEnvironmentVariable("TRACKDUB_ENGINE_CACHE_ROOT");
+        string? previousCacheRoot = Environment.GetEnvironmentVariable("TRACKDUB_CACHE_ROOT");
 
-        Assert.Equal(
-            TensorRtRtxProviderConstants.BundledFingerprintVersion,
-            Path.GetFileName(options["nv_runtime_cache_path"]));
-        Assert.Equal(
-            OperatingSystem.IsWindows() ? LimitText : null,
-            options.GetValueOrDefault(TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey));
+        Environment.SetEnvironmentVariable("TRACKDUB_ENGINE_CACHE_ROOT", null);
+        Environment.SetEnvironmentVariable("TRACKDUB_CACHE_ROOT", null);
+
+        try
+        {
+            IReadOnlyDictionary<string, string> options = OnnxExecutionSessionFactory.BuildTensorRtRtxOptions(null);
+
+            Assert.Equal(
+                TensorRtRtxProviderConstants.BundledFingerprintVersion,
+                Path.GetFileName(options["nv_runtime_cache_path"]));
+            Assert.Equal(
+                OperatingSystem.IsWindows() ? LimitText : null,
+                options.GetValueOrDefault(TensorRtRtxDirectMlInterop.MaxSharedMemSizeOptionKey));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TRACKDUB_ENGINE_CACHE_ROOT", previousEngineCacheRoot);
+            Environment.SetEnvironmentVariable("TRACKDUB_CACHE_ROOT", previousCacheRoot);
+        }
     }
 
     private static Dictionary<string, string> OptionsWith(string requestedLimit) =>

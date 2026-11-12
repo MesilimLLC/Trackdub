@@ -21,10 +21,11 @@ public sealed class JobAdapter(IJobStore store, JobService jobs, IArtifactStore 
         string workspace = Path.Join(Path.GetFullPath(workspaceRoot), job.Id.ToString(), job.AttemptId.ToString(), claim.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (Directory.Exists(workspace)) throw new IOException("Attempt workspace already exists.");
         Directory.CreateDirectory(workspace);
-        string input = Path.Join(workspace, "input.mp4");
-        string project = Path.Join(workspace, "project");
-        string result = Path.Join(workspace, "result.json");
-        string progress = Path.Join(workspace, "progress.jsonl");
+        var paths = new AttemptPaths(workspace);
+        string input = paths.Input;
+        string project = paths.Project;
+        string result = paths.Result;
+        string progress = paths.Progress;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
         deadline.CancelAfter(TimeSpan.FromHours(2));
         var lease = new ExecutionLeaseWatchdog(TimeProvider.System);
@@ -35,10 +36,7 @@ public sealed class JobAdapter(IJobStore store, JobService jobs, IArtifactStore 
             await objects.DownloadAsync(job.Input, input, deadline.Token).ConfigureAwait(false);
             await MediaValidator.ValidateAsync(input, deadline.Token).ConfigureAwait(false);
             // Fixed approved preset. Never accept client commands, paths, model IDs or environment overrides.
-            string[] args = [cliAssembly, "--model-directory", "/data/models",
-                "run", "pipeline", "--media", input, "--output", project, "--source-language", "en", "--target-language", "es",
-                "--preset", "poc-server-v1", "--voice", "SPEAKER_00:ef_dora", "--subtitle-format", "srt",
-                "--result-file", result, "--progress-file", progress];
+            string[] args = BuildPipelineArguments(job.Request, paths);
             var exit = await runner.RunAsync(new("dotnet", args, workspace, result), deadline.Token).ConfigureAwait(false);
             if (exit.ExitCode != 0 || exit.Outcome is null || exit.Outcome.Status != "succeeded") return 2;
             var inventory = new List<ArtifactReference>();
@@ -75,6 +73,23 @@ public sealed class JobAdapter(IJobStore store, JobService jobs, IArtifactStore 
         }
     }
 
+    private sealed record AttemptPaths(string Workspace)
+    {
+        public string Input => Path.Join(Workspace, "input.mp4");
+        public string Project => Path.Join(Workspace, "project");
+        public string Result => Path.Join(Workspace, "result.json");
+        public string Progress => Path.Join(Workspace, "progress.jsonl");
+    }
+
+    private string[] BuildPipelineArguments(CreateJobRequest request, AttemptPaths paths)
+    {
+        if (!CloudPresets.TryGet(request.Preset, request.TargetLanguage, out var preset))
+            throw new InvalidOperationException("Claimed job names a preset that is not approved for cloud execution.");
+        return [cliAssembly, "--model-directory", "/data/models",
+            "run", "pipeline", "--media", paths.Input, "--output", paths.Project, "--source-language", "en", "--target-language", preset.TargetLanguage,
+            "--preset", preset.Name, "--voice", preset.Voice, "--subtitle-format", "srt",
+            "--result-file", paths.Result, "--progress-file", paths.Progress];
+    }
     private async Task HeartbeatAsync(ExecutionClaim claim, string progressPath, CancellationTokenSource lifetime, ExecutionLeaseWatchdog lease)
     {
         DateTimeOffset lastRenewal = DateTimeOffset.UtcNow;

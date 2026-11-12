@@ -151,11 +151,10 @@ documented workaround (TensorRT-RTX 1.7 release notes, known issues).
 ### CUDA graphs (on by default)
 
 TensorRT-RTX sessions capture CUDA graphs by default (`OnnxExecutionSessionFactory.DefaultEnableCudaGraph`).
-The sources disagree on what that requires. The TensorRT-RTX runtime docs ("Working with RTX CUDA Graphs")
-say native capture recaptures when input sizes or buffer locations change and falls back to normal
-execution for graphs it cannot capture. The ONNX Runtime TensorRT-RTX EP docs say to avoid or be careful with
-`enable_cuda_graph` when input shapes or device bindings change frequently, and that data-dependent control
-flow is a poor fit. What has been checked here is output equality, not the mechanism: see the measurements below.
+NVIDIA's runtime docs say capture recaptures when input sizes or buffer locations change and falls back to
+normal execution for graphs it cannot capture; ORT's TensorRT-RTX EP docs advise caution with
+`enable_cuda_graph` when input shapes or device bindings change frequently, and note data-dependent control
+flow is a poor fit. What has been checked here is output equality, not capture behavior itself: see the measurements below.
 
 - Opt a model out by putting `enable_cuda_graph = 0` in that call site's TRT options (a caller profile
   wins over the default). The Qwen3-ASR encoder is opted out because its mel length changes almost every

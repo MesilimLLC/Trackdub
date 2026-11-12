@@ -494,8 +494,8 @@ internal static partial class OnnxExecutionSessionFactory
         // The encoder flag follows OnnxExecutionSessionFactory.DefaultEnableCudaGraph. Callers that
         // rebind fresh OrtValues (ParakeetTdtGreedyDecoder, smoke probes) rely on TensorRT-RTX
         // recapturing when buffer locations change. A caller opts out with enable_cuda_graph = 0
-        // in its TRT options. Explicit per-caller graph options also flow into the pool-key
-        // fingerprint so capture modes cannot collide.
+        // in its TRT options (a caller profile wins over the default). Explicit per-caller graph
+        // options also flow into the pool-key fingerprint so capture modes cannot collide.
         DualPooledLeasePair pair = await AcquirePooledDualPairAsync(new PooledDualCreate
         {
             Request = request,
