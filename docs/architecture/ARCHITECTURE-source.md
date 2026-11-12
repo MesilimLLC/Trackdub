@@ -790,9 +790,7 @@ Example:
 
 Rules:
 
-- Trackdub uses only commercially licensed models. A model with an unknown or non-commercial license is not added to the manifest for any pipeline stage.
-- The one current exception is `musetalk-v1-5` (experimental lip synthesis, `commercial_allowed: false`). Experimental engines run only when the user explicitly opts in; no stage routes to it by default.
-- `commercial_use_verified: true` requires both commercial-use license confidence and a non-empty SHA-256.
+- Trackdub uses only commercially licensed models. A model with an unknown or non-commercial license is not added to the manifest for any pipeline stage.- `commercial_use_verified: true` requires both commercial-use license confidence and a non-empty SHA-256.
 - `commercial_allowed: true` alone is not enough for commercial-safe routing.
 - Voice-cloning models require explicit consent flow.
 - Model licenses are independent from the app license.

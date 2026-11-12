@@ -790,9 +790,7 @@ Example:
 
 Rules:
 
-- Trackdub uses only commercially licensed models. A model with an unknown or non-commercial license is not added to the manifest for any pipeline stage.
-- The one current exception is `musetalk-v1-5` (experimental lip synthesis, `commercial_allowed: false`). Experimental engines run only when the user explicitly opts in; no stage routes to it by default.
-- `commercial_use_verified: true` requires both commercial-use license confidence and a non-empty SHA-256.
+- Trackdub uses only commercially licensed models. A model with an unknown or non-commercial license is not added to the manifest for any pipeline stage.- `commercial_use_verified: true` requires both commercial-use license confidence and a non-empty SHA-256.
 - `commercial_allowed: true` alone is not enough for commercial-safe routing.
 - Voice-cloning models require explicit consent flow.
 - Model licenses are independent from the app license.
@@ -2046,7 +2044,7 @@ The design supports the product spine and M22 positioning without obvious violat
 
 \- \*\*Evidence\*\*: LONGTERM-ROADMAP model governance JSON example + “Every real model or provider route must be manifest-driven”, M21 (ModelManagerViewModel, IMdlDownloadOrchestrator, states: missing/downloading/corrupt/installed/blocked/ready), AGENT\_CONTEXT provider/model governance and model lanes (commercial/non-commercial/experimental), bundled-models.manifest.json location. M22: wav2vec2-lv60-espeak-cv-ft-onnx manifest entry includes vocab.json with SHA-256; composition fix resolved model id mismatch.  
 
-\- \*\*Impact\*\*: Enables honest readiness, license auditing, and safe addition of future providers (SepFormer overlap-rescue, MuseTalk experimental, AudioShake premium, cloud). Prevents “repo license = commercial safe” mistakes.  
+\- \*\*Impact\*\*: Enables honest readiness, license auditing, and safe addition of future providers (SepFormer overlap-rescue, AudioShake premium, cloud). Prevents “repo license = commercial safe” mistakes.  
 
 \- \*\*Recommended Improvement + Trade-offs\*\*: Add an explicit `capabilities` array or bitflags (e.g., SupportsPhonemeTimings, RequiresSourceTranscript, ProducesOverlapSources) to the manifest schema so the planner and stage can query without hard-coded knowledge of model\_id. Trade-off: schema version bump + migration for existing manifest entries (small, one-time). This would have prevented or made explicit the M22 routing gap that required a later fix. High value, low cost.
 
