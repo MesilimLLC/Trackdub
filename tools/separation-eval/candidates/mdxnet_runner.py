@@ -189,6 +189,8 @@ def main(argv: list[str]) -> int:
     selected = "cuda" if sep.selected == "CUDAExecutionProvider" else "cpu"
     meta = metadata(sep, args.model)
     meta["selected_provider"] = selected
+    # device_type is torch's device, which gates the torch CUDA memory counters. Torch only does the STFT here, on the CPU;
+    # the GPU work is ONNX Runtime's, and its provider is recorded as selected_provider in the metadata above.
     return rc.run_all(sep.estimate, args, rc.RunContext(sep.torch, "cpu", args.provider or selected, meta))
 
 
