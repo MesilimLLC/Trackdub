@@ -254,6 +254,8 @@ The domain model must not reference:
 
 ## 5. Recommended project dependency flow
 
+`Trackdub.App.Avalonia` (the desktop shell) lives in the private Trackdub-gated repository, which consumes this repository as a submodule. The other projects below are in this repository.
+
 ```text
 Trackdub.App.Avalonia
   -> Trackdub.Application
@@ -839,11 +841,11 @@ Trackdub/
 
 ## 12. Source projects
 
-### 12.1 `src/Trackdub.App.Avalonia`
+### 12.1 `src/Trackdub.App.Avalonia` (Trackdub-gated repository)
 
 Purpose:
 
-Avalonia application shell for Windows, macOS, and Linux.
+Avalonia application shell for Windows, macOS, and Linux. It is not in this repository; it lives in the private Trackdub-gated repository.
 
 What belongs here:
 
@@ -1119,7 +1121,7 @@ tests/
 ├── Trackdub.Media.Tests/
 ├── Trackdub.Inference.Tests/
 ├── Trackdub.Benchmarks.Tests/
-├── Trackdub.App.Avalonia.Tests/
+├── Trackdub.App.Avalonia.Tests/       (Trackdub-gated repository)
 ├── Trackdub.Architecture.Tests/
 ├── Trackdub.Composition.Tests/
 ├── Trackdub.Sdk.Tests/
