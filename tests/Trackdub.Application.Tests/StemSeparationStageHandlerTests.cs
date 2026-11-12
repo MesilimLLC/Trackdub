@@ -116,7 +116,7 @@ public sealed class StemSeparationStageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_CommitsDemucsOutputsUnderEngineFamilyFolderAndRawSidecarsWithoutLatentFolders()
+    public async Task HandleAsync_CommitsMultiStemOutputsUnderEngineFamilyFolderAndRawSidecarsWithoutLatentFolders()
     {
         string directory = CreateTempDirectory();
         try
@@ -126,8 +126,8 @@ public sealed class StemSeparationStageHandlerTests
             var mediaRepository = new FakeMediaAssetRepository();
             var stageRunStore = new FakeProjectStageRunStore();
             var engine = new RecordingStemSeparationEngine(
-                engineFamily: "demucs-v4",
-                model: "demucs-v4",
+                engineFamily: "spleeter",
+                model: "spleeter",
                 writeMusic: true,
                 writeSfx: false,
                 rawStemNames: ["drums", "bass", "other", "vocals"]);
@@ -149,22 +149,22 @@ public sealed class StemSeparationStageHandlerTests
 
             Guid stageRunId = result.StageRun.Id;
             Assert.Equal(
-                ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "demucs-v4"),
+                ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "spleeter"),
                 result.VocalsArtifact.RelativePath);
             Assert.Equal(
-                ProjectArtifactPaths.GetStemAmbianceRelativePath(stageRunId, "demucs-v4"),
+                ProjectArtifactPaths.GetStemAmbianceRelativePath(stageRunId, "spleeter"),
                 result.AmbianceArtifact.RelativePath);
             Assert.Equal(
-                ProjectArtifactPaths.GetStemMusicRelativePath(stageRunId, "demucs-v4"),
+                ProjectArtifactPaths.GetStemMusicRelativePath(stageRunId, "spleeter"),
                 result.MusicArtifact?.RelativePath);
             Assert.Null(result.SoundEffectsArtifact);
-            Assert.Contains("generated-demucs-v4-vocals", result.VocalsArtifact.Provenance, StringComparison.Ordinal);
+            Assert.Contains("generated-spleeter-vocals", result.VocalsArtifact.Provenance, StringComparison.Ordinal);
             Assert.Contains("raw_stems=drums,bass,other,vocals", result.VocalsArtifact.Provenance, StringComparison.Ordinal);
 
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "drums")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "bass")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "other")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "vocals")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter", "drums")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter", "bass")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter", "other")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter", "vocals")));
             Assert.DoesNotContain(
                 artifactStore.Blobs.Keys,
                 path => path.Contains("/hush-dialogue/", StringComparison.OrdinalIgnoreCase));
@@ -390,8 +390,8 @@ public sealed class StemSeparationStageHandlerTests
             var artifactStore = new FakeArtifactStore(directory);
             (MediaAsset mediaAsset, ProjectArtifact sourceArtifact) = SeedSource(artifactStore, directory);
             var engine = new RecordingStemSeparationEngine(
-                engineFamily: " Demucs_V4 ",
-                model: "demucs-v4",
+                engineFamily: " Spleeter_V2 ",
+                model: "spleeter",
                 writeMusic: true,
                 writeSfx: false,
                 rawStemNames: ["drums", "bass", "other", "vocals"],
@@ -414,12 +414,12 @@ public sealed class StemSeparationStageHandlerTests
 
             Guid stageRunId = result.StageRun.Id;
             Assert.Equal(
-                ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "demucs-v4"),
+                ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "spleeter-v2"),
                 result.VocalsArtifact.RelativePath);
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "drums")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "bass")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "other")));
-            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "vocals")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter-v2", "drums")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter-v2", "bass")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter-v2", "other")));
+            Assert.True(artifactStore.Exists(ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter-v2", "vocals")));
         }
         finally
         {
@@ -442,8 +442,8 @@ public sealed class StemSeparationStageHandlerTests
                 ProjectArtifactPaths.GetStemSoundEffectsRelativePath(Guid.NewGuid(), "sepformer"));
             await mediaRepository.SaveArtifactAsync(existingSfx, TestContext.Current.CancellationToken);
             var engine = new RecordingStemSeparationEngine(
-                engineFamily: "demucs-v4",
-                model: "demucs-v4",
+                engineFamily: "spleeter",
+                model: "spleeter",
                 writeMusic: true,
                 writeSfx: false,
                 rawStemNames: ["drums", "bass", "other", "vocals"]);
@@ -499,7 +499,7 @@ public sealed class StemSeparationStageHandlerTests
                     progress: null,
                     TestContext.Current.CancellationToken));
 
-            Assert.DoesNotContain(artifactStore.Blobs.Keys, path => path.Contains("/demucs-v4/", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(artifactStore.Blobs.Keys, path => path.StartsWith("artifacts/stems/", StringComparison.Ordinal));
         }
         finally
         {

@@ -50,8 +50,8 @@ public sealed class SqliteLipSynthesisSegmentRepositoryTests
                 PatchedClipRelativePath: "artifacts/lip-synthesis/run/seg.mp4",
                 SkipReason: null,
                 FailureReason: null,
-                ProviderId: "python-musetalk-lip-synthesis",
-                ModelId: "musetalk-v1-5",
+                ProviderId: "latentsync-onnx",
+                ModelId: "ByteDance/LatentSync-1.6",
                 UsedExperimentalProvider: true,
                 CreatedAtUtc: now);
 
