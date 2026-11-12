@@ -539,7 +539,7 @@ Rules:
 
 - Direct language-pair models are preferred where available.
 - Pivot routing must be visible when used.
-- Non-commercial translation models (commercial_allowed: false) must never be routed in the bundled pipeline. This is enforced from the manifest fields (see section 10).
+- Translation uses only commercially licensed models: every translation model in the manifest has `commercial_allowed: true` and `commercial_use_verified: true` (see section 10).
 - Translation output is draft material.
 
 ---
@@ -790,8 +790,8 @@ Example:
 
 Rules:
 
-- Unknown-license models are not commercial-safe.
-- Non-commercial models are not commercial-safe.
+- Trackdub uses only commercially licensed models. A model with an unknown or non-commercial license is not added to the manifest for any pipeline stage.
+- The one current exception is `musetalk-v1-5` (experimental lip synthesis, `commercial_allowed: false`). Experimental engines run only when the user explicitly opts in; no stage routes to it by default.
 - `commercial_use_verified: true` requires both commercial-use license confidence and a non-empty SHA-256.
 - `commercial_allowed: true` alone is not enough for commercial-safe routing.
 - Voice-cloning models require explicit consent flow.
