@@ -1,8 +1,8 @@
 # Architecture — Trackdub public core
 
-Repo root: the current checkout (`git rev-parse --show-toplevel`). Solution `Trackdub.slnx` (plus `Trackdub.Sdk.slnx`, `Trackdub.Inference.slnx`). .NET 10, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`, central package management in `Directory.Packages.props`.
+Repo root: the current checkout (`git rev-parse --show-toplevel`). Solution `Trackdub.slnx` (plus `Trackdub.Sdk.slnx`, `Trackdub.Inference.slnx`). .NET 11, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`, central package management in `Directory.Packages.props`.
 
-Canonical sources: `AGENTS.md` (graph + commands), `docs/repository-policy.md` (org + doc taxonomy), `docs/architecture/ARCHITECTURE-source.md` (design rationale), `docs/decisions/ADR-0011-contracts-domain-coupling.md` (the one sanctioned coupling).
+Canonical sources: `AGENTS.md` (graph + commands), `docs/repository-policy.md` (org + doc taxonomy), `docs/architecture/ARCHITECTURE.md` (design rationale), `docs/decisions/ADR-0011-contracts-domain-coupling.md` (the one sanctioned coupling).
 
 ## Dependency graph (verbatim from `AGENTS.md`)
 
@@ -36,7 +36,7 @@ Project name vs directory name differ for two projects: `DubBench` lives in `src
 | Project | May depend on |
 |---|---|
 | `Trackdub.Domain` | nothing |
-| `Trackdub.Licensing` | nothing (zero `ProjectReference`, BCL-only crypto, `net10.0` single-target) |
+| `Trackdub.Licensing` | nothing (zero `ProjectReference`, BCL-only crypto, `net11.0` single-target) |
 | `Trackdub.Analyzers` | nothing |
 | `Trackdub.OnnxRuntime.Dnnl.Native` | nothing |
 | `Trackdub.Contracts` | `Domain` only (ADR-0011) |
@@ -70,7 +70,7 @@ dotnet test tests/Trackdub.Architecture.Tests --no-restore -m:1
 1. **Domain depends on nothing.** No Avalonia UI, SQLite, FFmpeg, Windows ML, ONNX Runtime, or machine-local paths in `src/Trackdub.Domain`.
 2. **Conflict order:** source code/tests > task instructions > documentation.
 3. **Never fake readiness:** provider registered != model downloaded != stage enabled != stage ran != stage succeeded.
-4. **Cross-platform is required.** Portable .NET 10 APIs by default (`net10.0`; Windows legs opt in explicitly). Extended ops: `docs/operations/cloud-operations.md`.
+4. **Cross-platform is required.** Portable .NET 11 APIs by default (`net11.0`; Windows legs opt in explicitly). Extended ops: `docs/operations/cloud-operations.md`.
 5. **Model governance:** commercial license only, verified. Unknown license = unsafe.
 6. **No end-user runtime dependencies** (Python, Conda, Docker, CUDA Toolkit) in the shipped path.
 
@@ -98,7 +98,7 @@ dotnet test tests/Trackdub.Architecture.Tests --no-restore -m:1
 
 **Inference is provider-neutral.** `Inference` holds descriptors, ranking policy, and planning (`src/Trackdub.Inference/Runtime/Planning/`) but never constructs a session. Per `Runtime/ExecutionProviders/README.md`, session construction lives in `Inference.Onnx` behind `IExecutionProviderSmokeTester` and the session-factory abstractions. Consequence: the provider probe order is data (`Milestone5PlanningPolicy.SupportedProvidersThisMilestone`), not a chain of `if (OperatingSystem.IsWindows())` inside the planner.
 
-**Media.Playback sits apart.** It references only `Application` and `Domain` — deliberately not `Contracts`, and not `Media`. It carries native playback interop (libmpv, LibVLCSharp, Media Foundation), `AllowUnsafeBlocks`, `WinNativeDepsManifest`, and its own multi-targeting (`net10.0;net10.0-windows10.0.19041.0`). Isolating it keeps native-playback dependencies and unsafe code out of the graph that every other consumer walks, and lets `Composition` opt into playback without `Media` dragging it along.
+**Media.Playback sits apart.** It references only `Application` and `Domain` — deliberately not `Contracts`, and not `Media`. It carries native playback interop (libmpv, LibVLCSharp, Media Foundation), `AllowUnsafeBlocks`, `WinNativeDepsManifest`, and its own multi-targeting (`net11.0;net11.0-windows10.0.19041.0`). Isolating it keeps native-playback dependencies and unsafe code out of the graph that every other consumer walks, and lets `Composition` opt into playback without `Media` dragging it along.
 
 **`Media` → `Analyzers` is an analyzer reference, not a code edge.** In `src/Trackdub.Media/Trackdub.Media.csproj` it is `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`. It appears in the diagram because the compile graph includes it; no runtime type flows that way.
 
@@ -123,10 +123,10 @@ dotnet format Trackdub.slnx --verify-no-changes
 
 # Headless CLI
 dotnet run --project src/Trackdub.Cli -- --help
-dotnet run --project src/Trackdub.Cli --framework net10.0 -- --help   # Windows multi-target
+dotnet run --project src/Trackdub.Cli --framework net11.0 -- --help   # Windows multi-target
 
 # Benchmarks
-dotnet run --project src/Trackdub.Benchmarks.DevHost -f net10.0 -- controlled-matrix <fixture> --output <dir>
+dotnet run --project src/Trackdub.Benchmarks.DevHost -f net11.0 -- controlled-matrix <fixture> --output <dir>
 dotnet run --project src/Trackdub.Benchmarks.Micro -c Release -- --list flat
 ```
 
