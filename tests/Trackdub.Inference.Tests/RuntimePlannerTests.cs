@@ -11,7 +11,7 @@ using Trackdub.Infrastructure.Settings;
 
 namespace Trackdub.Inference.Tests;
 
-public sealed class RuntimePlannerTests
+public sealed partial class RuntimePlannerTests
 {
     private const string ValidSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     [Fact]

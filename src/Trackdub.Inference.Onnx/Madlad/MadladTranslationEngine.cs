@@ -43,7 +43,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
                     request.PreferredExecutionProvider,
                     request.RequirePreferredExecutionProvider),
                 RequirePreferredExecutionProvider: request.RequirePreferredExecutionProvider,
-                PreferredModelVariantAlias: request.PreferredModelVariantAlias),
+                PreferredModelVariantAlias: request.PreferredModelVariantAlias, RequirePreferredModelAlias: RequiresRoutedModelAlias(request)),
             runtimePlanningPreferences,
             cancellationToken).ConfigureAwait(false);
 
@@ -143,7 +143,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
                     request.PreferredExecutionProvider,
                     request.RequirePreferredExecutionProvider),
                 RequirePreferredExecutionProvider: request.RequirePreferredExecutionProvider,
-                PreferredModelVariantAlias: request.PreferredModelVariantAlias),
+                PreferredModelVariantAlias: request.PreferredModelVariantAlias, RequirePreferredModelAlias: RequiresRoutedModelAlias(request)),
             runtimePlanningPreferences,
             cancellationToken).ConfigureAwait(false);
 
@@ -224,8 +224,9 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         // Classic TensorRT takes the same bounded profiles as TensorRT-RTX so production loads the
         // engines that the classic warm path built (EpContextTrtProfiles.Resolve).
         bool boundedTensorRtProfiles = plan.ExecutionProvider is ExecutionProviderKind.TensorRTRtx or ExecutionProviderKind.TensorRt;
+        bool classicTensorRt = plan.ExecutionProvider is ExecutionProviderKind.TensorRt;
         return await OnnxExecutionSessionFactory
-            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = boundedTensorRtProfiles ? MadladTrtProfiles.Encoder : null, AdditionalTrtDecoderOptions = boundedTensorRtProfiles ? MadladTrtProfiles.Decoder : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
+            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicEncoder : MadladTrtProfiles.Encoder) : null, AdditionalTrtDecoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicDecoder : MadladTrtProfiles.Decoder) : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
     }
 
@@ -257,7 +258,8 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
                 TargetLanguage: request.TargetLanguage,
                 PreferredExecutionProvider: ExecutionProviderKind.Cpu,
                 RequirePreferredExecutionProvider: true,
-                PreferredModelVariantAlias: null),
+                PreferredModelVariantAlias: null,
+                RequirePreferredModelAlias: RequiresRoutedModelAlias(request)),
             runtimePlanningPreferences,
             cancellationToken).ConfigureAwait(false);
 
@@ -273,6 +275,13 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         EnsurePlanReady(cpuPlan, RuntimeStage.Translation);
         return cpuPlan;
     }
+
+
+    // The router has already chosen this MADLAD model. A soft alias lets the planner fall through
+    // to another language-pair model (e.g. OPUS-MT) when the requested variant is not ready, and
+    // the engine would then load a non-MADLAD model directory.
+    private static bool RequiresRoutedModelAlias(TranslationRequest request) =>
+        !string.IsNullOrWhiteSpace(request.PreferredModelAlias);
 
     internal static async Task SmokeTestAsync(
         ExecutionProviderSmokeTestRequest request, string encoderPath, string decoderPath,
