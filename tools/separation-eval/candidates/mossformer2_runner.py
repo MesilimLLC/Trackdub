@@ -54,6 +54,8 @@ DITHER_SEED = 1234
 
 def load_clearvoice_modules(inner: Path):
     """The decoder and the model wrapper, imported without running the package's `__init__`."""
+    for key in [k for k in sys.modules if k == "clearvoice" or k.startswith("clearvoice.")]:
+        del sys.modules[key]  # a cached import from another checkout would make the source hashes meaningless
     stub = types.ModuleType("clearvoice")
     stub.__path__ = [str(inner)]
     sys.modules["clearvoice"] = stub
@@ -139,7 +141,7 @@ class Separator:
         torch = self.torch
         n = channel_48k.shape[0]
         with torch.inference_mode():
-            out = self.decode.decode_one_audio_mossformer2_se_48k(self.model, self.device, channel_48k.numpy()[None, :],
+            out = self.decode.decode_one_audio_mossformer2_se_48k(self.model, self.device, channel_48k.cpu().numpy()[None, :],
                                                                   self.args)
         out = torch.from_numpy(out).float().reshape(-1)
         if out.shape[0] < n or not bool(torch.isfinite(out).all()):

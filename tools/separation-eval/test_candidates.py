@@ -35,6 +35,18 @@ class ConstantsTests(unittest.TestCase):
         self.assertEqual((args["one_time_decode_length"], args["decode_window"]), (20, 4))
 
 
+class PortabilityTests(unittest.TestCase):
+    def test_memory_counters_work_on_this_platform(self):
+        peak, current = rc._memory_counters()
+        self.assertTrue(isinstance(peak, int) and isinstance(current, int) and peak > 0 and current > 0)
+
+    def test_padding_is_whole_strides_and_zero_when_already_whole(self):
+        self.assertEqual(mdx.padding_for(mdx.GEN_SIZE), 0)
+        self.assertEqual(mdx.padding_for(2 * mdx.GEN_SIZE), 0)
+        self.assertEqual(mdx.padding_for(1), mdx.GEN_SIZE - 1)
+        self.assertEqual((1000 + mdx.padding_for(1000)) % mdx.GEN_SIZE, 0)
+
+
 class CommandLineTests(unittest.TestCase):
     ARGS = ["separation-eval", "--jobs", "j", "--results", "r", "--model-directory", "m"]
 

@@ -20,6 +20,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -70,7 +71,24 @@ def git_head(repo: Path) -> str:
 
 
 def _memory_counters():
-    """Working-set counters of this process (Windows). Returns (peak, current) bytes."""
+    """Memory counters of this process. Returns (peak, current) bytes."""
+    return _windows_counters() if sys.platform == "win32" else _posix_counters()
+
+
+def _posix_counters():
+    """Peak resident size from getrusage (KiB on Linux, bytes on macOS); current from /proc where there is one."""
+    import resource
+
+    peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
+    try:
+        with open("/proc/self/statm", encoding="ascii") as f:
+            return peak, int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return peak, peak
+
+
+def _windows_counters():
+    """Working-set counters of this process (Windows)."""
     from ctypes import wintypes
 
     class Counters(ctypes.Structure):

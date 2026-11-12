@@ -56,6 +56,11 @@ BAND_LIMIT_HZ = DIM_F * rc.SEPARATOR_SR / N_FFT
 BATCH = 8
 
 
+def padding_for(n: int) -> int:
+    """Zeros appended so the input is a whole number of chunk strides; none when it already is."""
+    return (-n) % GEN_SIZE
+
+
 def verified_weights(model_directory: Path) -> tuple[bytes, str, str]:
     """The vocals graph from the archive, after the archive md5 and the member sha256 match their pins."""
     archive = model_directory / ARCHIVE_NAME
@@ -111,6 +116,7 @@ class Separator:
         self.reference_hashes = reference_hashes(model_directory / "repo")
         self.session, self.selected = open_session(ort, weights, provider)
         self.window = torch.hann_window(N_FFT, periodic=True)
+        self.device_name = "cpu" if self.selected == "CPUExecutionProvider" else self.selected
         self.versions = {"torch": torch.__version__, "onnxruntime": ort.__version__, "python": sys.version.split()[0]}
 
     def stft(self, x):
@@ -144,12 +150,12 @@ class Separator:
         """mix: float32 (2, n) at 44.1 kHz -> (dialogue, bed)."""
         torch = self.torch
         n = mix.shape[1]
-        pad = GEN_SIZE - n % GEN_SIZE
+        pad = padding_for(n)
         padded = torch.nn.functional.pad(mix, (TRIM, pad + TRIM))
         chunks = torch.stack([padded[:, i:i + CHUNK] for i in range(0, n + pad, GEN_SIZE)])
         with torch.inference_mode():
             tracks = self.run_chunks(chunks)
-        dialogue = tracks.transpose(0, 1).reshape(2, -1)[:, :-pad].float().contiguous()
+        dialogue = tracks.transpose(0, 1).reshape(2, -1)[:, :n].float().contiguous()
         return dialogue, mix - dialogue
 
 
@@ -168,7 +174,7 @@ def metadata(sep: Separator, model: str) -> dict:
             "chunking": f"{CHUNK} samples at stride {GEN_SIZE}, {TRIM} trimmed each side, no overlap-add",
             "inference_batch": str(BATCH), "native_sample_rate": str(rc.SEPARATOR_SR),
             "separator_sample_rate": str(rc.SEPARATOR_SR), "channels": "stereo network input, no resampling",
-            "output": "float32 stereo WAV", "device": "cpu", "selected_provider": sep.selected,
+            "output": "float32 stereo WAV", "device": sep.device_name, "selected_provider": sep.selected,
             "versions": json.dumps(sep.versions, sort_keys=True)}
 
 
