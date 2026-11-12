@@ -2,6 +2,7 @@ using Microsoft.ML.OnnxRuntime;
 using Trackdub.Inference.Onnx.Whisper;
 using Trackdub.Inference.Onnx.Madlad;
 using Trackdub.Inference.Onnx.NemotronAsr;
+using Trackdub.Inference.Onnx.Qwen3Asr;
 using Trackdub.Inference.Onnx.SortFormer;
 
 namespace Trackdub.Inference.Onnx.EpContext;
@@ -18,6 +19,11 @@ internal static class EpContextTrtProfiles
         if (MadladTrtProfiles.Resolve(sourceModelPath) is { } madladProfile)
         {
             return madladProfile;
+        }
+
+        if (Qwen3AsrTrtProfiles.Resolve(sourceModelPath) is { } qwen3Profile)
+        {
+            return qwen3Profile;
         }
 
         IReadOnlyCollection<string> inputNames;
