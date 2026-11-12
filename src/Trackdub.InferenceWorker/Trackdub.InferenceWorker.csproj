@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    ORT 1.30 inference worker (ADR-0017, amended 2026-10-09). The application process loads
-    Windows ML's ORT. GenAI stays in that process. This process loads the ORT 1.30 GPU build
+    ORT 1.31 inference worker (ADR-0017, amended 2026-10-09). The application process loads
+    Windows ML's ORT. GenAI stays in that process. This process loads the ORT 1.31 GPU build
     only for native-CUDA engines (Kokoro). It ships under inference-worker/ so the two
     onnxruntime.dll files never share a directory.
   -->
@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <!-- Inference.Onnx still restores Windows ML, whose managed ORT (assembly 0.0.0.0) would otherwise
-       flow here and win over the stock 1.30 binding the worker host was compiled against. -->
+       flow here and win over the stock 1.31 binding the worker host was compiled against. -->
   <Target Name="ReferenceStockManagedOrt" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup>
       <Reference Remove="@(Reference)"
@@ -42,13 +42,13 @@
   </Target>
 
   <!--
-    The worker reference of Trackdub.Inference.Onnx is compiled against stock managed ORT 1.30.
-    This target then places the matching ORT 1.30 GPU native build at the worker output root.
+    The worker reference of Trackdub.Inference.Onnx is compiled against stock managed ORT 1.31.
+    This target then places the matching ORT 1.31 GPU native build at the worker output root.
     Composition publishes that output only under inference-worker/.
   -->
   <!-- NuGet still copies Windows ML's managed ORT (assembly 0.0.0.0) because that package stays on the
        compile graph for its projection. Drop it from the output set, then the GPU target writes stock
-       managed ORT 1.30 last so the worker process has one binding. -->
+       managed ORT 1.31 last so the worker process has one binding. -->
   <Target Name="DropWinMlManagedOrtFromOutput" AfterTargets="GetCopyToOutputDirectoryItems;GetCopyToPublishDirectoryItems">
     <ItemGroup>
       <ContentWithTargetPath Remove="@(ContentWithTargetPath)"
@@ -91,15 +91,17 @@
           SkipUnchangedFiles="false" />
     <!-- deps.json runtimeTargets resolve DllImport("onnxruntime") to runtimes/<rid>/native/onnxruntime.dll
          ahead of app-dir probing, and NuGet filled that slot from Windows ML's ORT 1.27 payload while
-         the managed binding above is stock 1.31. Overwrite the slot or NativeMethods init fails. -->
+         the managed binding above is stock 1.31. Overwrite the slot or NativeMethods init fails.
+         Copy the complete payload (onnxruntime.dll plus providers_*.dll): ORT resolves provider
+         DLLs relative to the loaded runtime, so provider copies must sit beside it in this slot. -->
     <Copy Condition="'@(_OrtGpuNative)' != ''"
-          SourceFiles="$(_OrtGpuNativeDir)onnxruntime.dll"
+          SourceFiles="@(_OrtGpuNative)"
           DestinationFolder="$(TargetDir)runtimes\$(_OrtGpuRid)\native"
           OverwriteReadOnlyFiles="true"
           SkipUnchangedFiles="false" />
-    <!-- Same PreserveNewest hazard as the managed binding: stamp the overwritten native so
+    <!-- Same PreserveNewest hazard as the managed binding: stamp the overwritten natives so
          Composition's copy cannot keep a stale Windows ML build. -->
-    <Touch Files="$(TargetDir)runtimes\$(_OrtGpuRid)\native\onnxruntime.dll" AlwaysCreate="false"
+    <Touch Files="@(_OrtGpuNative->'$(TargetDir)runtimes\$(_OrtGpuRid)\native\%(RecursiveDir)%(Filename)%(Extension)')" AlwaysCreate="false"
           Condition="'@(_OrtGpuNative)' != ''" />
     <!-- Composition copies this tree with PreserveNewest. The stock package file is older than
          Windows ML's, so stamp the written file or a previous WinML copy is kept. -->
