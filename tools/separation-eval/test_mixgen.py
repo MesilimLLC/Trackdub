@@ -4,6 +4,7 @@ import math
 import struct
 import tempfile
 import unittest
+import zlib
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -282,6 +283,66 @@ class CorpusWriteTests(MixgenTestBase):
         with self.assertRaises(mixgen.GenerationError):
             mixgen.generate_corpus(self.items, self.cache, self.root / "o", split="dev", recipes=["A99"],
                                    seed=1, items_sha256="x", count_override=1)
+
+
+class LanguageTests(MixgenTestBase):
+    GROUPS = {"ar": "spk-ar", "pt": "spk-pt", "ru": "spk-ru"}
+
+    def add_dialogue(self, language):
+        item_id = f"dlg-{language}"
+        item = {"id": item_id, "role": "dialogue", "group": self.GROUPS[language], "tags": [], "split": "dev",
+                "url": f"https://example.org/{item_id}.wav", "license_spdx": "CC0-1.0", "language": language}
+        path = ingest.cache_path(self.cache, item)
+        am.write_wav(path, speechlike(3.0, np.random.default_rng(zlib.crc32(item_id.encode()))).reshape(-1, 1), am.SR)
+        item["sha256"] = ingest.sha256_file(path)
+        self.items.append(item)
+
+    def add_all(self):
+        for language in self.GROUPS:
+            self.add_dialogue(language)
+
+    def test_english_recipes_ignore_non_english_dialogue(self):
+        self.add_all()
+        for index in range(6):
+            _, _, meta = self.clip("A1", index)
+            self.assertIn(meta["speakers"][0]["group"], {"spk-a", "spk-b", "spk-w"})
+            self.assertNotIn("dialogue_language", meta)
+
+    def test_english_output_is_unchanged_by_extra_languages(self):
+        before, _, _ = self.clip("A1", 0)
+        self.add_all()
+        after, _, _ = self.clip("A1", 0)
+        for name in before:
+            np.testing.assert_array_equal(before[name], after[name])
+
+    def test_an_explicit_english_language_matches_a_missing_one(self):
+        before, _, _ = self.clip("A1", 0)
+        for item in self.items:
+            if item["role"] == "dialogue":
+                item["language"] = "en"
+        after, _, _ = self.clip("A1", 0)
+        for name in before:
+            np.testing.assert_array_equal(before[name], after[name])
+
+    def test_a13_cycles_through_the_non_english_languages_present(self):
+        self.add_all()
+        languages = [self.clip("A13", index)[2]["dialogue_language"] for index in range(6)]
+        self.assertEqual(languages, ["ar", "pt", "ru", "ar", "pt", "ru"])
+
+    def test_a13_uses_only_speakers_of_the_chosen_language(self):
+        self.add_all()
+        for index in range(3):
+            _, _, meta = self.clip("A13", index)
+            self.assertEqual(meta["speakers"][0]["group"], self.GROUPS[meta["dialogue_language"]])
+
+    def test_a13_fails_without_non_english_dialogue(self):
+        with self.assertRaisesRegex(mixgen.GenerationError, "non-English"):
+            self.clip("A13", 0)
+
+    def test_optional_recipes_are_left_out_of_the_default_list(self):
+        self.assertIn("A13", mixgen.RECIPES)
+        self.assertNotIn("A13", mixgen.DEFAULT_RECIPE_IDS)
+        self.assertEqual(len(mixgen.DEFAULT_RECIPE_IDS), 12)
 
 
 @unittest.skipUnless(am.have_ffmpeg(), "ffmpeg not installed")

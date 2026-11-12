@@ -4,6 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+DEFAULT_LANGUAGE = "en"
+
+
+def item_language(item: dict) -> str:
+    """Items from corpus v1.0 carry no language and are English."""
+    return item.get("language", DEFAULT_LANGUAGE)
+
+
+def language_allowed(item: dict, languages: tuple[str, ...]) -> bool:
+    """True when the item's language is listed; an empty list means every language except the default."""
+    language = item_language(item)
+    return language in languages if languages else language != DEFAULT_LANGUAGE
+
 
 @dataclass(frozen=True)
 class Layer:
@@ -22,6 +35,8 @@ class Recipe:
     duration_s: float = 30.0
     dialogue: bool = True
     dialogue_tags: tuple[str, ...] = ()
+    languages: tuple[str, ...] = (DEFAULT_LANGUAGE,)
+    optional: bool = False
     overlap: bool = False
     layers: tuple[Layer, ...] = (Layer("music", ("instrumental",)),)
     snr_db: tuple[float, float] = (0.0, 15.0)
@@ -51,4 +66,8 @@ RECIPES: dict[str, Recipe] = {recipe.recipe_id: recipe for recipe in (
            variants=("mono", "sr8000", "sr16000", "5.1")),
     Recipe("A12", "long form", 3, duration_s=1200.0, gap_s=(0.5, 4.0),
            layers=(Layer("music", ("instrumental",)), Layer("ambience", (), 0.5))),
+    # Corpus v1.1 only: needs non-English dialogue items, so it is left out of default runs and coverage checks.
+    Recipe("A13", "multilingual dialogue", 30, languages=(), optional=True),
 )}
+
+DEFAULT_RECIPE_IDS = tuple(rid for rid, recipe in RECIPES.items() if not recipe.optional)
