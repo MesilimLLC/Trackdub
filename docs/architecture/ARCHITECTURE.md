@@ -205,7 +205,7 @@ trackdub run pipeline --media in.mp4 --output ./project --preset <preset> \
   --result-file result.json --progress-file progress.jsonl
 ```
 
-It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` cover health checks, hash-verified model provisioning and engine builds.
+It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` (with `--provider tensorrt` on the server profile, see 3.2.1) cover health checks, hash-verified model provisioning and engine builds.
 
 Cloud presets fix the models, variants and per-stage providers for server runs (`src/Trackdub.Cli/PocServerPreset.cs`, `src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1` (English to Spanish) and `poc-server-zh-v1` (English to Chinese). Clients pick a preset name; they never supply commands, model IDs or paths.
 
