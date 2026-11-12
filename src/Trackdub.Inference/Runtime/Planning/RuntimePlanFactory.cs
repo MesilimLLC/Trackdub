@@ -556,8 +556,8 @@ internal sealed class RuntimePlanFactory
                 return [requiredProvider];
             }
 
-            // Engine family forbids the pin (e.g. Kokoro is CPU-only). Plan with the allowed
-            // list instead of blocking; callers attach PreferredExecutionProviderNotAllowedForEngine.
+            // A required provider is a hard constraint, including for engine family restrictions.
+            return [];
         }
 
         // Family overrides may intentionally change priority (for example, DirectML
@@ -1013,7 +1013,10 @@ internal sealed class RuntimePlanFactory
         string? modelSha256,
         ExecutionProviderKind provider,
         HardwareProfile hardwareProfile) =>
-        string.IsNullOrWhiteSpace(modelSha256)
+        // The persisted key does not yet include the Windows ML device policy. A verdict
+        // from a different policy cannot establish this session's actual placement.
+        string.IsNullOrWhiteSpace(modelSha256) ||
+        (OperatingSystem.IsWindows() && provider is ExecutionProviderKind.Qnn or ExecutionProviderKind.VitisAi or ExecutionProviderKind.OpenVinoCatalog or ExecutionProviderKind.Migraphx)
             ? null
             : new SmokeVerdictKey(
                 modelSha256,

@@ -79,7 +79,7 @@ public sealed class SileroVadSpeechRegionDetector(IRuntimePlanner runtimePlanner
 
         string modelPath = ResolvePlannedModelPath(plan);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "silero-vad", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AllowTrtInitFallback = !plan.RequirePreferredExecutionProvider }, modelPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "silero-vad", Provider = plan.ExecutionProvider!.Value, HasExplicitProviderPreference = plan.HasExplicitProviderPreference, CancellationToken = cancellationToken, AllowTrtInitFallback = !plan.RequirePreferredExecutionProvider }, modelPath)
             .ConfigureAwait(false);
 
         IAudioSamples audio = await WaveAudioReader.ReadMonoPcm16Async(request.NormalizedAudioPath, cancellationToken).ConfigureAwait(false);

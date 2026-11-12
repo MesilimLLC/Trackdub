@@ -118,7 +118,7 @@ public sealed class ParakeetTdtOnnxAudioTranscriptionEngine(
             .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "parakeet-tdt-preprocessor", Provider = ExecutionProviderKind.Cpu, CancellationToken = cancellationToken }, paths.PreprocessorPath)
             .ConfigureAwait(false);
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessions = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = EngineFamilyName, Provider = plan.ExecutionProvider.Value, CancellationToken = cancellationToken, ModelId = plan.ModelId, Variant = plan.Variant, AdditionalTrtEncoderOptions = TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = paths.EncoderPath, Decoder = paths.DecoderJointPath })
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = EngineFamilyName, Provider = plan.ExecutionProvider.Value, HasExplicitProviderPreference = plan.HasExplicitProviderPreference, CancellationToken = cancellationToken, ModelId = plan.ModelId, Variant = plan.Variant, AdditionalTrtEncoderOptions = TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = paths.EncoderPath, Decoder = paths.DecoderJointPath })
             .ConfigureAwait(false);
         var decoder = new ParakeetTdtGreedyDecoder(sessions.DecoderJointSession, vocab, plan.ExecutionProvider);
 

@@ -254,6 +254,25 @@ public static partial class CompositionRoot
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, OpusMtTranslationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, MadladTranslationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, PhiGenAiTranslationEngine>());
+        services.AddScoped<ITranslationEngineAdapter>(sp => new PhiGenAiTranslationEngine(
+            sp.GetRequiredService<IRuntimePlanner>(),
+            sp.GetRequiredService<BenchmarkModelPathResolver>(),
+            sp.GetService<IRuntimePlanningPreferences>(),
+            sp.GetService<IApplicationLogger>(),
+            PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            sp.GetService<IInferenceWorkerClient>()));
+        services.AddScoped<ITranslationEngineAdapter>(sp => new PhiGenAiTranslationEngine(
+            sp.GetRequiredService<IRuntimePlanner>(),
+            sp.GetRequiredService<BenchmarkModelPathResolver>(),
+            sp.GetService<IRuntimePlanningPreferences>(),
+            sp.GetService<IApplicationLogger>(),
+            PhiGenAiTranslationEngine.GemmaEngineFamilyName));
+        services.AddScoped<ITranslationEngineAdapter>(sp => new PhiGenAiTranslationEngine(
+            sp.GetRequiredService<IRuntimePlanner>(),
+            sp.GetRequiredService<BenchmarkModelPathResolver>(),
+            sp.GetService<IRuntimePlanningPreferences>(),
+            sp.GetService<IApplicationLogger>(),
+            "qwen-instruct"));
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, KokoroTtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, ChatterboxVoiceCloneTtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, Qwen3TtsEngine>());

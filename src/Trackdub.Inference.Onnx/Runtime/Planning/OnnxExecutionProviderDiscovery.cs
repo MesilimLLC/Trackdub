@@ -28,7 +28,7 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
     private readonly IInferenceWorkerClient? _workerClient;
 
     /// <summary>Engine families the ORT 1.30 inference worker runs on CUDA (ADR-0017).</summary>
-    internal static IReadOnlyList<string> WorkerCudaEngineFamilies { get; } = ["kokoro"];
+    internal static IReadOnlyList<string> WorkerCudaEngineFamilies { get; } = ["kokoro", "qwen-genai"];
 
     public OnnxExecutionProviderDiscovery()
         : this(new NullOpenVinoAvailabilityProvider())
@@ -196,7 +196,7 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
             : new(ExecutionProviderKind.CoreMl, false,
                 "CoreML is macOS-only."));
 
-        // Native ORT CUDA / TensorRT (Linux always; Windows when advanced setting enabled)
+        // Probe native providers independently of the Windows ML catalog routes.
         bool linuxNvidiaDriverLoaded = isLinux && isNvidiaGpu && _linuxRuntimeProbe.IsNvidiaDriverLoaded();
         bool linuxTensorRtAvailable = linuxNvidiaDriverLoaded && _linuxRuntimeProbe.IsNativeTensorRtAvailable();
 
@@ -204,7 +204,7 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
         bool windowsCudaListed = windowsNativeProbe && CudaOrtProbe.IsCudaProviderListed();
         bool windowsTensorRtLibs = windowsNativeProbe && NativeTensorRtLibraryProbe.IsNativeTensorRtAvailable();
         bool windowsTensorRtListed = windowsNativeProbe && TensorRtRtxOrtProbe.IsNativeTensorRtProviderListed();
-        bool windowsCudaAvailable = windowsCudaListed;
+        bool windowsCudaAvailable = windowsCudaListed && CudaOrtProbe.IsCuDnn9Available();
         bool windowsTensorRtAvailable = windowsTensorRtLibs && windowsTensorRtListed;
 
         bool linuxCudaUsable = linuxNvidiaDriverLoaded && _linuxRuntimeProbe.IsCudaOrtProviderAvailable();
@@ -216,7 +216,8 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
             isWindows,
             isNvidiaGpu,
             allowNativeCudaTensorRtOnWindows,
-            windowsCudaAvailable);
+            windowsCudaAvailable,
+            windowsCudaListed);
         if (!cudaAvailability.IsAvailable && isWindows && isNvidiaGpu &&
             await ResolveWorkerCudaAvailabilityAsync(cancellationToken).ConfigureAwait(false) is { } workerCuda)
         {
@@ -307,7 +308,8 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
         bool isWindows,
         bool isNvidiaGpu,
         bool allowNativeCudaTensorRtOnWindows,
-        bool windowsCudaAvailable)
+        bool windowsCudaAvailable,
+        bool windowsCudaListed)
     {
         if (isLinux)
         {
@@ -328,18 +330,24 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
         {
             return windowsCudaAvailable
                 ? new(ExecutionProviderKind.Cuda, true,
-                    "Native CUDAExecutionProvider is listed; use for explicit CUDA requests (advanced).")
+                    "Native CUDAExecutionProvider and cuDNN 9 are available.")
                 : new(ExecutionProviderKind.Cuda, false,
-                    isNvidiaGpu
-                        ? "CUDAExecutionProvider is not listed. Install NVIDIA drivers, CUDA, and ONNX Runtime GPU package."
-                        : "Native CUDA on Windows requires an NVIDIA GPU.");
+                    ResolveWindowsCudaUnavailableDetail(isNvidiaGpu, windowsCudaListed));
         }
 
         return new(ExecutionProviderKind.Cuda, false,
             isWindows
-                ? "CUDA native EP on Windows is off by default. Use TensorRT RTX instead."
-                : "CUDA native EP is available on Linux and Windows (when enabled).");
+                ? "The host policy disabled native CUDA discovery."
+                : "Native CUDA requires Linux or Windows.");
     }
+
+    private static string ResolveWindowsCudaUnavailableDetail(bool isNvidiaGpu, bool cudaListed) =>
+        (isNvidiaGpu, cudaListed) switch
+        {
+            (false, _) => "Native CUDA on Windows requires an NVIDIA GPU.",
+            (true, false) => "The loaded ONNX Runtime does not list CUDAExecutionProvider.",
+            _ => "CUDAExecutionProvider is listed, but cuDNN 9 could not be loaded.",
+        };
 
     private static ExecutionProviderAvailability ResolveTensorRtAvailability(
         bool isLinux,
@@ -365,15 +373,15 @@ public sealed class OnnxExecutionProviderDiscovery : IExecutionProviderDiscovery
         {
             return windowsTensorRtAvailable
                 ? new(ExecutionProviderKind.TensorRt, true,
-                    "Native TensorRT libraries and TensorrtExecutionProvider are available (advanced).")
+                    "Native TensorRT libraries and TensorrtExecutionProvider are available.")
                 : new(ExecutionProviderKind.TensorRt, false,
                     ResolveWindowsNativeTensorRtUnavailableDetail(isNvidiaGpu, windowsTensorRtLibs, windowsTensorRtListed));
         }
 
         return new(ExecutionProviderKind.TensorRt, false,
             isWindows
-                ? "Native TensorRT on Windows is off by default. Use TensorRT RTX instead."
-                : "TensorRT native EP is available on Linux and Windows (when enabled).");
+                ? "The host policy disabled native TensorRT discovery."
+                : "Native TensorRT requires Linux or Windows.");
     }
 
     private static string ResolveWindowsNativeTensorRtUnavailableDetail(

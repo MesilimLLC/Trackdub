@@ -15,6 +15,28 @@ public sealed partial class RuntimePlannerTests
 {
     private const string ValidSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     [Fact]
+    public async Task PlanAsync_PreservesProviderPreferenceOnCachedPlans()
+    {
+        using var workspace = new RuntimePlannerTestWorkspace();
+        BundledModelManifestRegistry registry = workspace.WriteManifest(
+            CreateVadSpec("silero-vad", commercialAllowed: true, license: "MIT"));
+        string root = workspace.CreateCacheRoot("onnx-community/silero-vad");
+        workspace.WriteCacheFile(root, "onnx/model_fp16.onnx");
+        RuntimePlanner planner = CreatePlanner(registry,
+            [new("onnx-community/silero-vad", root, "main", ValidSha256, DateTimeOffset.UtcNow)],
+            [new(ExecutionProviderKind.DirectMl, true)],
+            _ => new ExecutionProviderSmokeTestResult(true));
+
+        StageRuntimePlan automatic = await planner.PlanAsync(new StageRuntimePlanningRequest(RuntimeStage.Vad));
+        var request = new StageRuntimePlanningRequest(RuntimeStage.Vad, PreferredExecutionProvider: ExecutionProviderKind.DirectMl);
+        StageRuntimePlan selected = await planner.PlanAsync(request);
+        StageRuntimePlan cached = await planner.PlanAsync(request);
+
+        Assert.False(automatic.HasExplicitProviderPreference);
+        Assert.True(selected.HasExplicitProviderPreference);
+        Assert.True(cached.HasExplicitProviderPreference);
+    }
+    [Fact]
     public async Task PlanAsync_NoVerdict_ReturnsReadyDirectMlWithoutSmoke()
     {
         using var workspace = new RuntimePlannerTestWorkspace();
@@ -736,7 +758,7 @@ public sealed partial class RuntimePlannerTests
     }
 
     [Fact]
-    public async Task PlanAsync_RequiredProviderNotAllowedForEngineFamily_PlansAllowedProviderWithSkipWarning()
+    public async Task PlanAsync_RequiredProviderNotAllowedForEngineFamily_Blocks()
     {
         BundledModelManifestRegistry registry = LoadBundledRegistry();
         RuntimePlanner planner = CreatePlanner(
@@ -752,22 +774,14 @@ public sealed partial class RuntimePlannerTests
             PreferredExecutionProvider: ExecutionProviderKind.TensorRTRtx,
             RequirePreferredExecutionProvider: true));
 
-        Assert.Equal(StageRuntimePlanStatus.DownloadRequired, plan.Status);
-        Assert.Equal(ExecutionProviderKind.Cpu, plan.ExecutionProvider);
-        Assert.Equal("kokoro", plan.EngineFamily);
-        Assert.Contains(
-            plan.Warnings,
-            warning =>
-                warning.Code == RuntimePlanWarningCode.PreferredExecutionProviderNotAllowedForEngine
-                && warning.Detail is not null
-                && warning.Detail.Contains("TensorRTRtx", StringComparison.Ordinal));
+        Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+        Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task PlanAsync_RequiredTensorRTRtxForVad_FallsBackToDmlSinceBlocked()
+    public async Task PlanAsync_RequiredTensorRTRtxForVad_Blocks()
     {
-        // VAD excludes TensorRT RTX (silero-vad fails its engine build, #329), so a required
-        // TRT RTX pin is demoted to DirectML with a visible skip warning, never silently.
+        // VAD excludes TensorRT RTX, so a required pin cannot select another provider.
         using var workspace = new RuntimePlannerTestWorkspace();
         BundledModelManifestRegistry registry = workspace.WriteManifest(
             CreateVadSpec("silero-vad", commercialAllowed: true, license: "MIT"));
@@ -789,15 +803,12 @@ public sealed partial class RuntimePlannerTests
             PreferredExecutionProvider: ExecutionProviderKind.TensorRTRtx,
             RequirePreferredExecutionProvider: true));
 
-        Assert.True(plan.IsRunnable(), $"Expected runnable plan but got {plan.Status}");
-        Assert.Equal(ExecutionProviderKind.DirectMl, plan.ExecutionProvider);
-        Assert.Contains(
-            plan.Warnings,
-            warning => warning.Code == RuntimePlanWarningCode.PreferredExecutionProviderNotAllowedForEngine);
+        Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+        Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task PlanAsync_RequiredTensorRTRtxNotAllowedForOpusMt_PlansDirectMlWithoutTrtSmoke()
+    public async Task PlanAsync_RequiredTensorRTRtxNotAllowedForOpusMt_BlocksWithoutTrtSmoke()
     {
         using var workspace = new RuntimePlannerTestWorkspace();
         BundledModelManifestRegistry registry = LoadBundledRegistry();
@@ -831,15 +842,8 @@ public sealed partial class RuntimePlannerTests
             SourceLanguage: "es",
             TargetLanguage: "en"));
 
-        Assert.True(plan.IsRunnable(), $"Expected runnable plan but got {plan.Status}");
-        Assert.Equal("opus-mt", plan.EngineFamily);
-        Assert.Equal(ExecutionProviderKind.DirectMl, plan.ExecutionProvider);
-        Assert.Contains(
-            plan.Warnings,
-            warning =>
-                warning.Code == RuntimePlanWarningCode.PreferredExecutionProviderNotAllowedForEngine
-                && warning.Detail is not null
-                && warning.Detail.Contains("TensorRTRtx", StringComparison.Ordinal));
+        Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+        Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -971,15 +975,8 @@ public sealed partial class RuntimePlannerTests
             PreferredExecutionProvider: ExecutionProviderKind.TensorRTRtx,
             RequirePreferredExecutionProvider: true));
 
-        Assert.True(plan.IsRunnable(), $"Expected runnable plan but got {plan.Status}");
-        Assert.Equal("latentsync-diffusion", plan.EngineFamily);
-        Assert.Equal(ExecutionProviderKind.DirectMl, plan.ExecutionProvider);
-        Assert.Contains(
-            plan.Warnings,
-            warning =>
-                warning.Code == RuntimePlanWarningCode.PreferredExecutionProviderNotAllowedForEngine
-                && warning.Detail is not null
-                && warning.Detail.Contains("TensorRTRtx", StringComparison.Ordinal));
+        Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+        Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1875,7 +1872,7 @@ public sealed partial class RuntimePlannerTests
     }
 
     [Fact]
-    public async Task PlanAsync_RequiredGpuPin_OnKokoro_PlansCpuWithExactSkipReason()
+    public async Task PlanAsync_RequiredGpuPin_OnKokoro_BlocksWithReason()
     {
         using var workspace = new RuntimePlannerTestWorkspace();
         BundledModelManifestRegistry registry = LoadBundledRegistry();
@@ -1901,16 +1898,9 @@ public sealed partial class RuntimePlannerTests
             PreferredExecutionProvider: ExecutionProviderKind.TensorRTRtx,
             RequirePreferredExecutionProvider: true));
 
-        Assert.True(plan.IsRunnable(), $"Expected runnable plan but got {plan.Status}");
-        Assert.Equal(ExecutionProviderKind.Cpu, plan.ExecutionProvider);
-        Assert.Equal("kokoro", plan.EngineFamily);
-        Assert.Contains(
-            plan.Warnings,
-            warning =>
-                warning.Code == RuntimePlanWarningCode.PreferredExecutionProviderNotAllowedForEngine
-                && warning.Detail is not null
-                && warning.Detail.Contains("TensorRTRtx", StringComparison.Ordinal)
-                && warning.Detail.Contains("kokoro", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+        Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
+        Assert.Contains("kokoro", plan.Fallback.Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -1954,6 +1944,13 @@ public sealed partial class RuntimePlannerTests
             RequirePreferredModelAlias: true,
             PreferredExecutionProvider: ExecutionProviderKind.TensorRTRtx,
             RequirePreferredExecutionProvider: requirePreferredExecutionProvider));
+
+        if (requirePreferredExecutionProvider)
+        {
+            Assert.Equal(StageRuntimePlanStatus.Blocked, plan.Status);
+            Assert.Contains("TensorRTRtx", plan.Fallback!.Detail, StringComparison.Ordinal);
+            return;
+        }
 
         Assert.True(plan.IsRunnable(), $"Expected runnable plan but got {plan.Status}");
         Assert.Equal(engineFamily, plan.EngineFamily);

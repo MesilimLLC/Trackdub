@@ -50,12 +50,12 @@ internal sealed class SepFormerOnnxSeparator : ISepFormerSeparator
         // 1. OSD pass — find overlap regions in sample space
         progress?.Report(new StemSeparationProgress(0, 3, 0d, 1d));
         (List<(int Start, int End)> overlapRegions, string osdSelectedProvider, string? osdBootstrapDetail) = await DetectOverlapRegionsAsync(
-            samples, osdPath, provider, cancellationToken, allowTrtInitFallback).ConfigureAwait(false);
+            samples, osdPath, provider, cancellationToken, allowTrtInitFallback, request.Plan.HasExplicitProviderPreference).ConfigureAwait(false);
 
         // 2. Chunked SepFormer with OSD gate
         progress?.Report(new StemSeparationProgress(1, 3, 0.33d, 1d));
         (float[] source0, float[] source1, int chunkCount, _, string separatorSelectedProvider, string? separatorBootstrapDetail) = await RunChunkedSepFormerAsync(
-            samples, overlapRegions, sepPath, provider, cancellationToken, allowTrtInitFallback).ConfigureAwait(false);
+            samples, overlapRegions, sepPath, provider, cancellationToken, allowTrtInitFallback, request.Plan.HasExplicitProviderPreference).ConfigureAwait(false);
 
         progress?.Report(new StemSeparationProgress(3, 3, 1d, 1d));
 
@@ -85,7 +85,7 @@ internal sealed class SepFormerOnnxSeparator : ISepFormerSeparator
 
         (float[] source0, float[] source1, int chunkCount, bool permutationWarning, string separatorSelectedProvider, string? separatorBootstrapDetail) =
             await RunChunkedSepFormerAsync(
-                samples, overlapRegions, sepPath, provider, cancellationToken, allowTrtInitFallback)
+                samples, overlapRegions, sepPath, provider, cancellationToken, allowTrtInitFallback, request.Plan.HasExplicitProviderPreference)
                 .ConfigureAwait(false);
 
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -112,13 +112,14 @@ internal sealed class SepFormerOnnxSeparator : ISepFormerSeparator
         string osdPath,
         ExecutionProviderKind provider,
         CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        bool allowTrtInitFallback = true,
+        bool hasExplicitProviderPreference = false)
     {
         var overlapRegions = new List<(int Start, int End)>();
         int totalSamples = samples.Length;
 
         using OnnxExecutionSessionFactory.SingleSessionLease osdLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "sepformer-osd", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, osdPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "sepformer-osd", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, osdPath)
             .ConfigureAwait(false);
         string selectedProvider = osdLease.SelectedProvider;
         string? bootstrapDetail = osdLease.BootstrapDetail;
@@ -235,7 +236,8 @@ internal sealed class SepFormerOnnxSeparator : ISepFormerSeparator
         string sepPath,
         ExecutionProviderKind provider,
         CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        bool allowTrtInitFallback = true,
+        bool hasExplicitProviderPreference = false)
     {
         int totalSamples = samples.Length;
         float[] source0 = new float[totalSamples];
@@ -253,7 +255,7 @@ internal sealed class SepFormerOnnxSeparator : ISepFormerSeparator
         float[] fadeOut = BuildLinearRamp(OverlapSamples, rising: false);
 
         using OnnxExecutionSessionFactory.SingleSessionLease sepLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "sepformer", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, sepPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "sepformer", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, sepPath)
             .ConfigureAwait(false);
         string selectedProvider = sepLease.SelectedProvider;
         string? bootstrapDetail = sepLease.BootstrapDetail;

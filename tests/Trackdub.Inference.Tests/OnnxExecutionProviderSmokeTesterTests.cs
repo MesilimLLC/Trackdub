@@ -469,7 +469,7 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
             .GetMethod("EnsureSelectedProviderMatchesRequested", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("Could not locate selected-provider assertion helper.");
 
-        method.Invoke(null, [requestedProvider, selectedProvider]);
+        method.Invoke(null, [requestedProvider, selectedProvider, false]);
     }
 
     [Fact]
@@ -480,11 +480,20 @@ public sealed class OnnxExecutionProviderSmokeTesterTests
             ?? throw new InvalidOperationException("Could not locate selected-provider assertion helper.");
 
         TargetInvocationException exception = Assert.Throws<TargetInvocationException>(() =>
-            method.Invoke(null, [ExecutionProviderKind.TensorRTRtx, "dml"]));
+            method.Invoke(null, [ExecutionProviderKind.TensorRTRtx, "dml", false]));
         InvalidOperationException inner = Assert.IsType<InvalidOperationException>(exception.InnerException);
 
         Assert.Contains("requested provider 'tensorrt-rtx'", inner.Message, StringComparison.Ordinal);
         Assert.Contains("effective provider 'dml'", inner.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsureSelectedProviderMatchesRequested_accepts_policy_selected_provider()
+    {
+        MethodInfo method = typeof(OnnxExecutionProviderSmokeTester)
+            .GetMethod("EnsureSelectedProviderMatchesRequested", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Could not locate selected-provider assertion helper.");
+        method.Invoke(null, [ExecutionProviderKind.Qnn, "openvino-catalog", true]);
     }
 
     [Fact]

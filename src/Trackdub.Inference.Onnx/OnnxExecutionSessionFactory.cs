@@ -139,6 +139,7 @@ internal static partial class OnnxExecutionSessionFactory
         public IReadOnlyDictionary<string, string>? AdditionalTrtDecoderOptions { get; init; }
         public Func<string, SessionOptions, InferenceSession>? SessionFactory { get; init; }
         public bool AllowTrtInitFallback { get; init; } = true;
+        public bool HasExplicitProviderPreference { get; init; }
     }
 
     /// <summary>The four LatentSync diffusion graphs, in bundle order.</summary>
@@ -256,11 +257,12 @@ internal static partial class OnnxExecutionSessionFactory
 
     private static async Task<BootstrapContext> BootstrapForProviderAsync(
         ExecutionProviderKind provider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool hasExplicitProviderPreference = false)
     {
         var bootstrapResult = await BootstrapTrackedAsync(provider, allowDownloads: true, cancellationToken)
             .ConfigureAwait(false);
-        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken, hasExplicitProviderPreference)
             .ConfigureAwait(false);
         return new BootstrapContext(bootstrapResult, devicePolicy, ProviderNames.FormatProviderLabel(provider));
     }
@@ -802,11 +804,12 @@ internal static partial class OnnxExecutionSessionFactory
     internal static async Task<SessionOptionsFactoryBundle> CreateSessionOptionsFactoryAsync(
         ExecutionProviderKind requestedProvider,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? additionalTrtOptions = null)
+        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
+        bool hasExplicitProviderPreference = false)
     {
         var bootstrapResult = await BootstrapTrackedAsync(requestedProvider, allowDownloads: true, cancellationToken)
             .ConfigureAwait(false);
-        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken, hasExplicitProviderPreference)
             .ConfigureAwait(false);
         ExecutionProviderKind sessionProvider = ResolveSessionOptionsProvider(
             requestedProvider,
@@ -903,7 +906,17 @@ internal static partial class OnnxExecutionSessionFactory
 
         // Always probe GetEpDeviceForInputs for GPU / catalog routes so TRT sessions that
         // assigned zero nodes (or fell through) report DirectML/CPU honestly.
-        if (usedCatalogDevicePolicy || ShouldProbeEffectiveEpDevices(optionsSelectedProvider))
+        if (usedCatalogDevicePolicy)
+        {
+            IReadOnlyList<OrtEpDevice> devices = GetEpDevicesForInputs(session);
+            if (!devices.Any(device => TryMapCatalogEpNameToExecutionProviderKind(device.EpName, out _)))
+            {
+                throw new InvalidOperationException("The session's actual execution provider could not be established.");
+            }
+            return ResolveBestCatalogProvider(devices);
+        }
+
+        if (ShouldProbeEffectiveEpDevices(optionsSelectedProvider))
         {
             return ResolveCatalogEffectiveProviderFromSession(session);
         }
@@ -1217,9 +1230,7 @@ internal static partial class OnnxExecutionSessionFactory
     }
 
     /// <summary>
-    /// Reports the truth about whether a requested extended Windows ML device policy
-    /// (<see cref="WindowsMlExecutionDevicePolicy.DefaultRender"/> /
-    /// <see cref="WindowsMlExecutionDevicePolicy.MinPower"/>) actually took effect on the
+    /// Reports when a requested Windows ML device policy did not take effect on the
     /// session. <see cref="WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded"/> silently skips
     /// <c>SetEpSelectionPolicy</c> when the loaded ORT managed binding lacks the required enum
     /// members, so callers must not report the policy as active without checking
@@ -1229,16 +1240,18 @@ internal static partial class OnnxExecutionSessionFactory
     private static string? BuildDevicePolicyFallbackReason(
         WindowsMlExecutionDevicePolicy devicePolicy,
         bool devicePolicyApplied) =>
-        !devicePolicyApplied &&
-        devicePolicy is WindowsMlExecutionDevicePolicy.DefaultRender or WindowsMlExecutionDevicePolicy.MinPower
+        !devicePolicyApplied && devicePolicy != WindowsMlExecutionDevicePolicy.Explicit
             ? $"Requested Windows ML device policy '{WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)}' " +
-              "was not applied: the loaded ONNX Runtime managed binding does not expose the required " +
-              "extended ExecutionProviderDevicePolicy members (DEFAULT_RENDER/MIN_POWER); the session " +
-              "falls back to Explicit EP selection instead."
+              "was not applied by the loaded runtime; the session falls back to explicit provider selection."
             : null;
 
-    private static async Task<WindowsMlExecutionDevicePolicy> ResolveDevicePolicyAsync(CancellationToken cancellationToken)
+    internal static async Task<WindowsMlExecutionDevicePolicy> ResolveDevicePolicyAsync(CancellationToken cancellationToken, bool hasExplicitProviderPreference = false)
     {
+        if (hasExplicitProviderPreference)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return WindowsMlExecutionDevicePolicy.Explicit;
+        }
         try
         {
             return await _devicePolicyProvider.GetPolicyAsync(cancellationToken).ConfigureAwait(false);
@@ -1251,6 +1264,17 @@ internal static partial class OnnxExecutionSessionFactory
         {
             return WindowsMlExecutionDevicePolicy.Explicit;
         }
+    }
+
+    internal static async Task<bool> CanPolicySelectProviderAsync(ExecutionProviderKind provider, bool hasExplicitProviderPreference, CancellationToken cancellationToken)
+    {
+        WindowsMlExecutionDevicePolicy policy = await ResolveDevicePolicyAsync(cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
+        if (!ProviderNames.ShouldUseCatalogDevicePolicy(policy, provider))
+        {
+            return false;
+        }
+        using SessionOptions options = CreateBaseSessionOptions(policy, out bool applied);
+        return applied;
     }
 
     private sealed class NullWindowsMlEpDevicePolicyProvider : IWindowsMlEpDevicePolicyProvider

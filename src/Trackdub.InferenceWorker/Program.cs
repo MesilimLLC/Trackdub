@@ -3,7 +3,9 @@ using Microsoft.ML.OnnxRuntime;
 using Trackdub.Contracts.Pipeline;
 using Trackdub.Inference.Onnx;
 using Trackdub.Inference.Onnx.Kokoro;
+using Trackdub.Inference.Onnx.Phi;
 using Trackdub.Inference.Onnx.Runtime.Planning;
+using Trackdub.Inference.Onnx.Runtime;
 using Trackdub.Inference.Onnx.Worker;
 using Trackdub.Inference.Runtime.Planning;
 
@@ -11,6 +13,10 @@ using Trackdub.Inference.Runtime.Planning;
 // diagnostics go to standard error, which the application keeps as the crash tail.
 Stream input = Console.OpenStandardInput();
 Stream output = Console.OpenStandardOutput();
+
+// Bind the worker's pinned stock ORT before the first managed ORT call. The dependency
+// graph also contains Windows ML assets, so default native probing can select those.
+GenAiNativeRuntimeSelection.EnsureOrtLoaded(requireVerified: true);
 
 // Opt-in EcoQoS (MS efficiency guidance, CPU workloads): the worker is a background helper
 // process, so operators may prefer efficiency-oriented CPU scheduling for it. The variable is
@@ -49,24 +55,31 @@ async Task RespondAsync(WorkerMessage message)
     }
 }
 
+async Task<WorkerMessage> CreateResponseAsync(WorkerMessage request, CancellationToken cancellationToken) =>
+    request.Kind switch
+    {
+        InferenceWorkerProtocol.Hello => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
+            InferenceWorkerProtocol.ToPayload(DescribeWorker())),
+        InferenceWorkerProtocol.TtsSynthesize => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
+            InferenceWorkerProtocol.ToPayload(await kokoroHost.SynthesizeAsync(
+                InferenceWorkerProtocol.FromPayload<WorkerTtsRequest>(request.Payload),
+                cancellationToken).ConfigureAwait(false))),
+        InferenceWorkerProtocol.TtsWarm => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
+            InferenceWorkerProtocol.ToPayload(await kokoroHost.WarmAsync(
+                InferenceWorkerProtocol.FromPayload<WorkerWarmRequest>(request.Payload).Plan,
+                cancellationToken).ConfigureAwait(false))),
+        InferenceWorkerProtocol.Translation => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
+            InferenceWorkerProtocol.ToPayload(await TranslateAsync(
+                InferenceWorkerProtocol.FromPayload<WorkerTranslationRequest>(request.Payload),
+                cancellationToken).ConfigureAwait(false))),
+        _ => throw new NotSupportedException($"Unknown inference worker request '{request.Kind}'."),
+    };
+
 async Task HandleAsync(WorkerMessage request, CancellationToken cancellationToken)
 {
     try
     {
-        WorkerMessage response = request.Kind switch
-        {
-            InferenceWorkerProtocol.Hello => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
-                InferenceWorkerProtocol.ToPayload(DescribeWorker())),
-            InferenceWorkerProtocol.TtsSynthesize => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
-                InferenceWorkerProtocol.ToPayload(await kokoroHost.SynthesizeAsync(
-                    InferenceWorkerProtocol.FromPayload<WorkerTtsRequest>(request.Payload),
-                    cancellationToken).ConfigureAwait(false))),
-            InferenceWorkerProtocol.TtsWarm => new WorkerMessage(request.Id, InferenceWorkerProtocol.Result,
-                InferenceWorkerProtocol.ToPayload(await kokoroHost.WarmAsync(
-                    InferenceWorkerProtocol.FromPayload<WorkerWarmRequest>(request.Payload).Plan,
-                    cancellationToken).ConfigureAwait(false))),
-            _ => throw new NotSupportedException($"Unknown inference worker request '{request.Kind}'."),
-        };
+        WorkerMessage response = await CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);
         await RespondAsync(response).ConfigureAwait(false);
     }
     catch (Exception ex)
@@ -84,6 +97,26 @@ async Task HandleAsync(WorkerMessage request, CancellationToken cancellationToke
         }
     }
 }
+
+static async Task<WorkerTranslationResult> TranslateAsync(WorkerTranslationRequest request, CancellationToken cancellationToken)
+{
+    if (!SupportsTranslationRequest(request))
+    {
+        throw new NotSupportedException("The inference worker supports CUDA translation for qwen-genai.");
+    }
+
+    var engine = new PhiGenAiTranslationEngine(
+        new SuppliedTranslationPlan(request.Plan.ToStageRuntimePlan()),
+        BenchmarkModelPathResolver.CreateDefault(),
+        engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName);
+    var segments = await engine.TranslateAsync(request.Request, cancellationToken).ConfigureAwait(false);
+    return new WorkerTranslationResult(segments, engine.LastExecutionSummary);
+}
+
+static bool SupportsTranslationRequest(WorkerTranslationRequest request) =>
+    string.Equals(request.Plan.EngineFamily, PhiGenAiTranslationEngine.QwenEngineFamilyName, StringComparison.OrdinalIgnoreCase)
+    && request.Plan.Stage == Trackdub.Domain.RuntimeStage.Translation
+    && request.Plan.ExecutionProvider == Trackdub.Domain.ExecutionProviderKind.Cuda;
 
 static WorkerHelloResult DescribeWorker()
 {
@@ -176,4 +209,13 @@ internal sealed class PlanSuppliedByApplication : IRuntimePlanner
 {
     public Task<StageRuntimePlan> PlanAsync(StageRuntimePlanningRequest request, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException("The inference worker only runs plans supplied by the application.");
+}
+
+internal sealed class SuppliedTranslationPlan(StageRuntimePlan plan) : IRuntimePlanner
+{
+    public Task<StageRuntimePlan> PlanAsync(StageRuntimePlanningRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(plan);
+    }
 }

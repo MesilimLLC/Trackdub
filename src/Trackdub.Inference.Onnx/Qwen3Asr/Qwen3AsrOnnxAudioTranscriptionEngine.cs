@@ -367,6 +367,7 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
             {
                 EngineFamily = EngineFamilyName,
                 Provider = plan.ExecutionProvider!.Value,
+                HasExplicitProviderPreference = plan.HasExplicitProviderPreference,
                 CancellationToken = cancellationToken,
                 AdditionalTrtEncoderOptions = TrtEncoderOptions,
             },
@@ -378,7 +379,7 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
     private static StageRuntimeExecutionSummary CreatePlannedOnlySummary(StageRuntimePlan plan, string bootstrapDetail) =>
         new(
             "auto",
-            plan.ExecutionProvider!.Value.ToString().ToLowerInvariant(),
+            "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,

@@ -15,6 +15,14 @@ public sealed class TranslationLanguageRouter(
     IStudioSettingsService? settingsService = null)
     : ITranslationLanguageRouter
 {
+    private static readonly HashSet<string> GenAiPivotEngineFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "phi-genai",
+        "qwen-genai",
+        "gemma-genai",
+        "qwen-instruct"
+    };
+
     private readonly BundledModelManifestRegistry manifestRegistry = manifestRegistry ?? throw new ArgumentNullException(nameof(manifestRegistry));
     private readonly IModelCacheInventory modelCacheInventory = modelCacheInventory ?? throw new ArgumentNullException(nameof(modelCacheInventory));
 
@@ -23,6 +31,10 @@ public sealed class TranslationLanguageRouter(
     // Optional only so existing test doubles that build the router without DI continue to compile;
     // the production composition root always supplies a planner.
     private readonly IRuntimePlanner? runtimePlanner = runtimePlanner;
+
+    public static bool IsGenAiPivotEngineFamily(string? engineFamily) =>
+        !string.IsNullOrWhiteSpace(engineFamily) &&
+        GenAiPivotEngineFamilies.Contains(engineFamily.Trim());
 
     public async Task<IReadOnlyList<TranslationTargetLanguageOption>> GetSupportedTargetLanguagesAsync(
         string sourceLanguage,
@@ -244,9 +256,9 @@ public sealed class TranslationLanguageRouter(
                 ExpectedDownloadBytes: downloadable.ExpectedDownloadBytes);
 
         if (!string.IsNullOrWhiteSpace(preferredModelAlias))
-            return new TranslationRouteSelection(normalizedSourceLanguage, normalizedTargetLanguage,
-                TranslationRoutingKind.Unavailable, false, "none", "Unavailable",
-                UnavailableReason: $"Selected translation model '{preferredModelAlias}' is not available for this language pair.");
+        {
+            return CreateUnavailablePreferredRoute(normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias);
+        }
 
         if (TryResolveMadladPivotRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, out TranslationRouteSelection? madladRoute))
         {
@@ -310,14 +322,59 @@ public sealed class TranslationLanguageRouter(
                 return true;
             }
 
-            if (string.Equals(entry.EngineFamily, "phi-genai", StringComparison.OrdinalIgnoreCase) &&
+            if (IsGenAiPivotEngineFamily(entry.EngineFamily) &&
                 TryResolveGenAiPivotRoute(context, sourceLanguage, targetLanguage, entry, out route))
             {
                 return true;
             }
         }
 
-        return false;
+        return TryResolvePreferredGenAiDownload(context, sourceLanguage, targetLanguage, preferredModelAlias, out route);
+    }
+
+    private static bool TryResolvePreferredGenAiDownload(
+        TranslationRoutingContext context,
+        string sourceLanguage,
+        string targetLanguage,
+        string preferredModelAlias,
+        out TranslationRouteSelection? route)
+    {
+        route = null;
+        if (!context.CanDownload)
+        {
+            return false;
+        }
+
+        BundledModelManifestEntry? entry = GetPivotEntriesForPair(context, sourceLanguage, targetLanguage)
+            .FirstOrDefault(candidate => HasAlias(candidate, preferredModelAlias) && IsGenAiPivotEngineFamily(candidate.EngineFamily) &&
+                candidate.CommercialAllowed && candidate.CommercialUseVerified &&
+                (candidate.DownloadFiles.Count > 0 || candidate.Variants.Any(variant => variant.DownloadFiles.Count > 0)) &&
+                !context.CacheIndex.ContainsKey(candidate.ModelId));
+        if (entry is null)
+        {
+            return false;
+        }
+
+        route = new TranslationRouteSelection(sourceLanguage, targetLanguage,
+            TranslationRoutingKind.Pivot, false, entry.EngineFamily, "Download required",
+            ModelId: entry.ModelId, PreferredModelAlias: entry.Aliases.FirstOrDefault(),
+            EngineFamily: entry.EngineFamily, PreparationStatus: TranslationPreparationStatus.DownloadRequired,
+            ExpectedDownloadBytes: entry.ExpectedDownloadBytes);
+        return true;
+    }
+
+    private static TranslationRouteSelection CreateUnavailablePreferredRoute(
+        string sourceLanguage,
+        string targetLanguage,
+        string preferredModelAlias)
+    {
+        bool gemmaRuntimeUnavailable = preferredModelAlias.Equals("gemma-4-e4b-translation", StringComparison.OrdinalIgnoreCase);
+        string reason = gemmaRuntimeUnavailable
+            ? "Gemma 4 E4B translation is not available until its runtime and memory requirements have been validated."
+            : $"Selected translation model '{preferredModelAlias}' is not available for this language pair.";
+        return new TranslationRouteSelection(sourceLanguage, targetLanguage,
+            TranslationRoutingKind.Unavailable, false, gemmaRuntimeUnavailable ? "gemma-genai" : "none", "Unavailable",
+            UnavailableReason: reason);
     }
 
     private bool TryResolveMadladPivotRoute(
@@ -471,8 +528,8 @@ public sealed class TranslationLanguageRouter(
         out TranslationRouteSelection? route)
     {
         route = null;
-        foreach (BundledModelManifestEntry entry in context.PivotEntries
-            .Where(static e => string.Equals(e.EngineFamily, "phi-genai", StringComparison.OrdinalIgnoreCase)))
+        foreach (BundledModelManifestEntry entry in GetPivotEntriesForPair(context, sourceLanguage, targetLanguage)
+            .Where(static e => IsGenAiPivotEngineFamily(e.EngineFamily)))
         {
             if (TryResolveGenAiPivotRoute(context, sourceLanguage, targetLanguage, entry, out route))
             {
@@ -496,7 +553,7 @@ public sealed class TranslationLanguageRouter(
             return false;
         }
 
-        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry))
+        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry, includeVariants: true))
         {
             string? modelRootPath = Path.GetDirectoryName(entryPath);
             if (modelRootPath is null || !HasGenAiSupportingFiles(modelRootPath))
@@ -566,20 +623,27 @@ public sealed class TranslationLanguageRouter(
 
     private static IEnumerable<string> EnumerateResolvedEntryPaths(
         IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex,
-        BundledModelManifestEntry entry)
+        BundledModelManifestEntry entry,
+        bool includeVariants = false)
     {
         if (!cacheIndex.TryGetValue(entry.ModelId, out IReadOnlyList<LocalModelCacheRecord>? records))
         {
             yield break;
         }
 
-        string relativeEntryPath = Path.GetRelativePath(entry.RootDirectory, entry.DefaultBenchmarkEntryPath);
         foreach (LocalModelCacheRecord record in records)
         {
-            string resolvedPath = Path.GetFullPath(Path.Join(record.RootPath, relativeEntryPath));
-            if (File.Exists(resolvedPath))
+            IEnumerable<string> paths = includeVariants
+                ? entry.Variants.Select(variant => variant.EntryPath).Prepend(entry.DefaultBenchmarkEntryPath)
+                : [entry.DefaultBenchmarkEntryPath];
+            foreach (string candidatePath in paths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                yield return resolvedPath;
+                string relativeEntryPath = Path.GetRelativePath(entry.RootDirectory, candidatePath);
+                string resolvedPath = Path.GetFullPath(Path.Join(record.RootPath, relativeEntryPath));
+                if (File.Exists(resolvedPath))
+                {
+                    yield return resolvedPath;
+                }
             }
         }
     }
@@ -777,7 +841,7 @@ public sealed class TranslationLanguageRouter(
         entry.EngineFamily.ToLowerInvariant() switch
         {
             "madlad" => "MADLAD-400 pivot",
-            "phi-genai" => "Multilingual pivot",
+            var family when IsGenAiPivotEngineFamily(family) => "Multilingual pivot",
             _ => "Pivot translation"
         };
 

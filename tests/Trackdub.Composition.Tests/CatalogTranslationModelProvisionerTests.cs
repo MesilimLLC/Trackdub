@@ -10,6 +10,23 @@ namespace Trackdub.Composition.Tests;
 
 public sealed class CatalogTranslationModelProvisionerTests
 {
+    [Fact]
+    public async Task ExplicitQwenSelectionDownloadsTheRegisteredModel()
+    {
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var downloader = new Downloader();
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader,
+            new TrackdubStoragePaths(Path.GetTempPath()));
+
+        string? alias = await service.EnsureAsync("en", "fr", "qwen3-4b-translation", CancellationToken.None,
+            preferredModelVariantAlias: "cuda-int4");
+
+        Assert.Equal("qwen3-4b-translation", alias);
+        Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
+        Assert.Equal("cuda-int4", downloader.Variant);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -81,13 +98,18 @@ public sealed class CatalogTranslationModelProvisionerTests
     private sealed class Downloader : IModelDownloadOrchestrator
     {
         public string? Selected { get; private set; }
+        public string? Variant { get; private set; }
         public IObservable<ModelStateChange> StateChanges => throw new NotSupportedException();
         public Task<ModelDownloadResult> DownloadAsync(string modelId, IProgress<ModelDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
         {
             Selected = modelId;
             return Task.FromResult(new ModelDownloadResult(modelId, true, ModelCacheState.Installed, null));
         }
-        public Task<ModelDownloadResult> DownloadAsync(string modelId, string? variantAlias, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken = default) => DownloadAsync(modelId, progress, cancellationToken);
+        public Task<ModelDownloadResult> DownloadAsync(string modelId, string? variantAlias, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken = default)
+        {
+            Variant = variantAlias;
+            return DownloadAsync(modelId, progress, cancellationToken);
+        }
         public Task<ModelDownloadResult> RepairAsync(string modelId, IProgress<ModelDownloadProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> UninstallAsync(string modelId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }

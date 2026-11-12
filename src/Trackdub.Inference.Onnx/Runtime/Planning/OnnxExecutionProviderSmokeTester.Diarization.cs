@@ -24,19 +24,18 @@ namespace Trackdub.Inference.Onnx.Runtime.Planning;
 public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTester
 {
     private static async Task SmokeTestDiarizationAsync(
-        string modelPath,
-        ExecutionProviderKind provider,
+        ExecutionProviderSmokeTestRequest request,
         CancellationToken cancellationToken)
     {
         // Same family + TRT profiles as SortFormerDiarizationEngine so the smoke run warms
         // the session the diarization stage will lease.
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SortFormerDiarizationEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtOptions = SortFormerDiarizationEngine.TrtOptions, AllowTrtInitFallback = true }, modelPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SortFormerDiarizationEngine.EngineFamilyName, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtOptions = SortFormerDiarizationEngine.TrtOptions, AllowTrtInitFallback = true }, request.EntryPath)
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         using var inputs = CreateDiarizationInputs(sessionLease.Session);
-        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(inputs.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: provider);
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(inputs.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: request.ExecutionProvider);
     }
 
     private static InputSet CreateDiarizationInputs(InferenceSession session)

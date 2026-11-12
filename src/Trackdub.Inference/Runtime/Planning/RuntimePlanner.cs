@@ -55,6 +55,15 @@ public sealed class RuntimePlanner : IRuntimePlanner
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        StageRuntimePlan plan = await PlanCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        return plan with { HasExplicitProviderPreference = request.PreferredExecutionProvider.HasValue };
+    }
+
+    private async Task<StageRuntimePlan> PlanCoreAsync(
+        StageRuntimePlanningRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
 
         // Cold-start attribution: planning runs per stage (often with plan-cache hits) and is
         // a named phase of the pipeline-start overhead this run evidence exists to explain.
@@ -352,6 +361,7 @@ public sealed class RuntimePlanner : IRuntimePlanner
         DeviceExclusionSet? effectiveExclusions,
         CancellationToken cancellationToken)
     {
+        StageRuntimePlan? blockedPlan = null;
         foreach (RankedManifestEntry candidate in planEntries)
         {
             StageRuntimePlan? readyPlan = await planFactory.TryCreateReadyPlanAsync(
@@ -371,6 +381,11 @@ public sealed class RuntimePlanner : IRuntimePlanner
                 devices,
                 effectiveExclusions).ConfigureAwait(false);
 
+            if (readyPlan?.Status == StageRuntimePlanStatus.Blocked)
+            {
+                blockedPlan ??= readyPlan;
+                continue;
+            }
             if (readyPlan is not null)
             {
                 return readyPlan;
@@ -394,13 +409,18 @@ public sealed class RuntimePlanner : IRuntimePlanner
                 devices,
                 effectiveExclusions);
 
+            if (downloadPlan?.Status == StageRuntimePlanStatus.Blocked)
+            {
+                blockedPlan ??= downloadPlan;
+                continue;
+            }
             if (downloadPlan is not null)
             {
                 return downloadPlan;
             }
         }
 
-        return null;
+        return blockedPlan;
     }
 
     private static StageRuntimePlan AppendPreferredVariantFallbackWarning(

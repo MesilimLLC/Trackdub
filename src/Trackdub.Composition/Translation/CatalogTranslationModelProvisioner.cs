@@ -56,7 +56,7 @@ public sealed class CatalogTranslationModelProvisioner(
             .Select(group => CreateEntry(group, snapshot.PolicyVersion)).OfType<BundledModelManifestEntry>());
 
     public async Task<string?> EnsureAsync(string sourceLanguage, string targetLanguage, string? preferredModelAlias, CancellationToken cancellationToken,
-        IProgress<string>? preparationProgress = null)
+        IProgress<string>? preparationProgress = null, string? preferredModelVariantAlias = null)
     {
         if (string.IsNullOrWhiteSpace(sourceLanguage) || sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase) ||
             sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) return preferredModelAlias;
@@ -91,15 +91,20 @@ public sealed class CatalogTranslationModelProvisioner(
             pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) && pair.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) ||
             (Covers(selected.LanguageCoverage.SourceLanguages, sourceLanguage) && Covers(selected.LanguageCoverage.TargetLanguages, targetLanguage));
         if (!coversPair) return preferredModelAlias;
-        // Only catalog OPUS weights are fetched here; the default-variant download below must not replace an explicitly selected variant.
-        if (selected.EngineFamily != "opus-mt") return preferredModelAlias;
+        // Explicit Qwen selections may request a specific CPU or CUDA variant.
+        if (!CanProvisionSelectedModel(selected, explicitSelection))
+            return preferredModelAlias;
         preparationProgress?.Report($"Preparing {selected.ModelId}");
-        var result = await downloader.DownloadAsync(selected.ModelId,
+        var result = await downloader.DownloadAsync(selected.ModelId, preferredModelVariantAlias,
             preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
             cancellationToken).ConfigureAwait(false);
         if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
         return selected.Aliases.FirstOrDefault() ?? selected.ModelId;
     }
+
+    private static bool CanProvisionSelectedModel(BundledModelManifestEntry selected, bool explicitSelection) =>
+        selected.EngineFamily == "opus-mt" ||
+        (explicitSelection && selected.EngineFamily == "qwen-genai");
 
     private static bool Covers(IReadOnlyList<string> languages, string language) =>
         languages.Any(candidate => candidate.Equals(language, StringComparison.OrdinalIgnoreCase) || candidate is "multi" or "any" or "*");

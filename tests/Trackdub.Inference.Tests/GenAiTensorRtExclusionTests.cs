@@ -20,6 +20,9 @@ public sealed class GenAiTensorRtExclusionTests
         {
             yield return [RuntimeStage.Asr, "whisper-genai"];
             yield return [RuntimeStage.Translation, "phi-genai"];
+            yield return [RuntimeStage.Translation, "qwen-genai"];
+            yield return [RuntimeStage.Translation, "gemma-genai"];
+            yield return [RuntimeStage.Translation, "qwen-instruct"];
             yield return [RuntimeStage.TextRefinement, "qwen-instruct"];
             yield return [RuntimeStage.TextRefinement, "phi-genai"];
         }
@@ -49,6 +52,9 @@ public sealed class GenAiTensorRtExclusionTests
     [Theory]
     [InlineData(RuntimeStage.Asr, "whisper-genai")]
     [InlineData(RuntimeStage.Translation, "phi-genai")]
+    [InlineData(RuntimeStage.Translation, "qwen-genai")]
+    [InlineData(RuntimeStage.Translation, "gemma-genai")]
+    [InlineData(RuntimeStage.Translation, "qwen-instruct")]
     [InlineData(RuntimeStage.TextRefinement, "qwen-instruct")]
     public async Task SmokeTest_GenAiFamilyOnTensorRtRtx_FailsWithoutTouchingNativeCode(
         RuntimeStage stage,

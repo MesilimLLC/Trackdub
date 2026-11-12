@@ -88,7 +88,8 @@ internal sealed class CosyVoiceSessionPins : IDisposable
         CosyVoiceModelFiles modelFiles,
         ExecutionProviderKind provider,
         CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        bool allowTrtInitFallback = true,
+        bool hasExplicitProviderPreference = false)
     {
         string[] paths =
         [
@@ -127,6 +128,7 @@ internal sealed class CosyVoiceSessionPins : IDisposable
                         Provider = provider,
                         CancellationToken = cancellationToken,
                         AllowTrtInitFallback = allowTrtInitFallback,
+                        HasExplicitProviderPreference = hasExplicitProviderPreference,
                         AdditionalTrtOptions = trtOptions[i],
                     },
                     paths[i]).ConfigureAwait(false);

@@ -228,20 +228,22 @@ public sealed class RuntimeStageWarmupCoordinator(
         ExecutionProviderKind provider,
         CancellationToken cancellationToken)
     {
-        if (smokeVerdictStore is null
-            || hardwareProfileProvider is null
-            || plan.IsLocalOptimizedVariant
-            || string.IsNullOrWhiteSpace(plan.ModelRevisionHash))
+        ISmokeVerdictStore? verdictStore = smokeVerdictStore;
+        IHardwareProfileProvider? profileProvider = hardwareProfileProvider;
+        string? modelRevisionHash = plan.ModelRevisionHash;
+        // Catalog placement can change with the saved policy, which the persisted key lacks.
+        if (verdictStore is null || profileProvider is null || string.IsNullOrWhiteSpace(modelRevisionHash) ||
+            !ShouldRecordVerifiedVerdict(plan, provider))
         {
             return;
         }
 
         try
         {
-            HardwareProfile hardwareProfile = await hardwareProfileProvider
+            HardwareProfile hardwareProfile = await profileProvider
                 .GetCurrentAsync(cancellationToken).ConfigureAwait(false);
-            smokeVerdictStore.RecordVerified(new SmokeVerdictKey(
-                plan.ModelRevisionHash,
+            verdictStore.RecordVerified(new SmokeVerdictKey(
+                modelRevisionHash,
                 provider,
                 hardwareProfile.NvidiaGpuArchitecture,
                 hardwareProfile.GpuDriverVersion,
@@ -252,6 +254,26 @@ public sealed class RuntimeStageWarmupCoordinator(
         {
             // Best-effort persistence only (see summary).
         }
+    }
+
+    private static bool ShouldRecordVerifiedVerdict(
+        StageRuntimePlan plan,
+        ExecutionProviderKind provider)
+    {
+        if (plan.IsLocalOptimizedVariant)
+        {
+            return false;
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        return provider is not (
+            ExecutionProviderKind.Qnn or
+            ExecutionProviderKind.VitisAi or
+            ExecutionProviderKind.OpenVinoCatalog or
+            ExecutionProviderKind.Migraphx);
     }
     private Task<ExecutionProviderSmokeTestResult> SmokeAsync(
         StageRuntimePlan plan,
@@ -270,6 +292,7 @@ public sealed class RuntimeStageWarmupCoordinator(
                 plan.ModelRevisionHash)
             {
                 NonEvictingWarmup = true,
+                HasExplicitProviderPreference = plan.HasExplicitProviderPreference,
             },
             cancellationToken);
 

@@ -1082,7 +1082,9 @@ public sealed class OnnxExecutionSessionFactoryTests
     [Theory]
     [InlineData(WindowsMlExecutionDevicePolicy.DefaultRender, false)]
     [InlineData(WindowsMlExecutionDevicePolicy.MinPower, false)]
-    public void BuildDevicePolicyFallbackReason_reports_truthful_fallback_when_extended_policy_not_applied(
+    [InlineData(WindowsMlExecutionDevicePolicy.MaxPerformance, false)]
+    [InlineData(WindowsMlExecutionDevicePolicy.PreferNpu, false)]
+    public void BuildDevicePolicyFallbackReason_reports_truthful_fallback_when_policy_not_applied(
         WindowsMlExecutionDevicePolicy devicePolicy,
         bool devicePolicyApplied)
     {
@@ -1103,10 +1105,10 @@ public sealed class OnnxExecutionSessionFactoryTests
     [Theory]
     [InlineData(WindowsMlExecutionDevicePolicy.DefaultRender, true)]
     [InlineData(WindowsMlExecutionDevicePolicy.MinPower, true)]
-    [InlineData(WindowsMlExecutionDevicePolicy.MaxPerformance, false)]
-    [InlineData(WindowsMlExecutionDevicePolicy.PreferNpu, false)]
+    [InlineData(WindowsMlExecutionDevicePolicy.MaxPerformance, true)]
+    [InlineData(WindowsMlExecutionDevicePolicy.PreferNpu, true)]
     [InlineData(WindowsMlExecutionDevicePolicy.Explicit, false)]
-    public void BuildDevicePolicyFallbackReason_returns_null_when_policy_applied_or_not_extended(
+    public void BuildDevicePolicyFallbackReason_returns_null_when_policy_applied_or_explicit(
         WindowsMlExecutionDevicePolicy devicePolicy,
         bool devicePolicyApplied)
     {
@@ -1596,6 +1598,31 @@ public sealed class OnnxExecutionSessionFactoryTests
     ];
 
     [Fact]
+    public async Task ExplicitStagePreferenceOverridesSavedDevicePolicy()
+    {
+        OnnxExecutionSessionFactory.ResetForTests();
+        OnnxExecutionSessionFactory.Initialize(
+            new FixedSelectingBootstrapper(ExecutionProviderKind.Qnn),
+            new MutableDevicePolicyProvider { Policy = WindowsMlExecutionDevicePolicy.PreferNpu });
+        try
+        {
+            Assert.Equal(WindowsMlExecutionDevicePolicy.PreferNpu,
+                await OnnxExecutionSessionFactory.ResolveDevicePolicyAsync(CancellationToken.None));
+            Assert.Equal(WindowsMlExecutionDevicePolicy.Explicit,
+                await OnnxExecutionSessionFactory.ResolveDevicePolicyAsync(CancellationToken.None, true));
+#if WINDOWS
+            Assert.True(await OnnxExecutionSessionFactory.CanPolicySelectProviderAsync(ExecutionProviderKind.Qnn, false, CancellationToken.None));
+            Assert.False(await OnnxExecutionSessionFactory.CanPolicySelectProviderAsync(ExecutionProviderKind.Qnn, true, CancellationToken.None));
+            Assert.False(await OnnxExecutionSessionFactory.CanPolicySelectProviderAsync(ExecutionProviderKind.Cuda, false, CancellationToken.None));
+#endif
+        }
+        finally
+        {
+            OnnxExecutionSessionFactory.ResetForTests();
+        }
+    }
+
+    [Fact]
     public async Task CreatePooledLatentSyncAsync_does_not_reuse_sessions_when_only_device_policy_changes()
     {
         string directory = Path.Join(Path.GetTempPath(), "trackdub-latentsync-policy-" + Guid.NewGuid().ToString("N"));
@@ -1643,7 +1670,15 @@ public sealed class OnnxExecutionSessionFactoryTests
 
             // Catalog providers on Windows include the policy in the pool key. Elsewhere the
             // fingerprint stays default, so the same provider and model may reuse.
-            Assert.Equal(OperatingSystem.IsWindows() ? 8 : 4, creations);
+#if WINDOWS
+            const bool supportsCatalogPolicy = true;
+#else
+            const bool supportsCatalogPolicy = false;
+#endif
+            Assert.Equal(supportsCatalogPolicy ? 8 : 4, creations);
+
+            (await OnnxExecutionSessionFactory.CreatePooledLatentSyncAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "latentsync", Provider = ExecutionProviderKind.Migraphx, CancellationToken = CancellationToken.None, Pool = pool, SessionFactory = CreateSession, HasExplicitProviderPreference = true }, new OnnxExecutionSessionFactory.LatentSyncModelPaths(unet, vaeEncoder, vaeDecoder, whisperEncoder))).Dispose();
+            Assert.Equal(supportsCatalogPolicy ? 12 : 4, creations);
         }
         finally
         {

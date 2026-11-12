@@ -1,25 +1,41 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.ML.OnnxRuntimeGenAI;
 using Trackdub.Contracts;
+using Trackdub.Contracts.ApplicationContracts;
 using Trackdub.Contracts.Diagnostics;
 using Trackdub.Contracts.Pipeline;
 using Trackdub.Domain;
-using Trackdub.Inference.Onnx.Runtime.Routing;
-using Trackdub.Contracts.ApplicationContracts;
-using Trackdub.Inference.Onnx.Runtime.Planning;
 using Trackdub.Inference.Onnx.Pool;
 using Trackdub.Inference.Onnx.Runtime;
+using Trackdub.Inference.Onnx.Runtime.Planning;
+using Trackdub.Inference.Onnx.Runtime.Routing;
+using Trackdub.Inference.Onnx.Worker;
 using Trackdub.Inference.Runtime.Planning;
 
 namespace Trackdub.Inference.Onnx.Phi;
 
-public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
+public enum GenAiTranslationPromptFormat
+{
+    Phi,
+    Qwen3,
+    QwenChatMl,
+    Gemma4,
+    Gemma3
+}
+
+public sealed class PhiGenAiTranslationEngine(
+    IRuntimePlanner runtimePlanner,
     BenchmarkModelPathResolver modelPathResolver,
     IRuntimePlanningPreferences? runtimePlanningPreferences = null,
-    IApplicationLogger? applicationLogger = null)
+    IApplicationLogger? applicationLogger = null,
+    string engineFamily = PhiGenAiTranslationEngine.EngineFamilyName,
+    IInferenceWorkerClient? workerClient = null)
     : IStreamingTranslationEngineAdapter, IStageRuntimeExecutionReporter
 {
     public const string EngineFamilyName = "phi-genai";
+    public const string QwenEngineFamilyName = "qwen-genai";
+    public const string GemmaEngineFamilyName = "gemma-genai";
 
     /// <summary>Cold-start evidence source label for the GenAI token-generation choke point.</summary>
     internal const string GenerateSource = "genai:phi";
@@ -29,16 +45,62 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
     private const int MaxNewTokens = 512;
     private const double RepetitionPenalty = 1.1;
 
+    private static readonly (string OpenTag, string CloseTag)[] ThinkingBlockTags =
+    [
+        ("<think>", "</think>"),
+        ("<|thought>", "<thought|>"),
+        ("<|channel>thought\n", "<channel|>")
+    ];
+
     private static readonly string[] EosTokenSuffixes =
-        ["<|end|>", "<|endoftext|>", "<|assistant|>", "<|im_end|>"];
+    [
+        "<|end|>",
+        "<|endoftext|>",
+        "<|assistant|>",
+        "<|im_end|>",
+        "<end_of_turn>",
+        "<turn|>",
+        "<eos>"
+    ];
+
+    private static readonly IReadOnlyDictionary<string, string> TargetLanguageNames =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ar"] = "Arabic",
+            ["da"] = "Danish",
+            ["de"] = "German",
+            ["el"] = "Greek",
+            ["en"] = "English",
+            ["es"] = "Spanish",
+            ["fi"] = "Finnish",
+            ["fr"] = "French",
+            ["he"] = "Hebrew",
+            ["hi"] = "Hindi",
+            ["it"] = "Italian",
+            ["ja"] = "Japanese",
+            ["ko"] = "Korean",
+            ["ms"] = "Malay",
+            ["nl"] = "Dutch",
+            ["no"] = "Norwegian",
+            ["pl"] = "Polish",
+            ["pt"] = "Portuguese",
+            ["ru"] = "Russian",
+            ["sv"] = "Swedish",
+            ["sw"] = "Swahili",
+            ["tr"] = "Turkish",
+            ["zh"] = "Chinese",
+            ["zh-hans"] = "Chinese",
+            ["zh-hant"] = "Chinese"
+        };
 
     private readonly IRuntimePlanner runtimePlanner = runtimePlanner ?? throw new ArgumentNullException(nameof(runtimePlanner));
     private readonly BenchmarkModelPathResolver modelPathResolver = modelPathResolver ?? throw new ArgumentNullException(nameof(modelPathResolver));
     private readonly IApplicationLogger? applicationLogger = applicationLogger;
+    private readonly string engineFamily = string.IsNullOrWhiteSpace(engineFamily) ? EngineFamilyName : engineFamily.Trim();
 
     public StageRuntimeExecutionSummary? LastExecutionSummary { get; private set; }
 
-    public string EngineFamily => EngineFamilyName;
+    public string EngineFamily => engineFamily;
 
     public async Task<IReadOnlyList<TranslatedTextSegment>> TranslateAsync(
         TranslationRequest request,
@@ -47,26 +109,20 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Segments);
 
-        StageRuntimePlan plan = await runtimePlanner.PlanAsync(
-            await StageRuntimePlanningRequestFactory.ApplyPreferredModelTierAsync(new StageRuntimePlanningRequest(
-                RuntimeStage.Translation,
-                PreferredModelAlias: request.PreferredModelAlias,
-                SourceLanguage: request.SourceLanguage,
-                TargetLanguage: request.TargetLanguage,
-                PreferredExecutionProvider: ExecutionProviderRequest.ParsePreferredExecutionProvider(
-                    request.PreferredExecutionProvider,
-                    request.RequirePreferredExecutionProvider),
-                RequirePreferredExecutionProvider: request.RequirePreferredExecutionProvider,
-                PreferredModelVariantAlias: request.PreferredModelVariantAlias),
-            runtimePlanningPreferences,
-            cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+        StageRuntimePlan plan = await PlanTranslationAsync(request, cancellationToken).ConfigureAwait(false);
         EnsurePlanReady(plan);
 
         if (request.Segments.Count == 0)
         {
-            LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.");
+            LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.", ran: false);
             return [];
+        }
+
+        if (UseCudaWorker(plan))
+        {
+            WorkerTranslationResult result = await workerClient!.TranslateAsync(request, plan, cancellationToken).ConfigureAwait(false);
+            LastExecutionSummary = result.ExecutionSummary;
+            return result.Segments;
         }
 
         string modelRootPath = PlannedRuntimeModelResolver.ResolveModelRootPath(plan, modelPathResolver);
@@ -83,13 +139,18 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
         Model model = modelLease.Model;
         Tokenizer tokenizer = modelLease.Tokenizer;
 
-        string targetLanguageName = ResolveTargetLanguageName(request.TargetLanguage);
         var translatedSegments = new List<TranslatedTextSegment>(request.Segments.Count);
 
         foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string translatedText = TranslateSegment(model, tokenizer, segment.Text, targetLanguageName, cancellationToken);
+            TranslationPromptContext promptContext = CreatePromptContext(request, plan, segment);
+            string translatedText = TranslateSegment(
+                model,
+                tokenizer,
+                segment.Text,
+                promptContext,
+                cancellationToken);
             translatedSegments.Add(new TranslatedTextSegment(
                 segment.Index,
                 segment.StartSeconds,
@@ -97,7 +158,7 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
                 translatedText));
         }
 
-        LastExecutionSummary = CreateExecutionSummary(plan, "ONNX Runtime GenAI Phi text generation.");
+        LastExecutionSummary = CreateExecutionSummary(plan, $"ONNX Runtime GenAI {engineFamily} text generation.");
         return translatedSegments;
     }
 
@@ -116,25 +177,29 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
         ArgumentNullException.ThrowIfNull(request.Segments);
         PipelineStreamItemFactory.ValidateTranslationStreamContext(runId, snapshotId, sourceRevisionId);
 
-        StageRuntimePlan plan = await runtimePlanner.PlanAsync(
-            await StageRuntimePlanningRequestFactory.ApplyPreferredModelTierAsync(new StageRuntimePlanningRequest(
-                RuntimeStage.Translation,
-                PreferredModelAlias: request.PreferredModelAlias,
-                SourceLanguage: request.SourceLanguage,
-                TargetLanguage: request.TargetLanguage,
-                PreferredExecutionProvider: ExecutionProviderRequest.ParsePreferredExecutionProvider(
-                    request.PreferredExecutionProvider,
-                    request.RequirePreferredExecutionProvider),
-                RequirePreferredExecutionProvider: request.RequirePreferredExecutionProvider,
-                PreferredModelVariantAlias: request.PreferredModelVariantAlias),
-            runtimePlanningPreferences,
-            cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+        StageRuntimePlan plan = await PlanTranslationAsync(request, cancellationToken).ConfigureAwait(false);
         EnsurePlanReady(plan);
 
         if (request.Segments.Count == 0)
         {
-            LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.");
+            LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.", ran: false);
+            yield break;
+        }
+
+        if (UseCudaWorker(plan))
+        {
+            long workerSequence = 0;
+            foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
+            {
+                WorkerTranslationResult result = await workerClient!.TranslateAsync(
+                    request with { Segments = [segment] }, plan, cancellationToken).ConfigureAwait(false);
+                LastExecutionSummary = result.ExecutionSummary;
+                foreach (TranslatedTextSegment translated in result.Segments)
+                {
+                    yield return PipelineStreamItemFactory.CreateTranslation(
+                        translated, runId, snapshotId, sourceRevisionId, workerSequence++);
+                }
+            }
             yield break;
         }
 
@@ -145,12 +210,12 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
         GenAiModelKey modelKey = await GenAiModelKey.CreateAsync(
             modelRootPath, plan.ExecutionProvider!.Value, plan.ModelId, plan.Variant, plan.DeviceIndex,
             plan.ModelRevisionHash, cancellationToken).ConfigureAwait(false);
-        string targetLanguageName = ResolveTargetLanguageName(request.TargetLanguage);
         long sequence = 0;
 
         foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            TranslationPromptContext promptContext = CreatePromptContext(request, plan, segment);
 
             TranslatedTextSegment translated;
             using (GenAiModelLease modelLease = await GenAiModelPool.Shared
@@ -161,22 +226,64 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
                 Model model = modelLease.Model;
                 Tokenizer tokenizer = modelLease.Tokenizer;
                 string translatedText = TranslateSegment(
-                    model, tokenizer, segment.Text, targetLanguageName, cancellationToken);
+                    model,
+                    tokenizer,
+                    segment.Text,
+                    promptContext,
+                    cancellationToken);
                 translated = new TranslatedTextSegment(
-                    segment.Index, segment.StartSeconds, segment.EndSeconds, translatedText);
+                    segment.Index,
+                    segment.StartSeconds,
+                    segment.EndSeconds,
+                    translatedText);
             }
 
-            LastExecutionSummary = CreateExecutionSummary(plan, "ONNX Runtime GenAI Phi text generation.");
+            LastExecutionSummary = CreateExecutionSummary(plan, $"ONNX Runtime GenAI {engineFamily} text generation.");
             yield return PipelineStreamItemFactory.CreateTranslation(
                 translated, runId, snapshotId, sourceRevisionId, sequence++);
         }
     }
 
+    private bool UseCudaWorker(StageRuntimePlan plan) =>
+        OperatingSystem.IsWindows() &&
+        plan.ExecutionProvider == ExecutionProviderKind.Cuda &&
+        string.Equals(engineFamily, QwenEngineFamilyName, StringComparison.OrdinalIgnoreCase) &&
+        workerClient is not null && !CudaOrtProbe.IsCudaProviderListed();
+
+    private async Task<StageRuntimePlan> PlanTranslationAsync(
+        TranslationRequest request,
+        CancellationToken cancellationToken)
+    {
+        StageRuntimePlanningRequest planningRequest = await StageRuntimePlanningRequestFactory.ApplyPreferredModelTierAsync(
+            new StageRuntimePlanningRequest(
+                RuntimeStage.Translation,
+                PreferredModelAlias: request.PreferredModelAlias,
+                SourceLanguage: request.SourceLanguage,
+                TargetLanguage: request.TargetLanguage,
+                PreferredExecutionProvider: ExecutionProviderRequest.ParsePreferredExecutionProvider(
+                    request.PreferredExecutionProvider,
+                    request.RequirePreferredExecutionProvider),
+                RequirePreferredExecutionProvider: request.RequirePreferredExecutionProvider,
+                PreferredModelVariantAlias: request.PreferredModelVariantAlias),
+            runtimePlanningPreferences,
+            cancellationToken).ConfigureAwait(false);
+        return await runtimePlanner.PlanAsync(planningRequest, cancellationToken).ConfigureAwait(false);
+    }
+
+    private TranslationPromptContext CreatePromptContext(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        TranslationInputSegment segment) =>
+        new(
+            ResolveTargetLanguageName(request.TargetLanguage),
+            ResolvePromptFormat(plan.ModelId, plan.ModelAlias, engineFamily),
+            SelectApplicableGlossaryHints(segment, request.GlossaryHints));
+
     private static string TranslateSegment(
         Model model,
         Tokenizer tokenizer,
         string sourceText,
-        string targetLanguageName,
+        TranslationPromptContext promptContext,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sourceText))
@@ -184,7 +291,8 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
             return string.Empty;
         }
 
-        string prompt = BuildTranslationPrompt(sourceText, targetLanguageName);
+        string prompt = BuildTranslationPrompt(
+            sourceText, promptContext.TargetLanguageName, promptContext.PromptFormat, promptContext.GlossaryHints);
         using Sequences inputTokens = tokenizer.Encode(prompt);
         if (inputTokens.NumSequences == 0)
         {
@@ -225,7 +333,7 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
             return string.Empty;
         }
 
-        string result = decoded;
+        string result = StripThinkingBlocks(decoded);
         foreach (string suffix in EosTokenSuffixes)
         {
             int suffixIndex = result.IndexOf(suffix, StringComparison.Ordinal);
@@ -238,30 +346,160 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
         return result.Trim();
     }
 
-    private static string BuildTranslationPrompt(string sourceText, string targetLanguageName) =>
-        $"<|system|>\nTranslate the input to {targetLanguageName}. Output only the translation, no explanation.<|end|>\n<|user|>\n{sourceText}<|end|>\n<|assistant|>\n";
-
-    private static string ResolveTargetLanguageName(string targetLanguageCode) =>
-        targetLanguageCode.Trim().ToLowerInvariant() switch
+    private static string StripThinkingBlocks(string text)
+    {
+        string result = text;
+        foreach ((string openTag, string closeTag) in ThinkingBlockTags)
         {
-            "en" => "English",
-            "es" => "Spanish",
-            "fr" => "French",
-            "de" => "German",
-            "el" => "Greek",
-            "it" => "Italian",
-            "pt" => "Portuguese",
-            "ja" => "Japanese",
-            "zh" => "Chinese",
-            "ko" => "Korean",
-            "ar" => "Arabic",
-            "ru" => "Russian",
-            "nl" => "Dutch",
-            "pl" => "Polish",
-            "tr" => "Turkish",
-            "hi" => "Hindi",
-            var code => code
+            while (true)
+            {
+                int closeIndex = result.IndexOf(closeTag, StringComparison.Ordinal);
+                if (closeIndex < 0)
+                {
+                    break;
+                }
+
+                int openIndex = result.LastIndexOf(openTag, closeIndex, StringComparison.Ordinal);
+                result = openIndex >= 0
+                    ? string.Concat(result.AsSpan(0, openIndex), result.AsSpan(closeIndex + closeTag.Length))
+                    : result[(closeIndex + closeTag.Length)..];
+            }
+        }
+
+        return result;
+    }
+
+    internal static GenAiTranslationPromptFormat ResolvePromptFormat(
+        string? modelId,
+        string? modelAlias,
+        string? engineFamily = null)
+    {
+        string combined = $"{modelId} {modelAlias} {engineFamily}";
+
+        if (combined.Contains("gemma-4", StringComparison.OrdinalIgnoreCase) ||
+            combined.Contains("gemma4", StringComparison.OrdinalIgnoreCase))
+        {
+            return GenAiTranslationPromptFormat.Gemma4;
+        }
+
+        if (combined.Contains("gemma", StringComparison.OrdinalIgnoreCase))
+        {
+            return GenAiTranslationPromptFormat.Gemma3;
+        }
+
+        if (combined.Contains("qwen3", StringComparison.OrdinalIgnoreCase) ||
+            combined.Contains("qwen-3", StringComparison.OrdinalIgnoreCase))
+        {
+            return GenAiTranslationPromptFormat.Qwen3;
+        }
+
+        if (combined.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+        {
+            return GenAiTranslationPromptFormat.QwenChatMl;
+        }
+
+        return GenAiTranslationPromptFormat.Phi;
+    }
+
+    internal static IReadOnlyList<TranslationGlossaryHint> SelectApplicableGlossaryHints(
+        TranslationInputSegment segment,
+        IReadOnlyList<TranslationGlossaryHint>? glossaryHints)
+    {
+        if (glossaryHints is null || glossaryHints.Count == 0 || string.IsNullOrWhiteSpace(segment.Text))
+        {
+            return [];
+        }
+
+        var applicable = new List<TranslationGlossaryHint>();
+        var seenPairs = new HashSet<(string SourceTerm, string TargetTerm)>();
+
+        foreach (TranslationGlossaryHint hint in glossaryHints)
+        {
+            if (MatchesSegment(segment, hint) && seenPairs.Add((hint.SourceTerm.Trim(), hint.TargetTerm.Trim())))
+            {
+                applicable.Add(hint);
+            }
+        }
+
+        return applicable;
+    }
+
+    private static bool MatchesSegment(TranslationInputSegment segment, TranslationGlossaryHint hint)
+    {
+        if (string.IsNullOrWhiteSpace(hint.SourceTerm) || string.IsNullOrWhiteSpace(hint.TargetTerm))
+        {
+            return false;
+        }
+
+        if (hint.SourceMatches is { Count: > 0 })
+        {
+            return hint.SourceMatches.Any(match => match.SegmentIndex == segment.Index);
+        }
+
+        return segment.Text.Contains(
+            hint.SourceTerm,
+            hint.IsCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string BuildSystemInstruction(
+        string targetLanguageName,
+        IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null)
+    {
+        var builder = new StringBuilder();
+        builder.Append($"Translate the input to {targetLanguageName}. Output only the translation, no explanation.");
+
+        if (glossaryHints is { Count: > 0 })
+        {
+            builder.Append(" Adhere strictly to the following glossary terms: ");
+            builder.Append(string.Join(", ", glossaryHints.Select(static g => $"{g.SourceTerm.Trim()} -> {g.TargetTerm.Trim()}")));
+            builder.Append('.');
+        }
+
+        return builder.ToString();
+    }
+
+    internal static string BuildTranslationPrompt(
+        string sourceText,
+        string targetLanguageName,
+        GenAiTranslationPromptFormat promptFormat = GenAiTranslationPromptFormat.Phi,
+        IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null)
+    {
+        string systemInstruction = BuildSystemInstruction(targetLanguageName, glossaryHints);
+
+        return promptFormat switch
+        {
+            GenAiTranslationPromptFormat.Qwen3 =>
+                $"<|im_start|>system\n{systemInstruction}<|im_end|>\n" +
+                $"<|im_start|>user\n{sourceText}<|im_end|>\n" +
+                "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+            GenAiTranslationPromptFormat.QwenChatMl =>
+                $"<|im_start|>system\n{systemInstruction}<|im_end|>\n" +
+                $"<|im_start|>user\n{sourceText}<|im_end|>\n" +
+                "<|im_start|>assistant\n",
+            GenAiTranslationPromptFormat.Gemma4 =>
+                $"<bos><|turn>system\n{systemInstruction}<turn|>\n" +
+                $"<|turn>user\n{sourceText}<turn|>\n" +
+                "<|turn>model\n",
+            GenAiTranslationPromptFormat.Gemma3 =>
+                $"<start_of_turn>user\n{systemInstruction}\n\n{sourceText}<end_of_turn>\n" +
+                "<start_of_turn>model\n",
+            _ =>
+                $"<|system|>\n{systemInstruction}<|end|>\n" +
+                $"<|user|>\n{sourceText}<|end|>\n" +
+                "<|assistant|>\n"
         };
+    }
+
+    private static string ResolveTargetLanguageName(string targetLanguageCode)
+    {
+        string code = targetLanguageCode.Trim();
+        return TargetLanguageNames.TryGetValue(code, out string? name) ? name : code;
+    }
+
+    private sealed record TranslationPromptContext(
+        string TargetLanguageName,
+        GenAiTranslationPromptFormat PromptFormat,
+        IReadOnlyList<TranslationGlossaryHint> GlossaryHints);
 
     private static void EnsurePlanReady(StageRuntimePlan plan)
     {
@@ -294,7 +532,7 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
     /// </summary>
     private void LogModelProvenance(StageRuntimePlan plan, string modelRootPath) =>
         applicationLogger?.LogInformation(
-            $"Phi GenAI model provenance: root='{modelRootPath}'; " +
+            $"{(engineFamily == EngineFamilyName ? "Phi" : engineFamily)} GenAI model provenance: root='{modelRootPath}'; " +
             $"genai_config.json={(File.Exists(Path.Join(modelRootPath, GenAiConfigFileName)) ? "present" : "absent")}; " +
             $"config.json={(File.Exists(Path.Join(modelRootPath, HfConfigFileName)) ? "present" : "absent")}; " +
             $"provider={plan.ExecutionProvider!.Value.ToString().ToLowerInvariant()}; " +
@@ -303,10 +541,11 @@ public sealed class PhiGenAiTranslationEngine(IRuntimePlanner runtimePlanner,
 
     private static StageRuntimeExecutionSummary CreateExecutionSummary(
         StageRuntimePlan plan,
-        string bootstrapDetail) =>
+        string bootstrapDetail,
+        bool ran = true) =>
         new(
             "auto",
-            plan.ExecutionProvider!.Value.ToString().ToLowerInvariant(),
+            ran ? plan.ExecutionProvider!.Value.ToString().ToLowerInvariant() : "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,

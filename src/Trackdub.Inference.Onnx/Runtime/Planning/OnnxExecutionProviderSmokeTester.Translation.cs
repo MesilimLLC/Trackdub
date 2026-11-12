@@ -54,9 +54,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         try
         {
             using OnnxExecutionSessionFactory.OpusSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = engineFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
+                .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = engineFamily, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false);
-            EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+            EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
             using var encoderInputs = new InputSet([
                 NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(new long[] { 0L }, [1, 1])),

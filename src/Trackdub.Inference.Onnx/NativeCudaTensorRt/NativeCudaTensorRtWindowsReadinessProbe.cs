@@ -70,7 +70,7 @@ public sealed class NativeCudaTensorRtWindowsReadinessProbe : INativeCudaTensorR
                 TensorRtInstallHint: NativeCudaTensorRtWindowsProviderConstants.WindowsTensorRtInstallHint));
         }
 
-        bool cudaReady = cudaListed;
+        bool cudaReady = cudaListed && CudaOrtProbe.IsCuDnn9Available();
         bool tensorRtReady = trtLibs && trtListed;
 
         string cudaDetail = cudaReady
@@ -98,7 +98,7 @@ public sealed class NativeCudaTensorRtWindowsReadinessProbe : INativeCudaTensorR
 
     private static string ResolveCudaBlockedDetail(bool cudaListed) =>
         cudaListed
-            ? "CUDA EP is listed but readiness check failed."
+            ? "CUDAExecutionProvider is listed, but cuDNN 9 could not be loaded."
             : "CUDAExecutionProvider is not listed by ONNX Runtime.";
 
     private static string ResolveTensorRtBlockedDetail(bool trtLibs, bool trtListed)

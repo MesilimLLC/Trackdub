@@ -7808,6 +7808,108 @@
       "download_file_sources": {
         "2d106det.onnx": "https://huggingface.co/tonythethompson/insightface-buffalo-s-onnx/resolve/330345a8be02700373f8a3e96050c57d73a5e22f/2d106det.onnx"
       }
+    },
+    {
+      "model_id": "Qwen/Qwen3-4B",
+      "task": "translation",
+      "engine_family": "qwen-genai",
+      "capabilities": [
+        "translation",
+        "pivot-translation"
+      ],
+      "language_coverage": {
+        "target_languages": [
+          "multi"
+        ],
+        "source_languages": [
+          "multi"
+        ]
+      },
+      "tier": "quality",
+      "license": "Apache-2.0",
+      "commercial_allowed": true,
+      "redistribution_allowed": true,
+      "requires_attribution": true,
+      "requires_user_consent": false,
+      "voice_cloning": false,
+      "commercial_use_verified": true,
+      "source_url": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx",
+      "revision": "e7319aa0276a2766d038714372b4c5f00973a480",
+      "sha256": "dcb9aa8dd93b1acc17a2df193811c200ab540932c20a98ce4d4d23ce88a69b7d",
+      "aliases": [
+        "qwen3-4b-translation"
+      ],
+      "root_path": "../../../../models/qwen3-4b-translation",
+      "benchmark_entry": "genai_config.json",
+      "variants": [
+        {
+          "entry_path": "genai_config.json",
+          "download_files": [
+            "LICENSE",
+            "chat_template.jinja",
+            "config.json",
+            "genai_config.json",
+            "model.onnx",
+            "model.onnx.data",
+            "tokenizer.json",
+            "tokenizer_config.json"
+          ],
+          "alias": "cpu-int4",
+          "is_default": true,
+          "supported_providers": ["cpu"]
+        },
+        {
+          "alias": "cuda-int4",
+          "entry_path": "cuda-int4/genai_config.json",
+          "supported_providers": ["cuda"],
+          "download_files": [
+            "cuda-int4/chat_template.jinja",
+            "cuda-int4/config.json",
+            "cuda-int4/genai_config.json",
+            "cuda-int4/model.onnx",
+            "cuda-int4/model.onnx.data",
+            "cuda-int4/tokenizer.json",
+            "cuda-int4/tokenizer_config.json"
+          ]
+        }
+      ],
+      "download_file_hashes": {
+        "cuda-int4/chat_template.jinja": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+        "cuda-int4/config.json": "0bfeedcfa808cb8404e75d32cef3cdb6c566631acdb7c0edbe9e6945763c6989",
+        "cuda-int4/genai_config.json": "481b5b09371642a8d2c2a651fa39b7229e6007affaaf12b249c5e2f3ce84eb55",
+        "cuda-int4/model.onnx": "b074fc8192970b977761284deb5c7d3db3e47ab92bccbbad44c552f9c2370b29",
+        "cuda-int4/model.onnx.data": "35d01a337b4ec19f5a7e363c6260cf6ddd53102e17169f96099bd29d3fbcd24a",
+        "cuda-int4/tokenizer.json": "979d160e081df25a1bf7f4e2e8f4c441b5dfdc9a8e84aec9f32e80445e1b59b8",
+        "cuda-int4/tokenizer_config.json": "bfd13b57b2e0c2cb582f311c0895f077d16a868c0dc61e4dbbba544a835341d6",
+        "LICENSE": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+        "chat_template.jinja": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+        "config.json": "0bfeedcfa808cb8404e75d32cef3cdb6c566631acdb7c0edbe9e6945763c6989",
+        "genai_config.json": "dcb9aa8dd93b1acc17a2df193811c200ab540932c20a98ce4d4d23ce88a69b7d",
+        "model.onnx": "b4547cf9327bd532cb81703cf013f958117ba5a3e5a81c7c79a33aba534ff337",
+        "model.onnx.data": "d6003acd70841b99a44ce4c21d13dc42244e3ec3b7c12d70919f9b55440bbc45",
+        "tokenizer.json": "979d160e081df25a1bf7f4e2e8f4c441b5dfdc9a8e84aec9f32e80445e1b59b8",
+        "tokenizer_config.json": "bfd13b57b2e0c2cb582f311c0895f077d16a868c0dc61e4dbbba544a835341d6"
+      },
+      "hash_verification": {
+        "mode": "required"
+      },
+      "download_file_sources": {
+        "cuda-int4/chat_template.jinja": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/chat_template.jinja",
+        "cuda-int4/config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/config.json",
+        "cuda-int4/genai_config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/genai_config.json",
+        "cuda-int4/model.onnx": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/model.onnx",
+        "cuda-int4/model.onnx.data": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/model.onnx.data",
+        "cuda-int4/tokenizer.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/tokenizer.json",
+        "cuda-int4/tokenizer_config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/cuda-int4/tokenizer_config.json",
+        "LICENSE": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/LICENSE",
+        "chat_template.jinja": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/chat_template.jinja",
+        "config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/config.json",
+        "genai_config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/genai_config.json",
+        "model.onnx": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/model.onnx",
+        "model.onnx.data": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/model.onnx.data",
+        "tokenizer.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/tokenizer.json",
+        "tokenizer_config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/tokenizer_config.json"
+      }
     }
   ]
 }

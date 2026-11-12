@@ -56,6 +56,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
                 vocalsModelPath,
                 provider,
                 allowTrtInitFallback,
+                request.Plan.HasExplicitProviderPreference,
                 block.Magnitudes,
                 cancellationToken).ConfigureAwait(false);
             if (selectedProvider is null)
@@ -77,6 +78,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
                 accModelPath,
                 provider,
                 allowTrtInitFallback,
+                request.Plan.HasExplicitProviderPreference,
                 block.Magnitudes,
                 cancellationToken).ConfigureAwait(false);
             EnsureConsistentProvider(selectedProvider, accResult.SelectedProvider);
@@ -131,11 +133,12 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
         string modelPath,
         ExecutionProviderKind provider,
         bool allowTrtInitFallback,
+        bool hasExplicitProviderPreference,
         Memory<float> magnitudes,
         CancellationToken cancellationToken)
     {
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolKey, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolKey, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelPath)
             .ConfigureAwait(false);
 
         // Bind by the model's actual input name: the sherpa-onnx spleeter export names its

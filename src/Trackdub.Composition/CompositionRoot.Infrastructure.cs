@@ -266,7 +266,7 @@ public static partial class CompositionRoot
         });
         services.TryAddSingleton<IFileSystemProbe, PhysicalFileSystemProbe>();
         services.TryAddSingleton<IStudioSettingsService, JsonStudioSettingsService>();
-        services.TryAddSingleton<INativeCudaTensorRtWindowsPolicy, StudioSettingsNativeCudaTensorRtWindowsPolicy>();
+        services.TryAddSingleton<INativeCudaTensorRtWindowsPolicy, AutomaticNativeCudaTensorRtWindowsPolicy>();
         services.AddHttpClient<Trackdub.Application.Services.IUpdateService, ReleaseManifestUpdateService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);

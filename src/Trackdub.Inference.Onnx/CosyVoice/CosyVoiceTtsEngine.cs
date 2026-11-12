@@ -80,7 +80,8 @@ public sealed class CosyVoiceTtsEngine(
                 modelFiles,
                 plan.ExecutionProvider!.Value,
                 cancellationToken,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider).ConfigureAwait(false);
+                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider,
+                hasExplicitProviderPreference: plan.HasExplicitProviderPreference).ConfigureAwait(false);
 
             // Residency pins keep the nine graphs warm; execution leases are taken only
             // for this synthesis (audit §3A: residency ≠ exclusivity).
@@ -143,10 +144,11 @@ public sealed class CosyVoiceTtsEngine(
         CosyVoiceModelFiles modelFiles,
         ExecutionProviderKind provider,
         CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        bool allowTrtInitFallback = true,
+        bool hasExplicitProviderPreference = false)
     {
         if (pinnedRuntime is not null &&
-            pinnedRuntime.Matches(modelFiles.ModelRootPath, modelFiles.Variant, provider, allowTrtInitFallback))
+            pinnedRuntime.Matches(modelFiles.ModelRootPath, modelFiles.Variant, provider, allowTrtInitFallback, hasExplicitProviderPreference))
         {
             return pinnedRuntime;
         }
@@ -157,7 +159,7 @@ public sealed class CosyVoiceTtsEngine(
             modelFiles,
             provider,
             cancellationToken,
-            allowTrtInitFallback).ConfigureAwait(false);
+            allowTrtInitFallback, hasExplicitProviderPreference).ConfigureAwait(false);
         CosyVoiceEmbeddingTables embeddings;
         CosyVoiceWhisperTokenizer tokenizer;
         try
@@ -176,6 +178,7 @@ public sealed class CosyVoiceTtsEngine(
             modelFiles.Variant,
             provider,
             allowTrtInitFallback,
+            hasExplicitProviderPreference,
             pins,
             embeddings,
             tokenizer);
@@ -210,6 +213,7 @@ public sealed class CosyVoiceTtsEngine(
             string variant,
             ExecutionProviderKind provider,
             bool allowTrtInitFallback,
+            bool hasExplicitProviderPreference,
             CosyVoiceSessionPins pins,
             CosyVoiceEmbeddingTables embeddings,
             CosyVoiceWhisperTokenizer tokenizer)
@@ -218,6 +222,7 @@ public sealed class CosyVoiceTtsEngine(
             Variant = variant;
             Provider = provider;
             AllowTrtInitFallback = allowTrtInitFallback;
+            HasExplicitProviderPreference = hasExplicitProviderPreference;
             Pins = pins;
             Embeddings = embeddings;
             Tokenizer = tokenizer;
@@ -231,6 +236,8 @@ public sealed class CosyVoiceTtsEngine(
 
         public bool AllowTrtInitFallback { get; }
 
+        public bool HasExplicitProviderPreference { get; }
+
         public CosyVoiceSessionPins Pins { get; }
 
         public CosyVoiceEmbeddingTables Embeddings { get; }
@@ -241,11 +248,13 @@ public sealed class CosyVoiceTtsEngine(
             string modelRootPath,
             string variant,
             ExecutionProviderKind provider,
-            bool allowTrtInitFallback) =>
+            bool allowTrtInitFallback,
+            bool hasExplicitProviderPreference) =>
             string.Equals(ModelRootPath, modelRootPath, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(Variant, variant, StringComparison.OrdinalIgnoreCase) &&
             Provider == provider &&
-            AllowTrtInitFallback == allowTrtInitFallback;
+            AllowTrtInitFallback == allowTrtInitFallback &&
+            HasExplicitProviderPreference == hasExplicitProviderPreference;
 
         public void Dispose() => Pins.Dispose();
     }

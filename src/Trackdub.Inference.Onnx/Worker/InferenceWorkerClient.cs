@@ -17,6 +17,11 @@ public interface IInferenceWorkerClient
     /// <summary>Starts the worker if needed and returns its handshake, or null when it is unusable.</summary>
     Task<WorkerHelloResult?> TryGetHelloAsync(CancellationToken cancellationToken);
 
+    Task<WorkerTranslationResult> TranslateAsync(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken);
+
     /// <remarks>
     /// Cancelling a call while its request is still being written kills the worker, because its
     /// input pipe may then hold a partial frame. Other calls in flight on that worker fail with
@@ -80,6 +85,19 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     }
 
     public bool IsInstalled => executablePath is not null;
+
+    public async Task<WorkerTranslationResult> TranslateAsync(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(plan);
+        return await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
+            InferenceWorkerProtocol.Translation,
+            new WorkerTranslationRequest(request, WorkerPlan.From(plan)),
+            cancellationToken).ConfigureAwait(false);
+    }
 
     public static string? LocateExecutable()
     {
@@ -153,11 +171,22 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        WorkerMessage response = await SendAsync(
+        return await SendRequestAsync<WorkerWarmRequest, WorkerWarmResult>(
             InferenceWorkerProtocol.TtsWarm,
-            InferenceWorkerProtocol.ToPayload(new WorkerWarmRequest(WorkerPlan.From(plan))),
+            new WorkerWarmRequest(WorkerPlan.From(plan)),
             cancellationToken).ConfigureAwait(false);
-        return InferenceWorkerProtocol.FromPayload<WorkerWarmResult>(response.Payload);
+    }
+
+    private async Task<TResponse> SendRequestAsync<TRequest, TResponse>(
+        string messageKind,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        WorkerMessage response = await SendAsync(
+            messageKind,
+            InferenceWorkerProtocol.ToPayload(request),
+            cancellationToken).ConfigureAwait(false);
+        return InferenceWorkerProtocol.FromPayload<TResponse>(response.Payload);
     }
 
     /// <summary>Execution summary the worker reported for the most recent synthesis.</summary>

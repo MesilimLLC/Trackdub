@@ -47,11 +47,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         try
         {
             using OnnxExecutionSessionFactory.WhisperSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = WhisperOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
+                .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = WhisperOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = provider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
                 .ConfigureAwait(false);
             try
             {
-                EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
+                EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
             }
             catch (InvalidOperationException ex)
             {

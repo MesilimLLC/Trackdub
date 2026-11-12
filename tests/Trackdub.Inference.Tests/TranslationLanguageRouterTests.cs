@@ -8,7 +8,7 @@ using Trackdub.Inference.Runtime.Planning;
 
 namespace Trackdub.Inference.Tests;
 
-public sealed class TranslationLanguageRouterTests
+public sealed partial class TranslationLanguageRouterTests
 {
     [Fact]
     public async Task UnknownSourceAllowsTargetSelectionWithoutClaimingRunnableRoute()
@@ -364,39 +364,6 @@ public sealed class TranslationLanguageRouterTests
         Assert.Equal(TranslationRoutingKind.Pivot, route.RoutingKind);
         Assert.Equal("example/pivot-preferred", route.ModelId);
         Assert.Equal("pivot-preferred", route.PreferredModelAlias);
-    }
-
-    [Fact]
-    public async Task ResolveRouteAsync_WhenPreferredAliasTargetsGenAiPivot_SelectsPreferredGenAiRoute()
-    {
-        using var workspace = new TranslationRouterTestWorkspace();
-        BundledModelManifestRegistry registry = workspace.WriteManifest(
-            CreateMadladSpec(),
-            CreatePhiGenAiSpec());
-        string madladCacheRoot = workspace.CreateCacheRoot("google/madlad400-3b-mt");
-        workspace.WriteMadladCacheFiles(madladCacheRoot);
-        string phiCacheRoot = workspace.CreateCacheRoot("microsoft/Phi-3.5-mini-instruct-onnx");
-        workspace.WriteGenAiCacheFiles(phiCacheRoot);
-
-        var router = new TranslationLanguageRouter(
-            registry,
-            new InMemoryModelCacheInventory(
-            [
-                new LocalModelCacheRecord("google/madlad400-3b-mt", madladCacheRoot, "main", ValidSha256, DateTimeOffset.UtcNow),
-                new LocalModelCacheRecord("microsoft/Phi-3.5-mini-instruct-onnx", phiCacheRoot, "main", ValidSha256, DateTimeOffset.UtcNow)
-            ]));
-
-        TranslationRouteSelection route = await router.ResolveRouteAsync(
-            "en",
-            "fr",
-            CancellationToken.None,
-            preferredModelAlias: "phi-genai-pivot");
-
-        Assert.True(route.IsAvailable);
-        Assert.Equal(TranslationRoutingKind.Pivot, route.RoutingKind);
-        Assert.Equal("phi-genai", route.ProviderName);
-        Assert.Equal("microsoft/Phi-3.5-mini-instruct-onnx", route.ModelId);
-        Assert.Equal("phi-genai-pivot", route.PreferredModelAlias);
     }
 
     [Fact]

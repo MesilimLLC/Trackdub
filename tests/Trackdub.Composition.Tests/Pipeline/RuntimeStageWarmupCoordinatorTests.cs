@@ -548,6 +548,10 @@ public class RuntimeStageWarmupCoordinatorTests
         public Task<WorkerHelloResult?> TryGetHelloAsync(CancellationToken cancellationToken) =>
             Task.FromResult<WorkerHelloResult?>(null);
 
+        public Task<WorkerTranslationResult> TranslateAsync(
+            TranslationRequest request, StageRuntimePlan plan, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("Coordinator tests do not translate through the worker.");
+
         public Task<TtsSynthesisResult> SynthesizeTtsAsync(
             TtsSynthesisRequest request, StageRuntimePlan plan, CancellationToken cancellationToken) =>
             throw new NotSupportedException("Coordinator tests never synthesize through the worker.");

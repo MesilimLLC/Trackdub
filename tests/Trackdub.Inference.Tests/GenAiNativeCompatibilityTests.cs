@@ -119,12 +119,19 @@ public sealed class GenAiNativeCompatibilityTests
                 .Single(element => (string?)element.Attribute("Include") == "Microsoft.Windows.AI.MachineLearning")
                 .Attribute("Version")!.Value
             : ortVersion;
-        string genAiVersion = packageVersions.Descendants("PackageVersion")
-            .Single(element => (string?)element.Attribute("Include") == genAiPackageId)
-            .Attribute("Version")!.Value;
+        string ResolveVersion(XElement element)
+        {
+            string version = element.Attribute("Version")!.Value;
+            return version.StartsWith("$(", StringComparison.Ordinal) && version.EndsWith(')')
+                ? packageVersions.Descendants(version[2..^1]).Single().Value.Trim()
+                : version;
+        }
+
+        string genAiVersion = ResolveVersion(packageVersions.Descendants("PackageVersion")
+            .Single(element => (string?)element.Attribute("Include") == genAiPackageId));
         Assert.All(packageVersions.Descendants("PackageVersion")
                 .Where(element => ((string?)element.Attribute("Include"))?.StartsWith("Microsoft.ML.OnnxRuntimeGenAI", StringComparison.Ordinal) == true),
-            element => Assert.Equal(genAiVersion, element.Attribute("Version")!.Value));
+            element => Assert.Equal(genAiVersion, ResolveVersion(element)));
         var pair = new NativePairManifest(winMl ? "WindowsML" : "Stock", ortPackageVersion, ortVersion,
             genAiFlavor, genAiVersion, "win-x64", "ort", "genai");
 

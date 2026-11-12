@@ -25,6 +25,7 @@
          by UseOrtGpuRuntimeAtRoot into this output, never into the application root. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- Inference.Onnx still restores Windows ML, whose managed ORT (assembly 0.0.0.0) would otherwise
@@ -85,6 +86,8 @@
     <Warning Condition="'@(_OrtGpuNative)' == '' And '$(_OrtGpuRid)' != 'win-x64'"
              Text="The ORT GPU package has no $(_OrtGpuRid) runtime; the inference worker will not offer native CUDA on $(_OrtGpuRid)." />
     <Copy Condition="'@(_OrtGpuNative)' != ''" SourceFiles="@(_OrtGpuNative)" DestinationFolder="$(TargetDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
+    <Copy Condition="'$(_OrtGpuRid)' == 'win-x64'" SourceFiles="$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai.dll;$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll"
+          DestinationFolder="$(TargetDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
     <Copy SourceFiles="$(PkgMicrosoft_ML_OnnxRuntime_Managed)\lib\net8.0\Microsoft.ML.OnnxRuntime.dll"
           DestinationFolder="$(TargetDir)"
           OverwriteReadOnlyFiles="true"

@@ -94,6 +94,8 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     internal static bool UsesOrtGenAiTranslationSmoke(string? engineFamily) =>
         engineFamily is not null
         && (engineFamily.Equals("phi-genai", StringComparison.OrdinalIgnoreCase)
+            || engineFamily.Equals("qwen-genai", StringComparison.OrdinalIgnoreCase)
+            || engineFamily.Equals("gemma-genai", StringComparison.OrdinalIgnoreCase)
             || engineFamily.Equals("qwen-instruct", StringComparison.OrdinalIgnoreCase));
 
     private async Task SmokeTestGenAiLoadAsync(

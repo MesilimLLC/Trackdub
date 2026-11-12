@@ -68,7 +68,7 @@ internal static partial class OnnxExecutionSessionFactory
         CancellationToken cancellationToken = request.CancellationToken;
         var bootstrapResult = await BootstrapTrackedAsync(request.Provider, allowDownloads: true, cancellationToken)
             .ConfigureAwait(false);
-        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken)
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken, request.HasExplicitProviderPreference)
             .ConfigureAwait(false);
         SessionOptionsSelection optionsSelection = CreateSessionOptions(new SessionOptionsRequest(
             ResolveSessionOptionsProvider(request.Provider, bootstrapResult.SelectedProvider),
@@ -431,7 +431,7 @@ internal static partial class OnnxExecutionSessionFactory
     private static async Task<DualPooledLeasePair> AcquirePooledDualPairAsync(PooledDualCreate create)
     {
         PooledSessionRequest request = create.Request;
-        BootstrapContext bootstrap = await BootstrapForProviderAsync(create.Provider, request.CancellationToken)
+        BootstrapContext bootstrap = await BootstrapForProviderAsync(create.Provider, request.CancellationToken, request.HasExplicitProviderPreference)
             .ConfigureAwait(false);
         DualOptionsSelections selections = CreateDualOptionsSelections(new DualOptionsRequest
         {

@@ -155,6 +155,9 @@ internal static class StageRuntimeRequirementsCatalog
                     // phi-genai loads through ORT GenAI, whose NvTensorRtRtx device terminates
                     // the host process (confirmed in the 2026-10-18 isolated retest, exit 134).
                     ["phi-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
+                    ["qwen-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
+                    ["gemma-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
+                    ["qwen-instruct"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
                 }),
             [RuntimeStage.Diarization] = new(
                 RuntimeStage.Diarization,

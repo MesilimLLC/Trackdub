@@ -87,7 +87,8 @@ public sealed class Qwen3TtsEngine(
             PinnedPipeline pipeline = await GetOrCreatePinnedPipelineAsync(
                 modelFiles,
                 plan.ExecutionProvider!.Value,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                plan.HasExplicitProviderPreference).ConfigureAwait(false);
             // DirectML runs the language model on the GPU but the vocoder session is
             // explicitly CPU-backed, so account the full operation against CPU admission.
             ExecutionProviderKind admissionProvider = pipeline.SelectedProvider is ExecutionProviderKind.DirectMl
@@ -222,12 +223,14 @@ public sealed class Qwen3TtsEngine(
     private async Task<PinnedPipeline> GetOrCreatePinnedPipelineAsync(
         Qwen3TtsModelFiles modelFiles,
         ExecutionProviderKind requestedProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool hasExplicitProviderPreference)
     {
         if (pinnedPipeline is not null &&
             string.Equals(pinnedPipeline.RootDirectory, modelFiles.RootDirectory, StringComparison.OrdinalIgnoreCase) &&
             pinnedPipeline.IsBaseModel == modelFiles.IsBaseModel &&
-            pinnedPipeline.RequestedProvider == requestedProvider)
+            pinnedPipeline.RequestedProvider == requestedProvider &&
+            pinnedPipeline.HasExplicitProviderPreference == hasExplicitProviderPreference)
         {
             return pinnedPipeline;
         }
@@ -236,17 +239,19 @@ public sealed class Qwen3TtsEngine(
         pinnedPipeline = await CreatePinnedPipelineAsync(
             modelFiles,
             requestedProvider,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            hasExplicitProviderPreference).ConfigureAwait(false);
         return pinnedPipeline;
     }
 
     private static async Task<PinnedPipeline> CreatePinnedPipelineAsync(
         Qwen3TtsModelFiles modelFiles,
         ExecutionProviderKind requestedProvider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool hasExplicitProviderPreference)
     {
         OnnxExecutionSessionFactory.SessionOptionsFactoryBundle sessionOptions = await OnnxExecutionSessionFactory
-            .CreateSessionOptionsFactoryAsync(requestedProvider, cancellationToken)
+            .CreateSessionOptionsFactoryAsync(requestedProvider, cancellationToken, hasExplicitProviderPreference: hasExplicitProviderPreference)
             .ConfigureAwait(false);
 
         string requestedLabel = ProviderNames.FormatProviderLabel(sessionOptions.RequestedProvider);
@@ -266,7 +271,8 @@ public sealed class Qwen3TtsEngine(
             requestedProvider,
             vocoderProvider,
             modelFiles.IsBaseModel,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            hasExplicitProviderPreference).ConfigureAwait(false);
         try
         {
             if (modelFiles.IsBaseModel)
@@ -276,6 +282,7 @@ public sealed class Qwen3TtsEngine(
                     modelFiles.RootDirectory,
                     true,
                     requestedProvider,
+                    hasExplicitProviderPreference,
                     sessionOptions.SelectedProvider,
                     requestedLabel,
                     selectedLabel,
@@ -294,6 +301,7 @@ public sealed class Qwen3TtsEngine(
                 modelFiles.RootDirectory,
                 false,
                 requestedProvider,
+                hasExplicitProviderPreference,
                 sessionOptions.SelectedProvider,
                 requestedLabel,
                 selectedLabel,
@@ -349,6 +357,7 @@ public sealed class Qwen3TtsEngine(
             string rootDirectory,
             bool isBaseModel,
             ExecutionProviderKind requestedProvider,
+            bool hasExplicitProviderPreference,
             ExecutionProviderKind selectedProvider,
             string requestedProviderLabel,
             string selectedProviderLabel,
@@ -359,6 +368,7 @@ public sealed class Qwen3TtsEngine(
             RootDirectory = rootDirectory;
             IsBaseModel = isBaseModel;
             RequestedProvider = requestedProvider;
+            HasExplicitProviderPreference = hasExplicitProviderPreference;
             SelectedProvider = selectedProvider;
             RequestedProviderLabel = requestedProviderLabel;
             SelectedProviderLabel = selectedProviderLabel;
@@ -372,6 +382,8 @@ public sealed class Qwen3TtsEngine(
         public bool IsBaseModel { get; }
 
         public ExecutionProviderKind RequestedProvider { get; }
+
+        public bool HasExplicitProviderPreference { get; }
 
         public ExecutionProviderKind SelectedProvider { get; }
 

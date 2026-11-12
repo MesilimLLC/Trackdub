@@ -48,6 +48,31 @@
     </ItemGroup>
   </Target>
 
+  <!-- Use a separate output directory for this portable Windows CUDA build. -->
+  <Target Name="StagePortableWindowsCudaGenAi"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'$(TrackdubWindowsCudaGenAi)' == 'true' And '$(TargetFramework)' == 'net11.0' And
+                     $([MSBuild]::IsOSPlatform('Windows')) And
+                     ('$(OutputType)' == 'Exe' Or '$(IsTestProject)' == 'true') And
+                     '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And
+                     ('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'win-x64') And
+                     '$(PlatformTarget)' != 'ARM64'">
+    <PropertyGroup>
+      <_PortableCudaOrtDir>$([System.IO.Path]::Combine('$(NuGetPackageRoot)', 'microsoft.ml.onnxruntime.gpu.windows', '$(OnnxRuntimeVersion)', 'runtimes/win-x64/native'))</_PortableCudaOrtDir>
+      <_PortableCudaGenAiDir>$([System.IO.Path]::Combine('$(NuGetPackageRoot)', 'microsoft.ml.onnxruntimegenai.cuda', '$(OnnxRuntimeGenAiCudaVersion)', 'runtimes/win-x64/native'))</_PortableCudaGenAiDir>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_PortableCudaOrtDir)/onnxruntime_providers_cuda.dll') Or !Exists('$(_PortableCudaGenAiDir)/onnxruntime-genai-cuda.dll')"
+           Text="Restore the pinned Windows CUDA ONNX Runtime and GenAI packages before building the portable CUDA host." />
+    <ItemGroup>
+      <_PortableCudaNative Include="$(_PortableCudaOrtDir)/onnxruntime.dll;
+                                   $(_PortableCudaOrtDir)/onnxruntime_providers_shared.dll;
+                                   $(_PortableCudaOrtDir)/onnxruntime_providers_cuda.dll;
+                                   $(_PortableCudaGenAiDir)/onnxruntime-genai.dll;
+                                   $(_PortableCudaGenAiDir)/onnxruntime-genai-cuda.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PortableCudaNative)" DestinationFolder="$(TargetDir)" />
+  </Target>
+
   <!-- Windows GenAI CPU loader dynamically loads onnxruntime-genai-cuda.dll for NvTensorRtRtx.
        Copy that sidecar next to onnxruntime-genai.dll without taking Cuda's onnxruntime-genai.dll
        or its Microsoft.ML.OnnxRuntime.Gpu 1.28 graph. -->

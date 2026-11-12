@@ -32,7 +32,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         {
             // Pool key: production Qwen3 omits modelId/variant; keep smoke identical so the
             // session proven here is the one the ASR stage reuses.
-            await SmokeTestQwen3AsrAsync(request.EntryPath, request.ExecutionProvider, cancellationToken).ConfigureAwait(false);
+            await SmokeTestQwen3AsrAsync(request, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -66,18 +66,19 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     }
 
     private static async Task SmokeTestQwen3AsrAsync(
-        string encoderModelPath,
-        ExecutionProviderKind provider,
+        ExecutionProviderSmokeTestRequest request,
         CancellationToken cancellationToken)
     {
+        string encoderModelPath = request.EntryPath;
+        ExecutionProviderKind provider = request.ExecutionProvider;
         string root = Path.GetDirectoryName(encoderModelPath)
             ?? throw new InvalidOperationException("Qwen3-ASR smoke test could not resolve model root.");
         string decoderInitPath = Path.Join(root, "decoder_init.onnx");
         string decoderStepPath = Path.Join(root, "decoder_step.onnx");
         using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
+            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         using var encoderInputs = new InputSet([
             NamedOnnxValue.CreateFromTensor("mel", new DenseTensor<float>(new float[128], [1, 128, 1]))
@@ -99,9 +100,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         // modelId/variant must match NemotronAsrOnnxAudioTranscriptionEngine or the stage
         // misses this pooled session and pays cold load again.
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "nemotron-asr", Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = sessionOptions.Encoder, AdditionalTrtDecoderOptions = sessionOptions.Decoder }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderJointPath })
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "nemotron-asr", Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = sessionOptions.Encoder, AdditionalTrtDecoderOptions = sessionOptions.Decoder }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderJointPath })
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         using var encoderInputs = CreateNemotronEncoderInputs(sessionLease.EncoderSession.InputMetadata);
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderResults =
@@ -126,9 +127,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         EnsureSelectedProviderMatchesRequested(ExecutionProviderKind.Cpu, preprocessor.SelectedProvider);
 
         using OnnxExecutionSessionFactory.NemotronAsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = Path.Join(root, "decoder_joint-model.onnx") })
+            .CreatePooledNemotronAsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = ParakeetTdtOnnxAudioTranscriptionEngine.EngineFamilyName, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, ModelId = request.ModelId, Variant = request.Variant, AdditionalTrtEncoderOptions = ParakeetTdtOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = Path.Join(root, "decoder_joint-model.onnx") })
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         const int melFrames = 100;
         using var encoderInputs = new InputSet([

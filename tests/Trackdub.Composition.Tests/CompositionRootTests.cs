@@ -15,6 +15,7 @@ using Trackdub.Infrastructure.Persistence.Sqlite;
 using Trackdub.Infrastructure.Settings;
 using Trackdub.Inference.Onnx.ExecutionProviders;
 using Trackdub.Inference.Onnx.Pool;
+using Trackdub.Inference.Onnx.Runtime.Routing;
 using Trackdub.Inference.Onnx.QwenTextRefinement;
 using Trackdub.Inference.Runtime.ModelManifest;
 using Trackdub.Inference.Runtime.Planning;
@@ -26,6 +27,31 @@ namespace Trackdub.Composition.Tests;
 public sealed class CompositionRootTests : IDisposable
 {
     private readonly List<string> tempDirectories = [];
+
+    [Fact]
+    public async Task AddTrackdub_probes_native_windows_providers_with_legacy_setting_off()
+    {
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { AllowNativeCudaTensorRtOnWindows = false }, CancellationToken.None);
+        using ServiceProvider provider = BuildProvider(services => services.AddSingleton<IStudioSettingsService>(settings));
+
+        var policy = provider.GetRequiredService<INativeCudaTensorRtWindowsPolicy>();
+
+        Assert.Equal(OperatingSystem.IsWindows(), await policy.IsNativeProvidersAllowedOnWindowsAsync());
+    }
+
+    [Fact]
+    public void AddTrackdub_registers_all_genai_translation_adapters()
+    {
+        using ServiceProvider provider = BuildProvider();
+        using IServiceScope scope = provider.CreateScope();
+        string[] families = scope.ServiceProvider.GetServices<ITranslationEngineAdapter>()
+            .Select(adapter => adapter.EngineFamily).ToArray();
+
+        Assert.All(
+            new[] { "phi-genai", "qwen-genai", "gemma-genai", "qwen-instruct" },
+            family => Assert.Contains(family, families));
+    }
 
     [Fact]
     public void AddTrackdub_builds_with_scope_validation()

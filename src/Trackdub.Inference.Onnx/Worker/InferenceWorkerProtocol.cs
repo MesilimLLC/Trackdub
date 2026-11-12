@@ -14,12 +14,13 @@ namespace Trackdub.Inference.Onnx.Worker;
 /// </summary>
 public static class InferenceWorkerProtocol
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public const int MaxMessageBytes = 256 * 1024 * 1024;
 
     public const string Hello = "hello";
     public const string TtsSynthesize = "tts.synthesize";
     public const string TtsWarm = "tts.warm";
+    public const string Translation = "translation.run";
     public const string Cancel = "cancel";
     public const string Shutdown = "shutdown";
     public const string Result = "result";
@@ -206,6 +207,12 @@ public sealed record WorkerTtsResult(
     string ModelId,
     string VoiceId,
     string Provider,
+    StageRuntimeExecutionSummary? ExecutionSummary);
+
+public sealed record WorkerTranslationRequest(TranslationRequest Request, WorkerPlan Plan);
+
+public sealed record WorkerTranslationResult(
+    IReadOnlyList<TranslatedTextSegment> Segments,
     StageRuntimeExecutionSummary? ExecutionSummary);
 
 /// <summary>

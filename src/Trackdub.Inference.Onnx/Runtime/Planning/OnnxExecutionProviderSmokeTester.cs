@@ -67,24 +67,56 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         };
         try
         {
-            TtsSynthesisResult result = await workerClient!.SynthesizeTtsAsync(
-                new TtsSynthesisRequest("Hello.", "en", new VoiceCatalogEntry("af_heart", "en-us", "female", "Heart")),
-                plan,
-                cancellationToken).ConfigureAwait(false);
-            bool onRequestedProvider = string.Equals(
-                result.Provider,
-                FormatProviderLabel(request.ExecutionProvider),
-                StringComparison.OrdinalIgnoreCase);
-            return new ExecutionProviderSmokeTestResult(
-                onRequestedProvider && result.DurationSamples > 0,
-                onRequestedProvider
-                    ? $"Inference worker synthesized {result.DurationSamples} samples on {result.Provider}."
-                    : $"Inference worker ran on '{result.Provider}' instead of the requested provider.");
+            return await RunWorkerSmokeAsync(request, plan, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InferenceWorkerException or InvalidOperationException or IOException)
         {
             return new ExecutionProviderSmokeTestResult(false, $"Inference worker smoke failed: {ex.Message}");
         }
+    }
+
+    private Task<ExecutionProviderSmokeTestResult> RunWorkerSmokeAsync(
+        ExecutionProviderSmokeTestRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken) =>
+        request.Stage == RuntimeStage.Translation &&
+        string.Equals(request.EngineFamily, "qwen-genai", StringComparison.OrdinalIgnoreCase)
+            ? SmokeTestQwenTranslationWorkerAsync(plan, cancellationToken)
+            : SmokeTestTtsWorkerAsync(request, plan, cancellationToken);
+
+    private async Task<ExecutionProviderSmokeTestResult> SmokeTestQwenTranslationWorkerAsync(
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken)
+    {
+        WorkerTranslationResult translated = await workerClient!.TranslateAsync(
+            new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello.")]),
+            plan,
+            cancellationToken).ConfigureAwait(false);
+        bool onCuda = string.Equals(translated.ExecutionSummary?.SelectedProvider, "cuda", StringComparison.OrdinalIgnoreCase);
+        bool producedText = translated.Segments.Count == 1 && !string.IsNullOrWhiteSpace(translated.Segments[0].Text);
+        bool succeeded = onCuda && producedText;
+        return new ExecutionProviderSmokeTestResult(succeeded,
+            succeeded ? "Inference worker translated on CUDA." : "Inference worker did not produce a CUDA translation.");
+    }
+
+    private async Task<ExecutionProviderSmokeTestResult> SmokeTestTtsWorkerAsync(
+        ExecutionProviderSmokeTestRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken)
+    {
+        TtsSynthesisResult result = await workerClient!.SynthesizeTtsAsync(
+            new TtsSynthesisRequest("Hello.", "en", new VoiceCatalogEntry("af_heart", "en-us", "female", "Heart")),
+            plan,
+            cancellationToken).ConfigureAwait(false);
+        bool onRequestedProvider = string.Equals(
+            result.Provider,
+            FormatProviderLabel(request.ExecutionProvider),
+            StringComparison.OrdinalIgnoreCase);
+        return new ExecutionProviderSmokeTestResult(
+            onRequestedProvider && result.DurationSamples > 0,
+            onRequestedProvider
+                ? $"Inference worker synthesized {result.DurationSamples} samples on {result.Provider}."
+                : $"Inference worker ran on '{result.Provider}' instead of the requested provider.");
     }
 
     public async Task<ExecutionProviderSmokeTestResult> SmokeTestAsync(
@@ -115,6 +147,12 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             {
                 return bootstrapFailure;
             }
+
+            request = request with
+            {
+                AllowPolicyProviderSelection = await OnnxExecutionSessionFactory.CanPolicySelectProviderAsync(
+                    request.ExecutionProvider, request.HasExplicitProviderPreference, cancellationToken).ConfigureAwait(false),
+            };
 
             return await DispatchSmokeAsync(request, cancellationToken).ConfigureAwait(false);
         }
@@ -192,11 +230,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     {
         var handlers = new Dictionary<RuntimeStage, Func<CancellationToken, Task>>
         {
-            [RuntimeStage.Vad] = ct => SmokeTestVadAsync(request.EntryPath, request.ExecutionProvider, ct),
+            [RuntimeStage.Vad] = ct => SmokeTestVadAsync(request, ct),
             [RuntimeStage.Asr] = ct => SmokeTestAsrAsync(request, ct),
             [RuntimeStage.Separation] = ct => SmokeTestSeparationAsync(request, ct),
             [RuntimeStage.Translation] = ct => SmokeTestTranslationAsync(request, ct),
-            [RuntimeStage.Diarization] = ct => SmokeTestDiarizationAsync(request.EntryPath, request.ExecutionProvider, ct),
+            [RuntimeStage.Diarization] = ct => SmokeTestDiarizationAsync(request, ct),
             [RuntimeStage.Tts] = ct => SmokeTestTtsAsync(request, ct),
             [RuntimeStage.TextRefinement] = ct => SmokeTestTextRefinementGenAiAsync(request, ct),
             [RuntimeStage.SpeechEnhancement] = ct => SmokeTestGenericSessionAsync(request, ct),
@@ -211,8 +249,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     }
 
     private static async Task SmokeTestVadAsync(
-        string modelPath,
-        ExecutionProviderKind provider,
+        ExecutionProviderSmokeTestRequest request,
         CancellationToken cancellationToken)
     {
         // Keyed exactly like SileroVadSpeechRegionDetector, so the session this smoke verifies
@@ -220,11 +257,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         try
         {
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SileroVadPoolFamily, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = SileroVadPoolFamily, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, request.EntryPath)
                 .ConfigureAwait(false);
             try
             {
-                EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider);
+                EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
             }
             catch (InvalidOperationException ex)
             {
@@ -234,7 +271,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             }
 
             using var input = CreateVadInputs();
-            using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(input.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: provider);
+            using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(input.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: request.ExecutionProvider);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -252,9 +289,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     {
         string poolFamily = ResolveGenericPoolFamily(request);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, request.EntryPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, request.EntryPath)
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         using var inputs = CreateMetadataDrivenInputs(sessionLease.Session.InputMetadata);
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(inputs.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: request.ExecutionProvider);
@@ -398,10 +435,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
 
     private static void EnsureSelectedProviderMatchesRequested(
         ExecutionProviderKind requestedProvider,
-        string selectedProvider)
+        string selectedProvider,
+        bool allowPolicyProviderSelection = false)
     {
         string requestedProviderLabel = FormatProviderLabel(requestedProvider);
-        if (string.Equals(selectedProvider, requestedProviderLabel, StringComparison.OrdinalIgnoreCase))
+        if (allowPolicyProviderSelection || string.Equals(selectedProvider, requestedProviderLabel, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

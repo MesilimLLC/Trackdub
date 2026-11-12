@@ -30,9 +30,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         string modelPath = ResolveTtsProbeModelPath(request);
         string poolFamily = ResolveTtsPoolFamily(request);
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
+            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolFamily, Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AllowTrtInitFallback = true }, modelPath)
             .ConfigureAwait(false);
-        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+        EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 
         using var inputs = CreateTtsInputs(sessionLease.Session.InputMetadata);
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _ = sessionLease.Session.RunWithRetry(inputs.Values, maxAttempts: 1, cancellationToken: cancellationToken, provider: request.ExecutionProvider);
@@ -99,9 +99,9 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             }
 
             using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = request.ExecutionProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = false }, graphPath)
+                .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "cosyvoice", Provider = request.ExecutionProvider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AllowTrtInitFallback = false }, graphPath)
                 .ConfigureAwait(false);
-            EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider);
+            EnsureSelectedProviderMatchesRequested(request.ExecutionProvider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
         }
     }
 

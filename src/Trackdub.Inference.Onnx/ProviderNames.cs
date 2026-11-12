@@ -68,10 +68,6 @@ internal static class ProviderNames
         string.Equals(epName, DnnlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(epName, DnnlUpperExecutionProviderName, StringComparison.OrdinalIgnoreCase);
 
-    internal static bool IsCatalogGpuProvider(ExecutionProviderKind provider) =>
-        provider is ExecutionProviderKind.DirectMl
-            or ExecutionProviderKind.Migraphx;
-
     internal static bool ShouldUseCatalogDevicePolicy(
         WindowsMlExecutionDevicePolicy devicePolicy,
         ExecutionProviderKind provider) =>
