@@ -440,8 +440,6 @@ warnings
 Rules:
 
 - Stem separation should not be mandatory for all workflows.
-- Demucs/HTDemucs is non-commercial only (lane: non-commercial, commercial_allowed: false) and must never be routed in any commercial pipeline path. This is enforced from the manifest fields (see section 10), not via a runtime toggle.
-- Non-commercial mode may prefer Demucs while output quality is being evaluated.
 - Never promise perfect dialogue removal.
 - Label outputs as estimated stems.
 

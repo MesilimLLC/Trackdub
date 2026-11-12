@@ -440,8 +440,6 @@ warnings
 Rules:
 
 - Stem separation should not be mandatory for all workflows.
-- Demucs/HTDemucs is non-commercial only (lane: non-commercial, commercial_allowed: false) and must never be routed in any commercial pipeline path. This is enforced from the manifest fields (see section 10), not via a runtime toggle.
-- Non-commercial mode may prefer Demucs while output quality is being evaluated.
 - Never promise perfect dialogue removal.
 - Label outputs as estimated stems.
 
@@ -1797,11 +1795,9 @@ still hold — flagged for a later Lane-A pass, not P0.
 
 Commercial routing is manifest-only: there is no runtime `CommercialSafeMode` flag
 ([InferenceRequestOptions.cs](../../src/Trackdub.Contracts/Pipeline/InferenceRequestOptions.cs)), matching
-AGENTS.md. **Demucs/HTDemucs is not in the bundled manifest** (no entry in
-[bundled-models.manifest.json](../../src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json)),
-so the non-commercial separation route cannot be selected on the product path. The **Mrx cocktail-fork
+AGENTS.md. The **Mrx cocktail-fork
 is present and `commercial_allowed: true` (MIT)** ([manifest:144-160](../../src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json):144) — not a commercial *violation*, but P3-2 still slates it
-for removal. No accidental Demucs/Mrx mis-routing found.
+for removal. No accidental Mrx mis-routing found.
 
 ---
 
