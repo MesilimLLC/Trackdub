@@ -288,90 +288,16 @@ internal sealed record SessionPoolKey
     /// </summary>
     internal static string? HashModelContent(string? modelPath)
     {
-        if (string.IsNullOrWhiteSpace(modelPath))
+        if (!TryResolveCacheKey(modelPath, out string cacheKey))
         {
-            return null;
-        }
-
-        string cacheKey;
-        try
-        {
-            cacheKey = Path.GetFullPath(modelPath);
-            if (OperatingSystem.IsWindows() && !PreserveWindowsPathCase())
-            {
-                cacheKey = cacheKey.ToUpperInvariant();
-            }
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                $"SessionPoolKey: malformed model path '{modelPath}': {ex.Message}");
             return null;
         }
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
-            FileInfo info;
-            long length;
-            long writeTicks;
-            try
+            (bool retry, string? hash) = HashModelContentAttempt(modelPath!, cacheKey, attempt);
+            if (!retry)
             {
-                info = new FileInfo(modelPath);
-                if (!info.Exists)
-                {
-                    return null;
-                }
-
-                // Read metadata under the same guard: the file can disappear between
-                // Exists and Length (FileNotFoundException), or be inaccessible.
-                length = info.Length;
-                writeTicks = info.LastWriteTimeUtc.Ticks;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"SessionPoolKey: failed to inspect model file '{modelPath}': {ex.Message}");
-                return null;
-            }
-
-            (ContentHashLookup lookup, string? resolved) = attempt == 0
-                ? TryResolveContentHash(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks)) : default;
-            if (lookup != ContentHashLookup.NotFound)
-            {
-                return resolved;
-            }
-
-            string hash;
-            try
-            {
-                using FileStream stream = File.OpenRead(modelPath);
-                hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"SessionPoolKey: failed to hash model file '{modelPath}': {ex.Message}");
-                return null;
-            }
-
-            // If the file changed under the stream, the digest describes an inconsistent
-            // snapshot — retry once under the fresh metadata before trusting it.
-            bool unchanged;
-            try
-            {
-                info.Refresh();
-                unchanged = info.Exists
-                    && info.Length == length
-                    && info.LastWriteTimeUtc.Ticks == writeTicks;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                return null;
-            }
-
-            if (unchanged)
-            {
-                ModelContentHashCache[cacheKey] = (length, writeTicks, hash);
                 return hash;
             }
         }
@@ -379,6 +305,136 @@ internal sealed record SessionPoolKey
         // The file was still mutating after the second hash — conservative fallback: do
         // not pin pool identity to an inconsistent snapshot; path identity still applies.
         return null;
+    }
+
+    private static (bool Retry, string? Hash) HashModelContentAttempt(
+        string modelPath,
+        string cacheKey,
+        int attempt)
+    {
+        long generation = ModelContentHashGenerations.GetOrAdd(cacheKey, 0);
+        if (!TryReadModelMetadata(modelPath, out FileInfo info, out long length, out long writeTicks))
+        {
+            return (false, null);
+        }
+
+        var snapshot = new ModelFileSnapshot(info, length, writeTicks, generation);
+        if (attempt == 0)
+        {
+            (ContentHashLookup lookup, string? resolved) = TryResolveContentHash(modelPath, cacheKey, snapshot);
+            if (lookup != ContentHashLookup.NotFound)
+            {
+                return (false, resolved);
+            }
+        }
+
+        if (!TryHashModelFile(modelPath, out string hash))
+        {
+            return (false, null);
+        }
+
+        // If the file changed under the stream, the digest describes an inconsistent
+        // snapshot — retry once under the fresh metadata before trusting it.
+        if (!TryReadUnchangedMetadata(info, length, writeTicks, out bool unreadable))
+        {
+            return unreadable ? (false, null) : (true, null);
+        }
+
+        return TryCacheHash(cacheKey, snapshot, hash) ? (false, hash) : (true, null);
+    }
+
+    private static bool TryResolveCacheKey(string? modelPath, out string cacheKey)
+    {
+        cacheKey = string.Empty;
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            cacheKey = Path.GetFullPath(modelPath);
+            if (OperatingSystem.IsWindows() && !PreserveWindowsPathCase())
+            {
+                cacheKey = cacheKey.ToUpperInvariant();
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"SessionPoolKey: malformed model path '{modelPath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryReadModelMetadata(
+        string modelPath,
+        out FileInfo info,
+        out long length,
+        out long writeTicks)
+    {
+        info = null!;
+        length = 0;
+        writeTicks = 0;
+        try
+        {
+            info = new FileInfo(modelPath);
+            if (!info.Exists)
+            {
+                return false;
+            }
+
+            // Read metadata under the same guard: the file can disappear between
+            // Exists and Length (FileNotFoundException), or be inaccessible.
+            length = info.Length;
+            writeTicks = info.LastWriteTimeUtc.Ticks;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"SessionPoolKey: failed to inspect model file '{modelPath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryHashModelFile(string modelPath, out string hash)
+    {
+        hash = string.Empty;
+        try
+        {
+            using FileStream stream = File.OpenRead(modelPath);
+            hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"SessionPoolKey: failed to hash model file '{modelPath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryCacheHash(
+        string cacheKey,
+        ModelFileSnapshot snapshot,
+        string hash)
+    {
+        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) != snapshot.Generation)
+        {
+            return false;
+        }
+
+        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, hash);
+        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == snapshot.Generation)
+        {
+            return true;
+        }
+
+        ModelContentHashCache.TryRemove(cacheKey, out _);
+        return false;
     }
 
     internal static void InvalidateModelContentHash(string modelPath)
@@ -410,9 +466,8 @@ internal sealed record SessionPoolKey
     /// <summary>
     /// The model file metadata a content digest is resolved against: the file handle used to
     /// revalidate the file, the length and write time observed before hashing, and the cache
-    /// generation the digest must belong to. The synchronous path does not track generations
-    /// — invalidation removes the cached entry outright, so it can never reuse one — and
-    /// therefore leaves <see cref="Generation"/> at its default.
+    /// generation the digest must belong to. Both the synchronous and asynchronous paths track
+    /// generations, so an invalidation racing the lookup can never resurrect a stale digest.
     /// </summary>
     private readonly struct ModelFileSnapshot(FileInfo info, long length, long writeTicks, long generation = 0)
     {
@@ -429,6 +484,11 @@ internal sealed record SessionPoolKey
     /// while the file's length and write time still match the metadata the caller observed,
     /// so a same-path replacement never reuses a stale digest.
     /// </summary>
+    /// <remarks>
+    /// The shared hasher is awaited synchronously here, so this path blocks on file I/O and must
+    /// never be called from a UI dispatcher. Callers on a UI thread must use
+    /// <see cref="TryResolveContentHashAsync"/> instead.
+    /// </remarks>
     private static (ContentHashLookup Lookup, string? Hash) TryResolveContentHash(
         string modelPath,
         string cacheKey,
@@ -445,7 +505,42 @@ internal sealed record SessionPoolKey
             return (ContentHashLookup.NotFound, null);
         }
 
-        return TryResolveContentHashAsync(modelPath, cacheKey, snapshot, CancellationToken.None).GetAwaiter().GetResult();
+        string? sharedHash;
+        try
+        {
+            sharedHash = sharedHasher(modelPath, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Shared model fingerprint failed for '{modelPath}': {ex.Message}");
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        return TryAcceptSharedHash(cacheKey, snapshot, sharedHash);
+    }
+
+    private static (ContentHashLookup Lookup, string? Hash) TryAcceptSharedHash(
+        string cacheKey,
+        ModelFileSnapshot snapshot,
+        string? sharedHash)
+    {
+        if (string.IsNullOrWhiteSpace(sharedHash))
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
+        {
+            return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
+        }
+
+        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) != snapshot.Generation)
+        {
+            return (ContentHashLookup.NotFound, null);
+        }
+
+        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);
+        return (ContentHashLookup.Found, sharedHash);
     }
 
     /// <summary>
@@ -471,23 +566,7 @@ internal sealed record SessionPoolKey
         }
 
         string? sharedHash = await sharedHasher(modelPath, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(sharedHash))
-        {
-            return (ContentHashLookup.NotFound, null);
-        }
-
-        if (!TryReadUnchangedMetadata(snapshot.Info, snapshot.Length, snapshot.WriteTicks, out bool metadataUnreadable))
-        {
-            return (metadataUnreadable ? ContentHashLookup.Unreadable : ContentHashLookup.NotFound, null);
-        }
-
-        if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) != snapshot.Generation)
-        {
-            return (ContentHashLookup.NotFound, null);
-        }
-
-        ModelContentHashCache[cacheKey] = (snapshot.Length, snapshot.WriteTicks, sharedHash);
-        return (ContentHashLookup.Found, sharedHash);
+        return TryAcceptSharedHash(cacheKey, snapshot, sharedHash);
     }
 
     private static bool TryGetCachedHash(string cacheKey, long length, long writeTicks, out string? hash)
@@ -621,21 +700,7 @@ internal sealed record SessionPoolKey
         string? modelPath,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(modelPath))
-        {
-            return null;
-        }
-
-        string cacheKey;
-        try
-        {
-            cacheKey = Path.GetFullPath(modelPath);
-            if (OperatingSystem.IsWindows() && !PreserveWindowsPathCase())
-            {
-                cacheKey = cacheKey.ToUpperInvariant();
-            }
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        if (!TryResolveCacheKey(modelPath, out string cacheKey))
         {
             return null;
         }
@@ -643,82 +708,76 @@ internal sealed record SessionPoolKey
         for (int attempt = 0; attempt < 2; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            long generation = ModelContentHashGenerations.GetOrAdd(cacheKey, 0);
-            FileInfo info;
-            long length;
-            long writeTicks;
-            try
+            (bool retry, string? hash) = await HashModelContentAttemptAsync(
+                modelPath!, cacheKey, attempt, cancellationToken).ConfigureAwait(false);
+            if (!retry)
             {
-                info = new FileInfo(modelPath);
-                if (!info.Exists)
-                {
-                    return null;
-                }
-
-                length = info.Length;
-                writeTicks = info.LastWriteTimeUtc.Ticks;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                return null;
-            }
-
-            (ContentHashLookup lookup, string? resolved) = attempt == 0
-                ? await TryResolveContentHashAsync(modelPath, cacheKey, new ModelFileSnapshot(info, length, writeTicks, generation), cancellationToken).ConfigureAwait(false) : default;
-            if (lookup != ContentHashLookup.NotFound)
-            {
-                return resolved;
-            }
-
-            string hash;
-            try
-            {
-                await using var stream = new FileStream(
-                    modelPath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.Read,
-                    bufferSize: 1024 * 1024,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
-                byte[] digest = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
-                hash = Convert.ToHexString(digest).ToLowerInvariant();
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                return null;
-            }
-
-            bool unchanged;
-            try
-            {
-                info.Refresh();
-                unchanged = info.Exists && info.Length == length && info.LastWriteTimeUtc.Ticks == writeTicks;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                return null;
-            }
-
-            if (unchanged)
-            {
-                if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == generation)
-                {
-                    ModelContentHashCache[cacheKey] = (length, writeTicks, hash);
-                    if (ModelContentHashGenerations.GetOrAdd(cacheKey, 0) == generation)
-                    {
-                        return hash;
-                    }
-
-                    ModelContentHashCache.TryRemove(cacheKey, out _);
-                }
+                return hash;
             }
         }
 
         return null;
+    }
+
+    private static async Task<(bool Retry, string? Hash)> HashModelContentAttemptAsync(
+        string modelPath,
+        string cacheKey,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        long generation = ModelContentHashGenerations.GetOrAdd(cacheKey, 0);
+        if (!TryReadModelMetadata(modelPath, out FileInfo info, out long length, out long writeTicks))
+        {
+            return (false, null);
+        }
+
+        var snapshot = new ModelFileSnapshot(info, length, writeTicks, generation);
+        if (attempt == 0)
+        {
+            (ContentHashLookup lookup, string? resolved) = await TryResolveContentHashAsync(
+                modelPath, cacheKey, snapshot, cancellationToken).ConfigureAwait(false);
+            if (lookup != ContentHashLookup.NotFound)
+            {
+                return (false, resolved);
+            }
+        }
+
+        string? hash = await TryHashModelFileAsync(modelPath, cancellationToken).ConfigureAwait(false);
+        if (hash is null)
+        {
+            return (false, null);
+        }
+
+        if (!TryReadUnchangedMetadata(info, length, writeTicks, out bool unreadable))
+        {
+            return unreadable ? (false, null) : (true, null);
+        }
+
+        return TryCacheHash(cacheKey, snapshot, hash) ? (false, hash) : (true, null);
+    }
+
+    private static async Task<string?> TryHashModelFileAsync(string modelPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(
+                modelPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 1024 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            byte[] digest = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+            return Convert.ToHexString(digest).ToLowerInvariant();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Builds a key for a single-session model (graph role = "default").</summary>
