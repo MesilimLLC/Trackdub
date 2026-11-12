@@ -14,6 +14,7 @@ Design: docs/audits/separation-eval-corpus-and-rubric.md (section 2).
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -29,7 +30,7 @@ from scipy import signal
 
 import audiomath as am
 import ingest
-from recipe_data import Recipe, RECIPES
+from recipe_data import DEFAULT_LANGUAGE, DEFAULT_RECIPE_IDS, Recipe, RECIPES, item_language, language_allowed
 
 GENERATOR_VERSION = "0.1"
 TARGET_LUFS = -23.0
@@ -62,6 +63,12 @@ class ItemPool:
         self.audio_cache_capacity = audio_cache_capacity
         self._audio: OrderedDict[tuple[str, int], np.ndarray] = OrderedDict()
 
+    def with_languages(self, languages: tuple[str, ...]) -> ItemPool:
+        """A view whose dialogue items are limited to `languages`; it shares this pool's audio cache."""
+        view = copy.copy(self)
+        view.items = [i for i in self.items if i["role"] != "dialogue" or language_allowed(i, languages)]
+        return view
+
     def candidates(self, role: str, tags: tuple[str, ...] = (), exclude_groups: frozenset[str] = frozenset()) -> list[dict]:
         return [i for i in self.items
                 if i["role"] == role and set(tags) <= set(i.get("tags", [])) and i["group"] not in exclude_groups]
@@ -82,6 +89,19 @@ class ItemPool:
             if len(self._audio) > self.audio_cache_capacity:
                 self._audio.popitem(last=False)
         return self._audio[key]
+
+
+def scoped_dialogue_pool(recipe: Recipe, pool: ItemPool, index: int, meta: dict) -> ItemPool:
+    """The pool limited to the languages this clip may use. A multilingual recipe cycles through the
+    non-English languages present, one per clip, and records which one it used."""
+    languages = recipe.languages
+    if not languages:
+        present = sorted({item_language(i) for i in pool.items if i["role"] == "dialogue"} - {DEFAULT_LANGUAGE})
+        if not present:
+            raise GenerationError(f"{recipe.recipe_id} needs non-English dialogue items in this split")
+        languages = (present[index % len(present)],)
+        meta["dialogue_language"] = languages[0]
+    return pool.with_languages(languages)
 
 
 def loop_to_length(a: np.ndarray, n: int, rng: np.random.Generator) -> tuple[np.ndarray, int]:
@@ -244,11 +264,11 @@ def generate_clip(recipe: Recipe, index: int, split: str, ctx: Context) -> tuple
             rir_item, rt60 = ok[int(rng.integers(len(ok)))]
             meta.update({"rir_id": rir_item["id"], "rt60_s": round(rt60, 3)})
             meta["sources"].append({"id": rir_item["id"], "sha256": rir_item["sha256"], "role": "rir"})
-        speakers = 2 if recipe.overlap else 1
         used_groups: frozenset[str] = frozenset()
         speaker_meta = []
-        for s in range(speakers):
-            mono, used, group = assemble_dialogue(pool, rng, n, recipe.dialogue_tags, used_groups, recipe.gap_s)
+        dialogue_pool = scoped_dialogue_pool(recipe, pool, index, meta)
+        for s in range(2 if recipe.overlap else 1):
+            mono, used, group = assemble_dialogue(dialogue_pool, rng, n, recipe.dialogue_tags, used_groups, recipe.gap_s)
             used_groups = used_groups | {group}
             if rir_item is not None:
                 mono = reverberate(mono, pool.load(rir_item, 1))
@@ -367,7 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--cache", type=Path, required=True)
     g.add_argument("--out", type=Path, required=True)
     g.add_argument("--split", choices=("dev", "test"), required=True)
-    g.add_argument("--recipes", default=",".join(RECIPES), help="comma-separated recipe ids (default: all)")
+    g.add_argument("--recipes", default=",".join(DEFAULT_RECIPE_IDS),
+                   help="comma-separated recipe ids (default: every recipe except the optional ones, such as A13)")
     g.add_argument("--seed", type=int, required=True)
     g.add_argument("--count", type=int, help="clips per recipe (default: recipe count split dev/test)")
     g.add_argument("--duration", type=float, help="override clip duration in seconds (development only)")
@@ -377,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "recipes":
         for r in RECIPES.values():
-            print(f"{r.recipe_id:4} {r.count:3} clips  {r.summary}")
+            print(f"{r.recipe_id:4} {r.count:3} clips  {r.summary}{'  (optional)' if r.optional else ''}")
         return 0
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))

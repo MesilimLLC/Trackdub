@@ -234,6 +234,8 @@ public static partial class CompositionRoot
 
     private static void AddModelDownloadServices(IServiceCollection services)
     {
+        services.TryAddSingleton<IModelHashVerifier>(sp =>
+            new ModelHashVerifier(sp.GetService<IFileFingerprintService>()));
         // The warm queue is injected here so a successful install drives engine warming directly.
         // ModelDownloadOrchestrator is constructed on every download path, so this trigger runs
         // where installs actually happen rather than depending on some other type being resolved.
@@ -254,7 +256,14 @@ public static partial class CompositionRoot
     private static void AddSettingsAndUpdateClients(IServiceCollection services)
     {
         services.TryAddSingleton<IFileFingerprintService>(sp =>
-            new Sha256FileFingerprintService(sp.GetRequiredService<IApplicationLogger>()));
+        {
+            IAppStoragePaths storagePaths = sp.GetRequiredService<IAppStoragePaths>();
+            var fingerprints = new Sha256FileFingerprintService(
+                sp.GetRequiredService<IApplicationLogger>(),
+                cacheFilePath: Path.Join(storagePaths.UserCacheRoot, "file-fingerprints.json"));
+            SessionPoolContentHashProvider.Configure(fingerprints);
+            return fingerprints;
+        });
         services.TryAddSingleton<IFileSystemProbe, PhysicalFileSystemProbe>();
         services.TryAddSingleton<IStudioSettingsService, JsonStudioSettingsService>();
         services.TryAddSingleton<INativeCudaTensorRtWindowsPolicy, StudioSettingsNativeCudaTensorRtWindowsPolicy>();
@@ -383,7 +392,8 @@ public static partial class CompositionRoot
                 sp.GetRequiredService<IApplicationLogger>(),
                 httpClient: sp.GetRequiredService<ModelDownloadHttpClient>().Client,
                 downloadOptions: sp.GetRequiredService<HuggingFaceDownloadOptions>()));
-        services.TryAddSingleton<IModelContentHashCacheInvalidator, SessionPoolModelContentHashCacheInvalidator>();
+        services.TryAddSingleton<IModelContentHashCacheInvalidator>(sp =>
+            new SessionPoolModelContentHashCacheInvalidator(sp.GetService<IFileFingerprintService>()));
         services.TryAddSingleton<IModelDownloaderContract>(sp =>
             new ModelDownloaderAdapter(
                 sp.GetRequiredService<IModelDownloader>(),

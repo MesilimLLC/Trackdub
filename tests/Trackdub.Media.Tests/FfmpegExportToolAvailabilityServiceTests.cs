@@ -63,5 +63,9 @@ public sealed class FfmpegExportToolAvailabilityServiceTests
 
             return ffprobePath;
         }
+
+        public void InvalidateResolvedPaths()
+        {
+        }
     }
 }

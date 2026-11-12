@@ -17,7 +17,8 @@ import sys
 from pathlib import Path
 
 import ingest
-from recipe_data import RECIPES, Recipe
+from language_coverage import language_gaps, recipe_pools
+from recipe_data import Recipe
 
 SPLITS = ("dev", "test")
 RIR_RT60_NOTE = "RIR candidates must have a verified RT60 between 0.4 and 2.0 seconds"
@@ -51,11 +52,11 @@ def count(items: list[dict], split: str, role: str, tags: tuple[str, ...]) -> tu
 
 def check(items: list[dict], min_groups: int, cache: Path | None = None) -> tuple[list[dict], list[str]]:
     rows, gaps = [], []
-    for recipe in RECIPES.values():
+    for recipe, recipe_items in recipe_pools(items):
         for role, tags, groups_needed in needs(recipe):
             row = {"recipe": recipe.recipe_id, "source": role + (f"+{','.join(tags)}" if tags else "")}
             for split in SPLITS:
-                n_items, n_groups = count(items, split, role, tags)
+                n_items, n_groups = count(recipe_items, split, role, tags)
                 if role == "rir":
                     if cache is None:
                         gaps.append(f"{recipe.recipe_id} {row['source']} [{split}]: RT60 unverified; pass --cache")
@@ -64,7 +65,7 @@ def check(items: list[dict], min_groups: int, cache: Path | None = None) -> tupl
 
                         valid_groups: set[str] = set()
                         valid_items = 0
-                        matching = [item for item in items
+                        matching = [item for item in recipe_items
                                     if item["role"] == role and set(tags) <= set(item.get("tags", []))
                                     and ingest.assign_split(item["group"]) == split]
                         for item in matching:
@@ -85,7 +86,7 @@ def check(items: list[dict], min_groups: int, cache: Path | None = None) -> tupl
                     gaps.append(f"{recipe.recipe_id} {row['source']} [{split}]: {n_groups} group(s), "
                                 f"need {max(min_groups, groups_needed)}")
             rows.append(row)
-    return rows, gaps
+    return rows, gaps + language_gaps(items, min_groups)
 
 
 def main(argv: list[str] | None = None) -> int:

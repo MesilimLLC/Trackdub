@@ -7,6 +7,8 @@ internal interface IFfmpegToolResolver
     string ResolveFfmpegPath(bool allowAutoDownload = true);
 
     string ResolveFfprobePath(bool allowAutoDownload = true);
+
+    void InvalidateResolvedPaths();
 }
 
 internal interface IFfmpegAutoDownloader
@@ -23,17 +25,46 @@ internal sealed class FfmpegToolResolver(
     : IFfmpegToolResolver
 {
     private readonly IFfmpegAutoDownloader autoDownloader = autoDownloader ?? FfmpegAutoDownloader.Shared;
+    // Deliberately unlocked: racing callers may both resolve, but each writes an equivalent path.
+    private string? resolvedFfmpegPath;
+    private string? resolvedFfprobePath;
 
-    public string ResolveFfmpegPath(bool allowAutoDownload = true) =>
-        ResolveExecutable(
+    public string ResolveFfmpegPath(bool allowAutoDownload = true)
+    {
+        if (Volatile.Read(ref resolvedFfmpegPath) is { } cached)
+        {
+            return cached;
+        }
+
+        string resolved = ResolveExecutable(
             explicitFfmpegPath,
             "TRACKDUB_FFMPEG_PATH",
             GetPlatformExecutableNames("ffmpeg"),
             allowAutoDownload,
             autoDownloader);
+        Volatile.Write(ref resolvedFfmpegPath, resolved);
+        return resolved;
+    }
+
+    private string CacheFfprobePath(string path)
+    {
+        Volatile.Write(ref resolvedFfprobePath, path);
+        return path;
+    }
+
+    public void InvalidateResolvedPaths()
+    {
+        Volatile.Write(ref resolvedFfmpegPath, null);
+        Volatile.Write(ref resolvedFfprobePath, null);
+    }
 
     public string ResolveFfprobePath(bool allowAutoDownload = true)
     {
+        if (Volatile.Read(ref resolvedFfprobePath) is { } cached)
+        {
+            return cached;
+        }
+
         string ffmpegPath = ResolveFfmpegPath(allowAutoDownload);
         string? ffprobePath = TryResolveExecutable(
             explicitFfprobePath,
@@ -44,44 +75,67 @@ internal sealed class FfmpegToolResolver(
 
         if (!string.IsNullOrWhiteSpace(ffprobePath))
         {
-            return ffprobePath;
+            return CacheFfprobePath(ffprobePath);
         }
 
         string ffmpegDirectory = Path.GetDirectoryName(ffmpegPath)!;
-        foreach (string candidate in new[]
-                 {
-                     Path.Join(ffmpegDirectory, "ffprobe.exe"),
-                     Path.Join(ffmpegDirectory, "ffprobe"),
-                     Path.Join(Directory.GetParent(ffmpegDirectory)?.FullName ?? ffmpegDirectory, "ffprobe.exe"),
-                     Path.Join(Directory.GetParent(ffmpegDirectory)?.FullName ?? ffmpegDirectory, "ffprobe")
-                 })
-        {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
 
-        string[] commonRoots =
-        [
-            ffmpegDirectory,
-            AppContext.BaseDirectory,
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
-        ];
-
-        foreach (string root in commonRoots
-                     .Where(static value => !string.IsNullOrWhiteSpace(value))
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        string? TryFindSiblingFfprobeLocal()
         {
-            foreach (string candidateName in GetPlatformExecutableNames("ffprobe"))
+            foreach (string candidate in new[]
+                     {
+                         Path.Join(ffmpegDirectory, "ffprobe.exe"),
+                         Path.Join(ffmpegDirectory, "ffprobe"),
+                         Path.Join(Directory.GetParent(ffmpegDirectory)?.FullName ?? ffmpegDirectory, "ffprobe.exe"),
+                         Path.Join(Directory.GetParent(ffmpegDirectory)?.FullName ?? ffmpegDirectory, "ffprobe")
+                     })
             {
-                string? discovered = SearchRecursively(root, candidateName);
-                if (!string.IsNullOrWhiteSpace(discovered))
+                if (File.Exists(candidate))
                 {
-                    return discovered;
+                    return candidate;
                 }
             }
+
+            return null;
+        }
+
+        string? TryFindFfprobeBySearchLocal()
+        {
+            string[] commonRoots =
+            [
+                ffmpegDirectory,
+                AppContext.BaseDirectory,
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+            ];
+
+            foreach (string root in commonRoots
+                         .Where(static value => !string.IsNullOrWhiteSpace(value))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (string candidateName in GetPlatformExecutableNames("ffprobe"))
+                {
+                    string? discovered = SearchRecursively(root, candidateName);
+                    if (!string.IsNullOrWhiteSpace(discovered))
+                    {
+                        return discovered;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        string? sibling = TryFindSiblingFfprobeLocal();
+        if (sibling is not null)
+        {
+            return CacheFfprobePath(sibling);
+        }
+
+        string? discoveredProbe = TryFindFfprobeBySearchLocal();
+        if (discoveredProbe is not null)
+        {
+            return CacheFfprobePath(discoveredProbe);
         }
 
         throw new InvalidOperationException(

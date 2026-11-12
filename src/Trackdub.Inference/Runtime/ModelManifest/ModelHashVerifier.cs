@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Trackdub.Contracts;
 
 namespace Trackdub.Inference.Runtime.ModelManifest;
 
@@ -15,8 +16,10 @@ public interface IModelHashVerifier
         CancellationToken cancellationToken = default);
 }
 
-public sealed class ModelHashVerifier : IModelHashVerifier
+public sealed class ModelHashVerifier(IFileFingerprintService? fingerprintService = null) : IModelHashVerifier
 {
+    private readonly IFileFingerprintService? fingerprintService = fingerprintService;
+
     public async Task<HashVerificationResult> VerifyAsync(
         ModelManifest manifest,
         string filePath,
@@ -41,7 +44,9 @@ public sealed class ModelHashVerifier : IModelHashVerifier
             return new HashVerificationResult(true, false, null, null, "Manifest does not define sha256; verification skipped.");
         }
 
-        string actualHash = await ComputeSha256Async(filePath, cancellationToken).ConfigureAwait(false);
+        string actualHash = fingerprintService is null
+            ? await ComputeSha256Async(filePath, cancellationToken).ConfigureAwait(false)
+            : (await fingerprintService.ComputeAsync(filePath, cancellationToken).ConfigureAwait(false)).Sha256;
         bool isMatch = actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
         return new HashVerificationResult(
             IsValid: isMatch,
@@ -64,7 +69,9 @@ public sealed class ModelHashVerifier : IModelHashVerifier
             return new HashVerificationResult(true, false, null, null, "No SHA-256 in manifest; verification skipped.");
         }
 
-        string actualHash = await ComputeSha256Async(filePath, cancellationToken).ConfigureAwait(false);
+        string actualHash = fingerprintService is null
+            ? await ComputeSha256Async(filePath, cancellationToken).ConfigureAwait(false)
+            : (await fingerprintService.ComputeAsync(filePath, cancellationToken).ConfigureAwait(false)).Sha256;
         bool isMatch = actualHash.Equals(trimmed, StringComparison.OrdinalIgnoreCase);
         return new HashVerificationResult(
             IsValid: isMatch,

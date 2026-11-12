@@ -38,6 +38,8 @@ DEV_PERCENT = 30
 MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 ROLES = ("dialogue", "music", "sfx", "ambience", "rir")
+ITEM_PASSTHROUGH_KEYS = ("range_bytes", "ext", "tag_basis", "title", "creator", "query", "retrieved_at", "freesound_id",
+                         "language", "gender_class", "provenance", "local_only", "band_limit_hz")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 EXT_PATTERN = re.compile(r"^[a-z0-9]{1,5}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -130,9 +132,42 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def http_fetch(url: str, dest: Path, range_bytes: int | None = None) -> None:
+def _expected_size(resp, limit: int) -> int | None:
+    """Bytes the server says it will send, capped at `limit`, or None when it does not say."""
+    expected = None
+    content_range = resp.headers.get("Content-Range")
+    if content_range:
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", content_range.strip(), re.IGNORECASE)
+        if match and int(match.group(1)) == 0 and match.group(3) != "*":
+            expected = min(limit, int(match.group(3)))
+        elif resp.status == 206:
+            raise IngestError("download has an invalid Content-Range header")
+    if expected is None and resp.headers.get("Content-Length") is not None:
+        expected = min(limit, int(resp.headers["Content-Length"]))
+    return expected
+
+
+def _copy_limited(resp, out, limit: int, range_bytes: int | None) -> int:
+    """Write at most `limit` bytes and return the count. Going over the limit is an error unless
+    `range_bytes` asked for a truncated download."""
+    total = 0
+    while chunk := resp.read(min(1024 * 1024, limit - total + 1)):
+        total += len(chunk)
+        if total > limit:
+            if range_bytes is None:
+                raise IngestError(f"download exceeds {MAX_DOWNLOAD_BYTES} bytes")
+            chunk = chunk[: len(chunk) - (total - limit)]
+            total = limit
+        out.write(chunk)
+        if total == limit:
+            break
+    return total
+
+
+def http_fetch(url: str, dest: Path, range_bytes: int | None = None, *, bearer_token: str | None = None) -> None:
     """Download `url` to `dest`. With `range_bytes`, keep only the first that many bytes, which is
-    deterministic and still decodable for MP3 and similar streams; servers that ignore Range are cut off."""
+    deterministic and still decodable for MP3 and similar streams; servers that ignore Range are cut off.
+    `bearer_token` is sent only to `url` itself, never to a redirect target."""
     try:
         parsed_url = urllib.parse.urlsplit(url)
     except ValueError as exc:
@@ -145,35 +180,18 @@ def http_fetch(url: str, dest: Path, range_bytes: int | None = None) -> None:
     if range_bytes is not None:
         headers["Range"] = f"bytes=0-{range_bytes - 1}"
     req = urllib.request.Request(url, headers=headers)
+    if bearer_token:
+        # urllib does not copy unredirected headers onto a redirected request.
+        req.add_unredirected_header("Authorization", f"Bearer {bearer_token}")
     opener = urllib.request.build_opener(_HttpsRedirectHandler())
     try:
         with opener.open(req, timeout=60) as resp:
             if urllib.parse.urlsplit(resp.geturl()).scheme.lower() != "https" and not _is_loopback_http(url):
                 raise IngestError("HTTPS download redirected to a non-HTTPS URL")
 
-            expected = None
-            content_range = resp.headers.get("Content-Range")
-            if content_range:
-                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", content_range.strip(), re.IGNORECASE)
-                if match and int(match.group(1)) == 0 and match.group(3) != "*":
-                    expected = min(limit, int(match.group(3)))
-                elif resp.status == 206:
-                    raise IngestError("download has an invalid Content-Range header")
-            if expected is None and resp.headers.get("Content-Length") is not None:
-                expected = min(limit, int(resp.headers["Content-Length"]))
-
-            total = 0
+            expected = _expected_size(resp, limit)
             with tmp.open("wb") as out:
-                while chunk := resp.read(min(1024 * 1024, limit - total + 1)):
-                    total += len(chunk)
-                    if total > limit:
-                        if range_bytes is None:
-                            raise IngestError(f"download exceeds {MAX_DOWNLOAD_BYTES} bytes")
-                        chunk = chunk[: len(chunk) - (total - limit)]
-                        total = limit
-                    out.write(chunk)
-                    if total == limit:
-                        break
+                total = _copy_limited(resp, out, limit, range_bytes)
             if expected is not None and total < expected:
                 raise IngestError(f"incomplete download: received {total} of {expected} bytes")
         tmp.replace(dest)
@@ -186,7 +204,8 @@ def http_fetch(url: str, dest: Path, range_bytes: int | None = None) -> None:
 
 class _HttpsRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
+        loopback_fixture = req is not None and _is_loopback_http(req.full_url) and _is_loopback_http(newurl)
+        if urllib.parse.urlsplit(newurl).scheme.lower() != "https" and not loopback_fixture:
             raise IngestError("HTTPS download redirected to a non-HTTPS URL")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -239,6 +258,57 @@ def cache_path(cache: Path, rec: dict) -> Path:
     if not destination.is_relative_to(root):
         raise IngestError("cache destination escapes the cache directory")
     return destination
+
+
+def _local_problem(rec: dict, cache: Path) -> str | None:
+    """Why a local-only item cannot be used from the cache, or None when its file is there and intact."""
+    try:
+        path = cache_path(cache, rec)
+    except (IngestError, KeyError, TypeError, AttributeError):
+        return "has no usable cache location"
+    if not path.is_file():
+        return "is missing from the cache"
+    expected = rec.get("sha256")
+    if expected is not None and sha256_file(path) != expected:
+        return "differs from its recorded sha256"
+    return None
+
+
+def split_unusable_local(records: Iterable[dict], cache: Path) -> tuple[list[dict], list[Rejection]]:
+    """Set aside local-only items (built on this machine from archives) that are missing or corrupted in the
+    cache. Their `url` is only provenance, so there is nothing to download."""
+    kept: list[dict] = []
+    rejected: list[Rejection] = []
+    for rec in records:
+        problem = _local_problem(rec, cache) if isinstance(rec, dict) and rec.get("local_only") is True else None
+        if problem:
+            rejected.append(Rejection(str(rec.get("id", "<missing>")),
+                                      f"local-only item {problem}; rebuild it with build_local_items.py"))
+        else:
+            kept.append(rec)
+    return kept, rejected
+
+
+def _cache_matches(rec: dict, dest: Path) -> bool:
+    expected = rec.get("sha256")
+    if not dest.is_file():
+        return False
+    return expected is None or sha256_file(dest) == expected
+
+
+def split_pending(valid: list[tuple[dict, Path]]) -> tuple[list[tuple[dict, Path]], dict[str, Exception]]:
+    """Items that need downloading, and local-only items whose file changed after the first check. The latter
+    are never downloaded: their `url` is only provenance."""
+    pending: list[tuple[dict, Path]] = []
+    changed_local: dict[str, Exception] = {}
+    for rec, dest in valid:
+        if _cache_matches(rec, dest):
+            continue
+        if rec.get("local_only") is True:
+            changed_local[rec["id"]] = IngestError("local-only file changed or went missing; rebuild it with build_local_items.py")
+        else:
+            pending.append((rec, dest))
+    return pending, changed_local
 
 
 def fetch_all(
@@ -299,7 +369,7 @@ def ingest_items(
     if per_host < 1:
         raise IngestError("per_host must be a positive integer")
     accepted: list[dict] = []
-    rejected: list[Rejection] = []
+    records, rejected = split_unusable_local(records, cache)
     seen_ids: set[str] = set()
     seen_hashes: dict[str, str] = {}
 
@@ -320,12 +390,9 @@ def ingest_items(
         dest.parent.mkdir(parents=True, exist_ok=True)
         valid.append((rec, dest))
 
-    pending = []
-    for rec, dest in valid:
-        expected = rec.get("sha256")
-        if not (dest.is_file() and (expected is None or sha256_file(dest) == expected)):
-            pending.append((rec, dest))
+    pending, changed_local = split_pending(valid)
     failures = fetch_all(pending, fetch, workers, per_host, progress)
+    failures.update(changed_local)
 
     for rec, dest in valid:
         item_id = rec["id"]
@@ -361,7 +428,7 @@ def ingest_items(
             "license_evidence_url": rec.get("license_evidence_url", ""),
             "attribution_text": rec["attribution_text"],
             "tags": sorted({t.strip().lower() for t in rec.get("tags", [])}),
-            **{k: rec[k] for k in ("range_bytes", "ext", "tag_basis", "title", "creator", "query", "retrieved_at") if k in rec},
+            **{k: rec[k] for k in ITEM_PASSTHROUGH_KEYS if k in rec},
             "sha256": digest,
             "size_bytes": dest.stat().st_size,
             **audio,
@@ -440,6 +507,13 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def _select_fetcher(records: list[dict], args: argparse.Namespace) -> Fetcher:
+    """Plain downloads, or authorized and rate-limited ones when any item is a Freesound original."""
+    import freesound  # freesound imports this module
+    budget = freesound.DownloadBudget(args.freesound_interval, args.freesound_max_downloads)
+    return freesound.fetcher_for_records(records, args.freesound_token_file, budget)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -453,6 +527,12 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--per-host", type=positive_int, default=2, help="concurrent downloads per host (default 2)")
     p_ingest.add_argument("--skip-rejected", action="store_true",
                           help="write the manifest from accepted items even if some were rejected")
+    p_ingest.add_argument("--freesound-token-file", type=Path,
+                          help="OAuth2 token file from `freesound.py exchange` (default: the per-user location)")
+    p_ingest.add_argument("--freesound-interval", type=float, default=2.2,
+                          help="seconds between Freesound original downloads; Freesound allows 30 a minute (default 2.2)")
+    p_ingest.add_argument("--freesound-max-downloads", type=positive_int, default=450,
+                          help="most Freesound original downloads to make in this run; the daily limit is 500 (default 450)")
 
     p_verify = sub.add_parser("verify", help="re-check a manifest against the cache")
     p_verify.add_argument("--manifest", type=Path, required=True)
@@ -470,12 +550,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         records = read_jsonl(args.items)
+        fetch = _select_fetcher(records, args)
     except IngestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     accepted, rejected = ingest_items(
-        records, args.cache, allow_sharealike=args.allow_sharealike, workers=args.workers, per_host=args.per_host,
-        progress=lambda done, total, item_id: print(f"[{done}/{total}] {item_id}", file=sys.stderr, flush=True))
+        records, args.cache, allow_sharealike=args.allow_sharealike, fetch=fetch, workers=args.workers,
+        per_host=args.per_host, progress=lambda done, total, item_id: print(f"[{done}/{total}] {item_id}", file=sys.stderr, flush=True))
     for r in rejected:
         print(f"REJECTED {r.item_id}: {r.reason}", file=sys.stderr)
     if rejected and not args.skip_rejected:

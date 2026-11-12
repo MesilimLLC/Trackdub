@@ -229,6 +229,26 @@ public sealed class DiarizationStageHandlerTests
     }
 
     [Fact]
+    public async Task ImportModelAsync_uses_injected_fingerprint_for_integrity_check()
+    {
+        string root = CreateTempDirectory();
+        string sourcePath = Path.Join(root, "source.onnx");
+        await File.WriteAllBytesAsync(sourcePath, [1, 2, 3, 4], TestContext.Current.CancellationToken);
+        string expected = new string('b', 64);
+        var fingerprints = new FakeFileFingerprintService(new FileFingerprint(expected, 4, DateTimeOffset.UnixEpoch));
+        DiarizationStageHandler handler = new DiarizationStageHandler(
+            new FakeDiarizationEngine(),
+            new NoOpModelDownloader(),
+            modelCacheRoot: Path.Join(root, "model-cache"),
+            expectedSha256: expected,
+            fingerprintService: fingerprints);
+
+        await handler.ImportModelAsync(sourcePath, TestContext.Current.CancellationToken);
+
+        Assert.Contains(ExpectedModelFilePath(Path.Join(root, "model-cache")), fingerprints.RequestedPaths);
+    }
+
+    [Fact]
     public async Task DiarizeAsync_WhenModelReady_ReturnsSpeakerTurns()
     {
         var engine = new FakeDiarizationEngine();

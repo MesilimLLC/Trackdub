@@ -17,7 +17,8 @@ public sealed class DiarizationStageHandler(
     IModelCacheRegistrar? modelCacheRegistrar = null,
     string? modelCacheRoot = null,
     string? expectedSha256 = null,
-    IModelCacheRecordLookup? modelCacheLookup = null)
+    IModelCacheRecordLookup? modelCacheLookup = null,
+    IFileFingerprintService? fingerprintService = null)
     : IStageRuntimeExecutionReporter
 {
     private const string SortFormerModelId = "cgus/diar_streaming_sortformer_4spk-v2.1-onnx";
@@ -47,6 +48,8 @@ public sealed class DiarizationStageHandler(
 
     private readonly IModelCacheRecordLookup? modelCacheLookup =
         modelCacheLookup ?? modelCacheRegistrar as IModelCacheRecordLookup;
+
+    private readonly IFileFingerprintService? fingerprintService = fingerprintService;
 
     public StageRuntimeExecutionSummary? LastExecutionSummary =>
         diarizationEngine is IStageRuntimeExecutionReporter reporter
@@ -262,7 +265,9 @@ public sealed class DiarizationStageHandler(
             return false;
         }
 
-        string actualSha256 = await ComputeSha256Async(modelPath, cancellationToken).ConfigureAwait(false);
+        string actualSha256 = fingerprintService is null
+            ? await ComputeSha256Async(modelPath, cancellationToken).ConfigureAwait(false)
+            : (await fingerprintService.ComputeAsync(modelPath, cancellationToken).ConfigureAwait(false)).Sha256;
         if (string.Equals(actualSha256, sortFormerExpectedSha256, StringComparison.OrdinalIgnoreCase))
         {
             await RegisterModelCacheRecordAsync(modelRootPath, actualSha256, cancellationToken).ConfigureAwait(false);

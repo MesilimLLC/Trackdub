@@ -6,6 +6,7 @@ public sealed class FakeFileFingerprintService : IFileFingerprintService
 {
     private readonly Dictionary<string, FileFingerprint> fingerprints = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> requestedPaths = [];
+    private readonly List<string> invalidatedPaths = [];
 
     public FakeFileFingerprintService()
     {
@@ -19,6 +20,8 @@ public sealed class FakeFileFingerprintService : IFileFingerprintService
     public FileFingerprint? DefaultFingerprint { get; set; }
 
     public IReadOnlyList<string> RequestedPaths => requestedPaths;
+
+    public IReadOnlyList<string> InvalidatedPaths => invalidatedPaths;
 
     public void SetFingerprint(string path, FileFingerprint fingerprint)
     {
@@ -43,4 +46,11 @@ public sealed class FakeFileFingerprintService : IFileFingerprintService
 
     private static FileFingerprint CreateDefaultFingerprint(string path) =>
         new($"hash-{Path.GetFileName(path)}", 0, DateTimeOffset.UnixEpoch);
+
+    public void Invalidate(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        fingerprints.Remove(path);
+        invalidatedPaths.Add(path);
+    }
 }
