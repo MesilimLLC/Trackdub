@@ -361,7 +361,7 @@ def spec_types(spec: dict) -> tuple[str, ...]:
 
 
 def _license_clause(spec: dict) -> str:
-    names = sorted({LICENSE_FILTER_NAMES[l] for l in spec_licenses(spec)})
+    names = sorted({LICENSE_FILTER_NAMES[name] for name in spec_licenses(spec)})
     if len(names) == 1:
         return f'license:"{names[0]}"'
     return "license:(" + " OR ".join(f'"{n}"' for n in names) + ")"
