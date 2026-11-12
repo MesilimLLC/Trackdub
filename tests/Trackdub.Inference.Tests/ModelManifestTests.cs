@@ -2392,7 +2392,7 @@ public sealed class ModelManifestLoaderTests
     }
 }
 
-public sealed class ModelHashVerifierTests
+public sealed partial class ModelHashVerifierTests
 {
     [Fact]
     public async Task Verify_RequiredPolicyFailsWhenShaMissing()

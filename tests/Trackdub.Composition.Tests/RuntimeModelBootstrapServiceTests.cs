@@ -5,6 +5,7 @@ using Trackdub.Domain;
 using Trackdub.Infrastructure.Settings;
 using Trackdub.Inference.Runtime.ModelManifest;
 using Trackdub.Inference.Runtime.Planning;
+using Trackdub.TestDoubles;
 
 namespace Trackdub.Composition.Tests;
 
@@ -38,7 +39,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             fingerprintService,
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? missingStatus = await service.GetRequiredModelStatusAsync(
             new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true));
@@ -77,7 +79,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? status = await service.GetRequiredModelStatusAsync(
             new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true));
@@ -114,7 +117,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? status = await service.GetRequiredModelStatusAsync(
             new RuntimeModelRequest(
@@ -155,7 +159,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? status = await service.GetRequiredModelStatusAsync(
             new RuntimeModelRequest(
@@ -196,7 +201,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus status = await service.DownloadRequiredModelAsync(
             new RuntimeModelRequest(
@@ -233,7 +239,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus status = await service.ImportRequiredModelAsync(
             new RuntimeModelRequest(
@@ -272,7 +279,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
         var request = new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true);
 
         RequiredRuntimeModelStatus? status = await service.GetRequiredModelStatusAsync(request);
@@ -314,7 +322,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
         var request = new RuntimeModelRequest(
             RuntimeStage.Separation,
             PreferredModelAlias: "hush-dialogue",
@@ -362,7 +371,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             new RecordingModelDownloader(),
             new RecordingModelCacheRegistrar(),
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? status = await service.GetRequiredModelStatusAsync(
             new RuntimeModelRequest(
@@ -394,7 +404,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? status = await service.GetManifestCompanionModelStatusAsync(
             "missing-companion",
@@ -430,7 +441,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus? missingStatus = await service.GetManifestCompanionModelStatusAsync(
             "hush-dialogue",
@@ -473,7 +485,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus result = await service.DownloadRequiredModelAsync(
             new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true),
@@ -508,7 +521,8 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             downloader,
             registrar,
             new StaticFileFingerprintService(),
-            storagePaths);
+            storagePaths,
+            hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus result = await service.DownloadRequiredModelAsync(
             new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true),
@@ -530,7 +544,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
         var downloader = new RecordingModelDownloader();
         var registrar = new RecordingModelCacheRegistrar();
         var service = new RuntimeModelBootstrapService(new QueueRuntimePlanner(), registry, downloader,
-            registrar, new StaticFileFingerprintService(), storagePaths);
+            registrar, new StaticFileFingerprintService(), storagePaths, hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus result = await service.DownloadManifestCompanionModelAsync(
             "example", RuntimeStage.Tts, cancellationToken: TestContext.Current.CancellationToken);
@@ -550,7 +564,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
         var downloader = new RecordingModelDownloader("onnx/model.onnx");
         var registrar = new RecordingModelCacheRegistrar();
         var service = new RuntimeModelBootstrapService(new QueueRuntimePlanner(), CreateRegistry(), downloader,
-            registrar, new StaticFileFingerprintService(), new TrackdubStoragePaths(tempRoot));
+            registrar, new StaticFileFingerprintService(), new TrackdubStoragePaths(tempRoot), hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus result = await service.DownloadManifestCompanionModelAsync("example", RuntimeStage.Tts);
 
@@ -566,7 +580,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
         var downloader = new RecordingModelDownloader();
         var registrar = new RecordingModelCacheRegistrar();
         var service = new RuntimeModelBootstrapService(new QueueRuntimePlanner(), CreateRegistry(), downloader,
-            registrar, new StaticFileFingerprintService(), new TrackdubStoragePaths(tempRoot));
+            registrar, new StaticFileFingerprintService(), new TrackdubStoragePaths(tempRoot), hashVerifier: new ModelHashVerifier());
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -591,7 +605,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
         var downloader = new RecordingModelDownloader();
         var service = new RuntimeModelBootstrapService(
             new QueueRuntimePlanner(CreatePlan(StageRuntimePlanStatus.DownloadRequired), CreatePlan(StageRuntimePlanStatus.Ready, entry)),
-            registry, downloader, registrar, new StaticFileFingerprintService(), storagePaths);
+            registry, downloader, registrar, new StaticFileFingerprintService(), storagePaths, hashVerifier: new ModelHashVerifier());
 
         RequiredRuntimeModelStatus result = await service.ImportRequiredModelAsync(
             new RuntimeModelRequest(RuntimeStage.Tts, "example", RequirePreferredModelAlias: true), source,

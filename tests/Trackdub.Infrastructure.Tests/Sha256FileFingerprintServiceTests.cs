@@ -36,6 +36,14 @@ public sealed class Sha256FileFingerprintServiceTests : IDisposable
         return path;
     }
 
+    // System.IO.File has no SetLength member; truncating through a write handle is the
+    // supported way to restore a file's byte length while leaving the content different.
+    private static void SetFileLength(string path, long length)
+    {
+        using FileStream stream = new(path, FileMode.Open, FileAccess.Write, FileShare.None);
+        stream.SetLength(length);
+    }
+
     // ---------------------------------------------------------------
     // RED phase: tests that define expected behavior before optimization
     // ---------------------------------------------------------------
@@ -254,5 +262,119 @@ public sealed class Sha256FileFingerprintServiceTests : IDisposable
 
         Assert.NotEqual(first.Sha256, second.Sha256);
         Assert.NotEqual(first.SizeBytes, second.SizeBytes);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_reuses_persisted_fingerprint_in_a_new_service_instance()
+    {
+        string path = CreateTempFile("persisted fingerprint");
+        string expected = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("persisted fingerprint")))
+            .ToLowerInvariant();
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        tempFiles.Add(cachePath + ".tmp");
+        var first = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+        await first.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        // Capture the stat BEFORE rewriting the bytes, then restore it, so the persisted entry
+        // still matches (length, write time) while the content on disk differs.
+        var original = new FileInfo(path);
+        DateTime originalWriteTime = original.LastWriteTimeUtc;
+        long originalLength = original.Length;
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("different bytes with the same saved stat"));
+        SetFileLength(path, originalLength);
+        File.SetLastWriteTimeUtc(path, originalWriteTime);
+        var second = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+
+        FileFingerprint result = await second.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, result.Sha256);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_rehashes_when_persisted_file_stat_changes()
+    {
+        string path = CreateTempFile("before");
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        var first = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+        FileFingerprint before = await first.ComputeAsync(path, TestContext.Current.CancellationToken);
+        File.AppendAllText(path, "after");
+        var second = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+
+        FileFingerprint result = await second.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(before.Sha256, result.Sha256);
+        Assert.Equal(new FileInfo(path).Length, result.SizeBytes);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_ignores_corrupt_persisted_cache()
+    {
+        string path = CreateTempFile("valid content");
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        File.WriteAllText(cachePath, "{not-json");
+        var service = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+
+        FileFingerprint result = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("valid content"))).ToLowerInvariant(), result.Sha256);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_ignores_persisted_entry_with_out_of_range_timestamp()
+    {
+        string path = CreateTempFile("valid content");
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        tempFiles.Add(cachePath + ".tmp");
+        string json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Version = 1,
+            Entries = new[]
+            {
+                new
+                {
+                    Path = path,
+                    Sha256 = new string('f', 64),
+                    SizeBytes = new FileInfo(path).Length,
+                    LastWriteTimeUtcTicks = long.MaxValue
+                }
+            }
+        });
+        File.WriteAllText(cachePath, json);
+
+        var service = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+
+        FileFingerprint result = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("valid content"))).ToLowerInvariant(),
+            result.Sha256);
+    }
+
+    [Fact]
+    public async Task Invalidate_forces_rehash_even_when_file_stat_is_unchanged()
+    {
+        string path = CreateTempFile("original");
+        string cachePath = Path.Join(Path.GetTempPath(), "Trackdub.Infrastructure.Tests", Guid.NewGuid().ToString("N") + ".json");
+        tempFiles.Add(cachePath);
+        var service = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+        FileFingerprint before = await service.ComputeAsync(path, TestContext.Current.CancellationToken);
+        var original = new FileInfo(path);
+        DateTime writeTime = original.LastWriteTimeUtc;
+        long length = original.Length;
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("replaced"));
+        SetFileLength(path, length);
+        File.SetLastWriteTimeUtc(path, writeTime);
+
+        service.Invalidate(path);
+
+        // A fresh instance must not reload the invalidated entry from disk either.
+        var reloaded = new Sha256FileFingerprintService(cacheFilePath: cachePath);
+        FileFingerprint result = await reloaded.ComputeAsync(path, TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(before.Sha256, result.Sha256);
     }
 }
