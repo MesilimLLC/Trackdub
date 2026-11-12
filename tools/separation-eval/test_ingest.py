@@ -380,5 +380,24 @@ class VerifyTests(unittest.TestCase):
         self.assertTrue(any("missing" in p for p in ingest.verify_manifest(self.manifest, self.cache)))
 
 
+class SplitPendingTests(unittest.TestCase):
+    def test_a_local_only_item_that_changed_is_never_queued_for_download(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "a.wav"
+            dest.write_bytes(b"changed")
+            local = {"id": "loc", "local_only": True, "sha256": "0" * 64, "url": "https://example.org/x.wav"}
+            remote = {"id": "rem", "sha256": "0" * 64, "url": "https://example.org/y.wav"}
+            pending, changed = ingest.split_pending([(local, dest), (remote, dest)])
+        self.assertEqual([rec["id"] for rec, _ in pending], ["rem"])
+        self.assertEqual(list(changed), ["loc"])
+
+    def test_matching_files_need_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "a.wav"
+            dest.write_bytes(b"abc")
+            rec = {"id": "x", "local_only": True, "sha256": ingest.sha256_file(dest), "url": "https://example.org/x"}
+            self.assertEqual(ingest.split_pending([(rec, dest)]), ([], {}))
+
+
 if __name__ == "__main__":
     unittest.main()

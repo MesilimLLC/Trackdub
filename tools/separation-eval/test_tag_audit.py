@@ -194,5 +194,70 @@ class MainTests(AuditTestBase):
         self.assertIn("error:", err)
 
 
+class ReviewRobustnessTests(AuditTestBase):
+    def test_sound_in_the_last_fraction_of_a_clip_is_in_the_excerpt(self):
+        audio = np.zeros(int(20.25 * am.SR), dtype=np.float32)
+        audio[-am.SR // 4:] = 0.5
+        self.assertGreater(float(np.abs(ta.loudest_excerpt(audio, 20.0)).max()), 0.4)
+
+    def test_a_replaced_cache_file_is_refused(self):
+        item = dict(self.items[0], sha256="0" * 64)
+        with self.assertRaisesRegex(ta.AuditError, "does not match the manifest sha256"):
+            ta.verified_path(item, self.cache)
+
+    def test_a_matching_hash_is_accepted(self):
+        item = dict(self.items[0])
+        item["sha256"] = ingest.sha256_file(ingest.cache_path(self.cache, item))
+        self.assertEqual(ta.verified_path(item, self.cache), ingest.cache_path(self.cache, item))
+
+
+class CsvShapeTests(AuditTestBase):
+    def write_csv(self, rows, name="audit.csv"):
+        path = self.root / name
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=ta.FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+        return path
+
+    def test_a_row_cut_short_is_an_error_naming_its_line(self):
+        path = self.root / "short.csv"
+        path.write_text(",".join(ta.FIELDS) + "\n001.wav,x,loud,q,-20,\n", encoding="utf-8")
+        with self.assertRaisesRegex(ta.AuditError, "line 2 is missing a column"):
+            ta.read_verdicts(path)
+
+    def test_an_empty_csv_is_an_error(self):
+        with self.assertRaisesRegex(ta.AuditError, "no rows"):
+            ta.read_verdicts(self.write_csv([]))
+
+    def test_deleted_rows_are_detected_when_the_pack_list_is_present(self):
+        rows = rows_for("loud", ["pass"] * 3)
+        path = self.write_csv(rows[:2])
+        (self.root / ta.PACK_LIST).write_text(json.dumps({"files": [r["file"] for r in rows]}), encoding="utf-8")
+        with self.assertRaisesRegex(ta.AuditError, "missing"):
+            ta.read_verdicts(path)
+
+    def test_a_complete_csv_matches_its_pack_list(self):
+        rows = rows_for("loud", ["pass"] * 3)
+        path = self.write_csv(rows)
+        (self.root / ta.PACK_LIST).write_text(json.dumps({"files": [r["file"] for r in rows]}), encoding="utf-8")
+        self.assertEqual(len(ta.read_verdicts(path)), 3)
+
+    def test_sample_writes_the_pack_list(self):
+        out = self.root / "pack"
+        rows = ta.build_pack(self.manifest, self.cache, out)
+        listed = json.loads((out / ta.PACK_LIST).read_text(encoding="utf-8"))["files"]
+        self.assertEqual(listed, [r["file"] for r in rows])
+
+    def test_score_refuses_to_overwrite_the_verdict_csv(self):
+        path = self.write_csv(rows_for("loud", ["pass"]))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = ta.main(["score", "--csv", str(path), "--out", str(path)])
+        self.assertEqual(code, 1)
+        self.assertIn("overwrite the verdicts", err.getvalue())
+        self.assertIn("file,item_id", path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

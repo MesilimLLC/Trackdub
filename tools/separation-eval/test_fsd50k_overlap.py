@@ -96,5 +96,13 @@ class OverlapTests(unittest.TestCase):
         self.assertIn("cannot open", err.getvalue())
 
 
+class UnassessedTests(unittest.TestCase):
+    def test_openverse_freesound_items_without_an_id_are_counted_not_dropped(self):
+        items = ITEMS + [{"id": "ov", "source": "openverse:freesound", "role": "sfx", "tags": []},
+                         {"id": "jam", "source": "openverse:jamendo", "role": "music", "tags": []}]
+        summary = fo.summarize(items, [])
+        self.assertEqual((summary["unassessed_freesound_items"], summary["unassessed_ids"]), (1, ["ov"]))
+
+
 if __name__ == "__main__":
     unittest.main()

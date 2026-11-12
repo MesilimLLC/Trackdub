@@ -61,10 +61,17 @@ def count_by(rows: list[dict], key) -> dict[str, int]:
     return dict(sorted(collections.Counter(key(r) for r in rows).items()))
 
 
+def unassessed_ids(items: list[dict]) -> list[str]:
+    """Freesound-sourced items with no `freesound_id` (Openverse results), which cannot be matched."""
+    return [i["id"] for i in items if "freesound" in str(i.get("source", "")) and "freesound_id" not in i]
+
+
 def summarize(items: list[dict], flagged: list[dict]) -> dict:
     sounds = [i for i in items if "freesound_id" in i]
+    unassessed = unassessed_ids(items)
     return {
         "freesound_items": len(sounds), "in_fsd50k": len(flagged),
+        "unassessed_freesound_items": len(unassessed), "unassessed_ids": unassessed,
         "share_in_fsd50k": round(len(flagged) / len(sounds), 4) if sounds else 0.0,
         "by_role": count_by(flagged, lambda r: r["role"]),
         "by_tag": count_by([dict(r, tag=t) for r in flagged for t in (r["tags"] or ["(none)"])], lambda r: r["tag"]),
@@ -91,7 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     s = report["summary"]
-    print(f"{s['in_fsd50k']} of {s['freesound_items']} Freesound items are in FSD50K ({s['share_in_fsd50k']:.1%}); report: {args.out}")
+    print(f"{s['in_fsd50k']} of {s['freesound_items']} Freesound items are in FSD50K ({s['share_in_fsd50k']:.1%}); "
+          f"{s['unassessed_freesound_items']} Freesound items have no id and were not checked; report: {args.out}")
     return 0
 
 

@@ -289,6 +289,28 @@ def split_unusable_local(records: Iterable[dict], cache: Path) -> tuple[list[dic
     return kept, rejected
 
 
+def _cache_matches(rec: dict, dest: Path) -> bool:
+    expected = rec.get("sha256")
+    if not dest.is_file():
+        return False
+    return expected is None or sha256_file(dest) == expected
+
+
+def split_pending(valid: list[tuple[dict, Path]]) -> tuple[list[tuple[dict, Path]], dict[str, Exception]]:
+    """Items that need downloading, and local-only items whose file changed after the first check. The latter
+    are never downloaded: their `url` is only provenance."""
+    pending: list[tuple[dict, Path]] = []
+    changed_local: dict[str, Exception] = {}
+    for rec, dest in valid:
+        if _cache_matches(rec, dest):
+            continue
+        if rec.get("local_only") is True:
+            changed_local[rec["id"]] = IngestError("local-only file changed or went missing; rebuild it with build_local_items.py")
+        else:
+            pending.append((rec, dest))
+    return pending, changed_local
+
+
 def fetch_all(
     pending: list[tuple[dict, Path]],
     fetch: Fetcher,
@@ -368,12 +390,9 @@ def ingest_items(
         dest.parent.mkdir(parents=True, exist_ok=True)
         valid.append((rec, dest))
 
-    pending = []
-    for rec, dest in valid:
-        expected = rec.get("sha256")
-        if not (dest.is_file() and (expected is None or sha256_file(dest) == expected)):
-            pending.append((rec, dest))
+    pending, changed_local = split_pending(valid)
     failures = fetch_all(pending, fetch, workers, per_host, progress)
+    failures.update(changed_local)
 
     for rec, dest in valid:
         item_id = rec["id"]

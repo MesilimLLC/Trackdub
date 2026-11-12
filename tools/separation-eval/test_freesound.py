@@ -1,6 +1,8 @@
 import contextlib
 import io
 import json
+import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -421,6 +423,16 @@ class BudgetTests(unittest.TestCase):
             with self.assertRaises(ingest.IngestError):
                 fetch(f"https://freesound.org/apiv2/sounds/{sound}/download/", Path("a"), None)
         self.assertEqual(len(calls), 2)
+
+
+@unittest.skipIf(os.name == "nt", "POSIX file modes")
+class TokenFileModeTests(unittest.TestCase):
+    def test_the_token_file_is_private_and_no_temp_file_is_left(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sub" / "token.json"
+            freesound.save_token(path, {"access_token": "x"})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual([p.name for p in path.parent.iterdir()], ["token.json"])
 
 
 if __name__ == "__main__":

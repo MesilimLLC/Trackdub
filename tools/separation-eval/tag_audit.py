@@ -43,6 +43,7 @@ EXCERPT_S = 20.0
 SILENT_DBFS = -60.0
 SEED = "tag-audit-v1"
 VERDICTS = ("pass", "fail", "unsure")
+PACK_LIST = "pack.json"
 FIELDS = ["file", "item_id", "claimed_tag", "question", "rms_dbfs", "auto_flag", "verdict", "notes"]
 
 
@@ -69,7 +70,7 @@ def loudest_excerpt(audio: np.ndarray, seconds: float = EXCERPT_S, sr: int = am.
     window, hop = int(seconds * sr), sr // 2
     if audio.shape[0] <= window:
         return audio
-    starts = np.arange(0, audio.shape[0] - window + 1, hop)
+    starts = np.union1d(np.arange(0, audio.shape[0] - window + 1, hop), [audio.shape[0] - window])
     energy = np.concatenate([[0.0], np.cumsum(audio.astype(np.float64) ** 2)])
     totals = energy[starts + window] - energy[starts]
     start = int(starts[int(np.argmax(totals))])
@@ -91,9 +92,18 @@ class Pack(NamedTuple):
     out_dir: Path
 
 
+def verified_path(item: dict, cache: Path) -> Path:
+    """The cached file for the item, checked against the manifest hash so a replaced file is not reviewed."""
+    path = ingest.cache_path(cache, item)
+    expected = item.get("sha256")
+    if expected is not None and ingest.sha256_file(path) != expected:
+        raise AuditError(f"{item['id']}: cached file does not match the manifest sha256")
+    return path
+
+
 def review_row(number: int, tag: str, item: dict, pack: Pack) -> dict:
     try:
-        audio = loudest_excerpt(am.load_audio(ingest.cache_path(pack.cache, item), channels=1)[:, 0])
+        audio = loudest_excerpt(am.load_audio(verified_path(item, pack.cache), channels=1)[:, 0])
     except (OSError, ValueError, am.AudioError, ingest.IngestError) as exc:
         raise AuditError(f"{item['id']}: cannot load audio: {exc}") from exc
     name = f"{number:03d}.wav"
@@ -114,6 +124,7 @@ def build_pack(manifest: dict, cache: Path, out_dir: Path) -> list[dict]:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
         writer.writerows(rows)
+    (out_dir / PACK_LIST).write_text(json.dumps({"files": [r["file"] for r in rows]}) + "\n", encoding="utf-8")
     return rows
 
 
@@ -123,10 +134,31 @@ def read_verdicts(path: Path) -> list[dict]:
             rows = list(csv.DictReader(f))
     except OSError as exc:
         raise AuditError(f"cannot read {path}: {exc}") from exc
+    check_complete_rows(rows, path)
     bad = [r["file"] for r in rows if r["verdict"].strip().lower() not in ("", *VERDICTS)]
     if bad:
         raise AuditError(f"verdict must be pass, fail or unsure (or blank); see {', '.join(bad[:5])}")
     return rows
+
+
+def check_complete_rows(rows: list[dict], path: Path) -> None:
+    """Every row needs every column, and the rows must be the ones the pack was written with."""
+    if not rows:
+        raise AuditError(f"{path} has no rows")
+    for number, row in enumerate(rows, 2):
+        if any(row.get(field) is None for field in FIELDS):
+            raise AuditError(f"{path} line {number} is missing a column; expected {', '.join(FIELDS)}")
+    check_against_pack_list(rows, path.with_name(PACK_LIST))
+
+
+def check_against_pack_list(rows: list[dict], pack_list: Path) -> None:
+    if not pack_list.is_file():
+        return
+    expected = set(json.loads(pack_list.read_text(encoding="utf-8"))["files"])
+    found = {r["file"] for r in rows}
+    if found != expected:
+        raise AuditError(f"rows differ from the pack: missing {sorted(expected - found)[:5]}, "
+                         f"unexpected {sorted(found - expected)[:5]}")
 
 
 def tag_result(rows: list[dict]) -> dict:
@@ -156,6 +188,8 @@ def cmd_sample(args: argparse.Namespace) -> str:
 
 
 def cmd_score(args: argparse.Namespace) -> str:
+    if args.out.resolve() == args.csv.resolve():
+        raise AuditError("--out must not be the verdict CSV; it would overwrite the verdicts")
     report = score(read_verdicts(args.csv))
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return "; ".join(f"{t}: {r['status']} ({r['fail_rate']:.0%} of {r['items']})" for t, r in report["tags"].items())

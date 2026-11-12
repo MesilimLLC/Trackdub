@@ -126,9 +126,11 @@ def default_token_file() -> Path:
 def save_token(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(record), encoding="utf-8")
-    if os.name != "nt":
-        os.chmod(tmp, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        if os.name != "nt":
+            os.chmod(tmp, 0o600)
+        f.write(json.dumps(record))
     tmp.replace(path)
 
 
