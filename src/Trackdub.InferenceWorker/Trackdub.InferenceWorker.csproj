@@ -89,6 +89,18 @@
           DestinationFolder="$(TargetDir)"
           OverwriteReadOnlyFiles="true"
           SkipUnchangedFiles="false" />
+    <!-- deps.json runtimeTargets resolve DllImport("onnxruntime") to runtimes/<rid>/native/onnxruntime.dll
+         ahead of app-dir probing, and NuGet filled that slot from Windows ML's ORT 1.27 payload while
+         the managed binding above is stock 1.31. Overwrite the slot or NativeMethods init fails. -->
+    <Copy Condition="'@(_OrtGpuNative)' != ''"
+          SourceFiles="$(_OrtGpuNativeDir)onnxruntime.dll"
+          DestinationFolder="$(TargetDir)runtimes\$(_OrtGpuRid)\native"
+          OverwriteReadOnlyFiles="true"
+          SkipUnchangedFiles="false" />
+    <!-- Same PreserveNewest hazard as the managed binding: stamp the overwritten native so
+         Composition's copy cannot keep a stale Windows ML build. -->
+    <Touch Files="$(TargetDir)runtimes\$(_OrtGpuRid)\native\onnxruntime.dll" AlwaysCreate="false"
+          Condition="'@(_OrtGpuNative)' != ''" />
     <!-- Composition copies this tree with PreserveNewest. The stock package file is older than
          Windows ML's, so stamp the written file or a previous WinML copy is kept. -->
     <Touch Files="$(TargetDir)Microsoft.ML.OnnxRuntime.dll" AlwaysCreate="false" />
