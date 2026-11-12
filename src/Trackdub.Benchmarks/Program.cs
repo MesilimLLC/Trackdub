@@ -365,7 +365,7 @@ public static class Program
     {
         if (args.Length == 0 || args.Any(a => a is "--help" or "-h" or "/?"))
         {
-            output.WriteLine("matrix <fixture> --output <directory> [--providers <comma-separated>] [--baseline <provider>] [--scenario <name>] [--runs <count>] [--mock] [--dry-run] [--format <console|json|both>] [--report-dir <directory>]");
+            output.WriteLine("matrix <fixture> --output <directory> [--providers <comma-separated>] [--baseline <provider>] [--scenario <name>] [--runs <count>] [--language <code>] [--source-language <code>] [--mock] [--dry-run] [--format <console|json|both>] [--report-dir <directory>]");
             output.WriteLine("Evaluates comparative execution provider performance (speedup, latency deltas, throughput, memory) across configured providers.");
             return args.Length == 0 ? 1 : 0;
         }
@@ -376,6 +376,8 @@ public static class Program
         string baselineProvider = "cpu";
         IReadOnlyList<string>? providers = null;
         int runCount = 1;
+        string targetLanguage = "es";
+        string? sourceLanguage = null;
         bool mock = false;
         bool dryRun = false;
         ReportFormat format = ReportFormat.Both;
@@ -433,6 +435,13 @@ public static class Program
                 case "--report-dir":
                     reportDirectory = value;
                     break;
+                case "--language":
+                case "--target-language":
+                    targetLanguage = value;
+                    break;
+                case "--source-language":
+                    sourceLanguage = value;
+                    break;
                 default:
                     error.WriteLine($"Unknown option {arg}.");
                     return 1;
@@ -447,21 +456,8 @@ public static class Program
 
         providers ??= ["cpu", "directml"];
 
-        string[] validProviders = ["cpu", "dml", "directml", "cuda", "tensorrt", "trt", "tensorrtrtx", "trt-rtx", "openvino", "migraphx", "rocm", "coreml", "nnapi", "xnnpack", "snpe", "qnn"];
-        foreach (string p in providers)
+        if (!ExecutionProviderMatrixValidation.TryValidateProviders(providers, baselineProvider, error))
         {
-            if (!validProviders.Contains(BenchmarkComparison.NormalizeProvider(p), StringComparer.OrdinalIgnoreCase) &&
-                !validProviders.Contains(p, StringComparer.OrdinalIgnoreCase))
-            {
-                error.WriteLine($"Unknown provider '{p}'. Expected one of: cpu, directml, cuda, tensorrt, openvino, etc.");
-                return 1;
-            }
-        }
-
-        if (!providers.Any(p => BenchmarkComparison.NormalizeProvider(p).Equals(
-                BenchmarkComparison.NormalizeProvider(baselineProvider), StringComparison.OrdinalIgnoreCase)))
-        {
-            error.WriteLine($"Baseline provider '{baselineProvider}' must be one of --providers ({string.Join(", ", providers)}).");
             return 1;
         }
 
@@ -489,6 +485,8 @@ public static class Program
                 Mock = mock || dryRun,
                 DryRun = dryRun,
                 Format = format,
+                TargetLanguage = targetLanguage,
+                SourceLanguage = sourceLanguage,
             };
 
             var report = await runner.RunAsync(options, cancellationToken).ConfigureAwait(false);
