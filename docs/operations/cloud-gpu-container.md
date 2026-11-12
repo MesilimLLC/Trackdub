@@ -160,8 +160,10 @@ for that stage. The seeded volume has to contain the variant (`trackdub models d
 For example, to run MADLAD's classic-TensorRT-qualified export instead of the preset's `quantized` files:
 
 ```bash
-docker run --rm --gpus all -v trackdub-data:/data <server-image> run pipeline   --media /in/clip.mp4 --source-language es --target-language en --output /out/project   --execution-provider tensorrt --require-execution-provider   --preset poc-server-v1 --variant translation:trt-fp16
+docker run --rm --gpus all -v trackdub-data:/data -v /in:/in:ro -v /out:/out <server-image> run pipeline   --media /in/clip.mp4 --source-language es --target-language en --output /out/project   --execution-provider cuda --preset poc-server-v1 --variant translation:trt-fp16
 ```
+
+Note: `--preset poc-server-v1` pins the translation stage to the CUDA execution provider, so `--execution-provider tensorrt` is overridden to CUDA for that stage. The `--variant` only changes the model variant (e.g., `trt-fp16`), not the provider. Combine `--variant` with `--execution-provider tensorrt --require-execution-provider` when running without a preset, or use the preset's provider pins directly.
 
 Reference: [gpu-execution-providers.md](../reference/gpu-execution-providers.md#choosing-a-variant-explicitly-run-pipeline---variant).
 

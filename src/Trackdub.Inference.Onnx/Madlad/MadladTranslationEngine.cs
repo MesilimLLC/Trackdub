@@ -276,7 +276,6 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         return cpuPlan;
     }
 
-
     // The router has already chosen this MADLAD model. A soft alias lets the planner fall through
     // to another language-pair model (e.g. OPUS-MT) when the requested variant is not ready, and
     // the engine would then load a non-MADLAD model directory.
