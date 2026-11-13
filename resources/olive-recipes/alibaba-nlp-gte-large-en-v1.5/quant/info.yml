@@ -1,7 +1,0 @@
-keywords:
-    olive-ci
-name: gte-large-en-v1.5
-recipes:
-    - file: config.json
-      ep: CPUExecutionProvider
-      device: cpu

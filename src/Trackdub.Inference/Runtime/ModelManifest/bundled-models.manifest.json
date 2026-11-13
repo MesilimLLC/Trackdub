@@ -5041,7 +5041,7 @@
       "requires_user_consent": false,
       "voice_cloning": false,
       "lane": "commercial",
-      "notes": "M23 video lip synthesis (original-footage repair). ONNX artifacts exported from HF weights; downloadable bundle at tonythethompson/latentsync-1.6-onnx. Companion face models: InsightFace/scrfd-500m, InsightFace/2d106det. Supersedes MuseTalk 1.5 (archived).",
+      "notes": "M23 video lip synthesis (original-footage repair). ONNX artifacts exported from HF weights; downloadable bundle at tonythethompson/latentsync-1.6-onnx. Companion face models: InsightFace/scrfd-500m, InsightFace/2d106det.",
       "aliases": [
         "latentsync-1.6",
         "latentsync"
@@ -7695,38 +7695,6 @@
         "vae_encoder.onnx": "https://huggingface.co/tonythethompson/latentsync-1.6-onnx/resolve/8e1dd855e910df770732bb1be7d77666dd28ee45/vae_encoder.onnx",
         "whisper_encoder.onnx": "https://huggingface.co/tonythethompson/latentsync-1.6-onnx/resolve/8e1dd855e910df770732bb1be7d77666dd28ee45/whisper_encoder.onnx"
       }
-    },
-    {
-      "model_id": "musetalk-v1-5",
-      "display_name": "MuseTalk 1.5 (video lip synthesis, archived)",
-      "task": "lip-synthesis",
-      "engine_family": "python-musetalk-lip-synthesis",
-      "provider_id": "python-musetalk-lip-synthesis",
-      "tier": "quality",
-      "license": "MIT",
-      "commercial_allowed": false,
-      "commercial_use_verified": false,
-      "redistribution_allowed": false,
-      "requires_attribution": true,
-      "requires_user_consent": false,
-      "voice_cloning": false,
-      "lane": "experimental",
-      "deprecated": true,
-      "deprecated_reason": "Superseded by ByteDance/LatentSync-1.6 (2026-06-25). LatentSync offers ONNX/ORT runtime, openrail++ commercial license, and 512×512 native resolution vs 256×256. MuseTalk dependency chain (LRS2 training data provenance unresolved, Python/CUDA packaging) never cleared commercial lane.",
-      "blocked_reason": "M23 video lip synthesis. Python/CUDA experimental provider. Dependency licenses (sd-vae-ft-mse, whisper, dwpose, face-parsing, face-alignment, s3fd) require human review before commercial use; runtime/packaging/GPU requirements are not stable for the default product lane.",
-      "notes": "Archived historical reference. Superseded by ByteDance/LatentSync-1.6. Do not use for new work.",
-      "aliases": [
-        "musetalk",
-        "musetalk-1.5"
-      ],
-      "expected_runtime": "python-cuda",
-      "source_url": "https://github.com/TMElyralab/MuseTalk",
-      "root_path": "../../../../models/musetalk-v1-5",
-      "benchmark_entry": "models/musetalkV15/unet.pth",
-      "hash_verification": {
-        "mode": "none"
-      },
-      "variants": []
     },
     {
       "model_id": "InsightFace/scrfd-500m",

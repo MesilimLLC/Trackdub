@@ -1,1 +1,0 @@
-PowerShell (strict mode, PSCustomObject) for agent orchestration; Bash with `mapfile`/`dotnet sln` for CI test runner; Python 3 with `argparse`, `onnx`, `onnxruntime`, `torch`, `speechbrain`, `pyannote.audio`, and `huggingface_hub` for model export/validation; Git subprocess calls for repository scanning.

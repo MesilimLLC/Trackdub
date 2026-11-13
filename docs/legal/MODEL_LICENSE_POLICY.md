@@ -40,8 +40,9 @@ Rules:
 - **There is no runtime `CommercialSafeMode` flag or user toggle.** The product
   ships only commercial-safe models. Lane enforcement is done at manifest
   authoring time via `commercial_allowed`, `commercial_use_verified`, and `lane`
-  fields; `CommercialSafeEvaluator` reads these fields — it does not consume a
-  runtime parameter.
+  fields. The model inventory and runtime planner read these fields
+  (`ModelManifest.CommercialSafeMode` is computed from `commercial_use_verified`);
+  nothing consumes a runtime parameter.
 - Non-commercial models (`lane: "non-commercial"`, `commercial_allowed: false`)
   must never appear in `bundled-models.manifest.json`. They belong in a separate
   research or dev-tooling manifest only.

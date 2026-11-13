@@ -135,17 +135,17 @@ public sealed class ProjectArtifactPathsTests
         Guid stageRunId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
         Assert.Equal(
-            "artifacts/stems/33333333-3333-3333-3333-333333333333/demucs-v4/vocals.wav",
-            ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "demucs-v4"));
+            "artifacts/stems/33333333-3333-3333-3333-333333333333/spleeter/vocals.wav",
+            ProjectArtifactPaths.GetStemVocalsRelativePath(stageRunId, "spleeter"));
         Assert.Equal(
-            "artifacts/stems/33333333-3333-3333-3333-333333333333/demucs-v4/ambiance.wav",
-            ProjectArtifactPaths.GetStemAmbianceRelativePath(stageRunId, "demucs-v4"));
+            "artifacts/stems/33333333-3333-3333-3333-333333333333/spleeter/ambiance.wav",
+            ProjectArtifactPaths.GetStemAmbianceRelativePath(stageRunId, "spleeter"));
         Assert.Equal(
-            "artifacts/stems/33333333-3333-3333-3333-333333333333/demucs-v4/music.wav",
-            ProjectArtifactPaths.GetStemMusicRelativePath(stageRunId, "demucs-v4"));
+            "artifacts/stems/33333333-3333-3333-3333-333333333333/spleeter/music.wav",
+            ProjectArtifactPaths.GetStemMusicRelativePath(stageRunId, "spleeter"));
         Assert.Equal(
-            "artifacts/stems/33333333-3333-3333-3333-333333333333/demucs-v4/sfx.wav",
-            ProjectArtifactPaths.GetStemSoundEffectsRelativePath(stageRunId, "demucs-v4"));
+            "artifacts/stems/33333333-3333-3333-3333-333333333333/spleeter/sfx.wav",
+            ProjectArtifactPaths.GetStemSoundEffectsRelativePath(stageRunId, "spleeter"));
     }
 
     [Fact]
@@ -153,17 +153,17 @@ public sealed class ProjectArtifactPathsTests
     {
         Guid stageRunId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
-        string path = ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "demucs-v4", "drums");
+        string path = ProjectArtifactPaths.GetRawStemRelativePath(stageRunId, "spleeter", "drums");
 
-        Assert.Equal("artifacts/stems/33333333-3333-3333-3333-333333333333/demucs-v4/drums.wav", path);
+        Assert.Equal("artifacts/stems/33333333-3333-3333-3333-333333333333/spleeter/drums.wav", path);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
-    [InlineData("../demucs")]
-    [InlineData("demucs/v4")]
-    [InlineData("DemucsV4")]
+    [InlineData("../spleeter")]
+    [InlineData("spleeter/v2")]
+    [InlineData("SpleeterV2")]
     public void EngineScopedStemPaths_InvalidEngineFamily_Throws(string engineFamily)
     {
         Guid stageRunId = Guid.NewGuid();
@@ -180,7 +180,7 @@ public sealed class ProjectArtifactPathsTests
     [InlineData("Drums")]
     public void GetRawStemRelativePath_InvalidStemName_Throws(string stemName)
     {
-        Assert.Throws<ArgumentException>(() => ProjectArtifactPaths.GetRawStemRelativePath(Guid.NewGuid(), "demucs-v4", stemName));
+        Assert.Throws<ArgumentException>(() => ProjectArtifactPaths.GetRawStemRelativePath(Guid.NewGuid(), "spleeter", stemName));
     }
 
     [Fact]

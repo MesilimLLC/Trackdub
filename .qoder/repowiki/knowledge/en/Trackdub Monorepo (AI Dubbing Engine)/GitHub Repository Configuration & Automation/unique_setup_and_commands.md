@@ -1,1 +1,0 @@
-Dependabot is configured to run weekly against both `github-actions` and `nuget` package ecosystems at the repository root, limiting open PRs to 10 per ecosystem. Pull requests must be validated using `dotnet build Trackdub.slnx -m:1 -p:Platform=x64` and `dotnet test Trackdub.slnx -m:1 -p:Platform=x64` as documented in the PR template.
