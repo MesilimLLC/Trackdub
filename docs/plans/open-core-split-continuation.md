@@ -34,7 +34,7 @@ The core contains:
 - An unmodified Apache-2.0 `LICENSE` and the root `NOTICE`:
   ```text
   Trackdub
-  Copyright 2024-2026 Mesilim LLC
+  Copyright 2026 Mesilim LLC
   ```
 - A neutral `IExportTierGate` contract and no public concrete export-tier registration.
 
