@@ -1397,7 +1397,7 @@ This ADR holds the surface documented so future agents do not re-derive the reco
 
 - Status: Accepted
 - Date: 2026-10-06
-- Decided by: Tony, 2026-10-06 (recorded in PR #401, following pitch PR #394; `docs/plans/rust-inference-sidecar-pitch.md`)
+- Decided by: Tony, 2026-10-06 (recorded in PR #401, following pitch PR #394; `docs/archive/rust-inference-sidecar-pitch.md`)
 
 ## Context
 
@@ -1465,7 +1465,7 @@ A single scoped exception to the no-end-user-Python rule:
 ### Neutral
 
 - No `src/` changes ship under this ADR. It authorizes the spike
-  (`docs/plans/rust-sidecar-spike-plan.md`); promotion to `src/` needs its
+  (`docs/archive/rust-sidecar-spike-plan.md`); promotion to `src/` needs its
   own review with harness evidence attached.
 
 ## Alternatives considered

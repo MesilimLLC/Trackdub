@@ -1,1 +1,0 @@
-GitHub repository configuration including Dependabot dependency updates, CODEOWNERS-based PR review assignment, funding links, and pull request/issue templates to guide contributor workflow.

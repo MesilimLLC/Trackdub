@@ -6,7 +6,7 @@
 > **Layers audited:** App.Avalonia, Media/Media.Playback, Application (pipeline orchestration), Inference/Inference.Onnx, Sdk  
 > **Layers excluded:** Cloud (Api, Worker, WebhookDelivery), Benchmarks, Tools  
 > **Fix posture:** proposed-only — no code changes in this audit  
-> **Sources:** Two independent audits merged, then corrected against current tree. Surviving source walk: `docs/Audit/pipeline-full-walk-audit-2026-07-08.md`. Cited `docs/architecture/local-pipeline-audit-2026-07-08.md` is **not present** in the tree (agent-1 content survived only via this merge). Principles supplement: `docs/architecture/pipeline-principles-review-grok-2026-07-08.md`.
+> **Sources:** Two independent audits merged, then corrected against current tree. Surviving source walk: `docs/archive/pipeline-full-walk-audit-2026-07-08.md`. Cited `docs/architecture/local-pipeline-audit-2026-07-08.md` is **not present** in the tree (agent-1 content survived only via this merge). Principles supplement: `docs/architecture/pipeline-principles-review-grok-2026-07-08.md`.
 
 ---
 
@@ -418,7 +418,7 @@ src/Trackdub.Inference/Runtime/ModelManifest/BundledModelManifestRegistry.cs
 AGENT_CONTEXT.md
 MILESTONE.md
 AGENTS.md                                  ← stale skill table (TestDoubles count fixed 2026-07-09)
-docs/Audit/pipeline-full-walk-audit-2026-07-08.md
+docs/archive/pipeline-full-walk-audit-2026-07-08.md
 docs/architecture/pipeline-principles-review-grok-2026-07-08.md
 docs/architecture/P0-pipeline-audit-2026-06-01.md
 tests/Trackdub.Architecture.Tests/

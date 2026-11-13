@@ -9,6 +9,7 @@ this core would read as authoritative.
 
 This intentionally does not scan docs/architecture, docs/specs,
 docs/operations, docs/development, docs/decisions, docs/audits, docs/plans,
+docs/archive,
 or tools/**: those contain legitimate historical/internal-engineering
 references to pre-split monorepo projects (Trackdub.App.Avalonia,
 Trackdub.Api, Trackdub.Worker, Trackdub.WebhookDelivery, the activation
@@ -38,6 +39,7 @@ LICENSE_CLAIM_PATTERNS = [
     re.compile(r"dual[- ]licens", re.IGNORECASE),
 ]
 LICENSE_CLAIM_EXCLUDE_DIRS = [
+    "docs/archive/",
     "docs/plans/",
     "docs/decisions/",
     "docs/audits/",

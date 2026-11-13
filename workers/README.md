@@ -64,8 +64,9 @@ workers/supervisor/Cargo.toml` first.
 
 ### Evidence
 
-Measured runs are committed as files under
-[`tools/sidecar-evidence/`](../tools/sidecar-evidence/):
+Measured runs from 2026-10-08 (the raw logs were removed from the tree on
+2026-11-12; they remain in git history at commit `7925368e` under
+`tools/sidecar-evidence/`):
 
 - `live-run.txt` — full live health → load → infer test output (real 24 kHz
   audio produced through the actual pipeline).
@@ -75,9 +76,12 @@ Measured runs are committed as files under
   measurement: **median 7954.7 ms, n=30** (min 6445.6, max 12339.6) for 2.6 s
   of 24 kHz audio per call, `activeProvider: cuda`, cold CUDA load 120–200 s.
 
+New live runs of `OverheadMeasurementTests` write their JSON evidence to
+`tools/sidecar-evidence/`, which is gitignored.
+
 ### CI
 
 [`.github/workflows/sidecar-worker.yml`](../.github/workflows/sidecar-worker.yml)
 runs all three cheap suites on PRs and pushes touching `workers/**` or the
 host tools. Live tests stay env-gated OFF in CI — the live evidence is the
-committed files above.
+"Evidence" summary above.

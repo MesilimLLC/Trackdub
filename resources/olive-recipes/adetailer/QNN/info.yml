@@ -1,7 +1,0 @@
-keywords:
-    QNN
-name: adetailer
-recipes:
-    - name: face_yolo_qnn.json
-      ep: QNNExecutionProvider
-      device: npu

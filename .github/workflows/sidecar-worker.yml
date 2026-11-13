@@ -78,6 +78,6 @@ jobs:
         run: dotnet test tools/Trackdub.SidecarHost.Tests -m:1
 
 # Live-worker tests stay env-gated OFF in CI (TRACKDUB_SIDECAR_TESTS is not
-# set here): CI runs the cheap suites only; the live evidence is committed
-# under tools/sidecar-evidence/. Live CI is a maintainer decision, not this
+# set here): CI runs the cheap suites only; the live evidence is summarized in
+# workers/README.md "Evidence". Live CI is a maintainer decision, not this
 # workflow's.

@@ -145,6 +145,11 @@
         "resolved": "6.0.2",
         "contentHash": "ANjkN9TiBZXm5cvj3bb3QbezBzqkupCzxwgNf46d4V4ToRBHcEp3IEgbc67M3ZqVHQxaJgEncZ/frdqznpVWIw=="
       },
+      "SQLite": {
+        "type": "Transitive",
+        "resolved": "3.53.4",
+        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
+      },
       "SQLitePCLRaw.config.e_sqlite3": {
         "type": "Transitive",
         "resolved": "3.0.5",
@@ -185,12 +190,6 @@
       },
       "trackdub.licensing": {
         "type": "Project"
-      },
-      "SQLite": {
-        "type": "CentralTransitive",
-        "requested": "[3.53.4, )",
-        "resolved": "3.53.4",
-        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
       }
     }
   }

@@ -1,5 +1,0 @@
-- `python scripts/export-sepformer-onnx.py [--no-upload] [--inspect-only] [--skip-osd] [--skip-sepformer]` requires `pip install speechbrain pyannote.audio onnx onnxruntime huggingface_hub torch` and optionally `HF_TOKEN` for gated pyannote models.
-- `python scripts/inspect-deepfilternet-onnx.py [--output-dir models/deepfilternet3] [--skip-download]` downloads `DeepFilterNet3_onnx.tar.gz` from GitHub releases.
-- `python scripts/mirror_to_hf.py` mirrors external ONNX repos to `tonythethompson/*` on HuggingFace.
-- `./scripts/bs.ps1 <agent|control> [name] [fast]` delegates to `tools/agent-git-flow.ps1`.
-- `scripts/ci/run-avslnf-tests-sequential.sh [Trackdub.Avalonia.slnf] [framework_flag]` runs dotnet tests sequentially.

@@ -202,6 +202,11 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
+      "SQLite": {
+        "type": "Transitive",
+        "resolved": "3.53.4",
+        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
+      },
       "SQLitePCLRaw.config.e_sqlite3": {
         "type": "Transitive",
         "resolved": "3.0.5",
@@ -385,12 +390,6 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "3.0.5",
           "SQLitePCLRaw.core": "3.0.5"
         }
-      },
-      "SQLite": {
-        "type": "CentralTransitive",
-        "requested": "[3.53.4, )",
-        "resolved": "3.53.4",
-        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
       },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "CentralTransitive",
