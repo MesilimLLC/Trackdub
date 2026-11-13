@@ -133,8 +133,8 @@ to rebase only part of the stack.
 - A merged PR is detected automatically and replayed with `--onto` against the correct target, so a
   squash-merged parent does not produce spurious conflicts.
 - Starting a rebase while one is in progress exits **7**.
-- Occupied branches are rebased in their clean owning worktrees; unoccupied branches are checked out in the
-  invoking worktree. Resolve/stage conflicts at the reported path. `--continue`/`--abort` may run from any
+- Occupied branches are rebased in their clean owning worktrees; unoccupied branches use the
+  origin. Resolve/stage conflicts at the reported path. `--continue`/`--abort` may run from any
   linked worktree and use the recorded owners. No auto-stash or worktree lifecycle management.
 
 ## view

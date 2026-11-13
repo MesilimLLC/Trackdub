@@ -172,7 +172,7 @@ an ancestor of the branch.
   create/remove worktrees. Mutations serialize across the clone, and paused operations require
   recovery in their recorded owners.
 - `modify` supports distributed stack branches, but its editor remains TUI-only. Actions run in
-  affected clean owners; unoccupied branches are checked out in the invoking worktree. Drop/fold source branches and
+  affected clean owners; unoccupied branches use the origin. Drop/fold source branches and
   worktrees are preserved. Recovery flags may run from any worktree and use recorded native
   operation owners; never resolve/stage in the caller's tree unless the diagnostic names it.
 - There is no non-interactive reorder or removal. Errors may suggest `gh stack modify`, but it is
