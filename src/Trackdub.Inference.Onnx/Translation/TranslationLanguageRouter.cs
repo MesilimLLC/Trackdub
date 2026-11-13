@@ -346,10 +346,7 @@ public sealed class TranslationLanguageRouter(
         }
 
         BundledModelManifestEntry? entry = GetPivotEntriesForPair(context, sourceLanguage, targetLanguage)
-            .FirstOrDefault(candidate => HasAlias(candidate, preferredModelAlias) && IsGenAiPivotEngineFamily(candidate.EngineFamily) &&
-                candidate.CommercialAllowed && candidate.CommercialUseVerified &&
-                (candidate.DownloadFiles.Count > 0 || candidate.Variants.Any(variant => variant.DownloadFiles.Count > 0)) &&
-                !context.CacheIndex.ContainsKey(candidate.ModelId));
+            .FirstOrDefault(candidate => IsUninstalledPreferredGenAiDownload(context, candidate, preferredModelAlias));
         if (entry is null)
         {
             return false;
@@ -361,6 +358,27 @@ public sealed class TranslationLanguageRouter(
             EngineFamily: entry.EngineFamily, PreparationStatus: TranslationPreparationStatus.DownloadRequired,
             ExpectedDownloadBytes: entry.ExpectedDownloadBytes);
         return true;
+    }
+
+    private static bool IsUninstalledPreferredGenAiDownload(
+        TranslationRoutingContext context,
+        BundledModelManifestEntry candidate,
+        string preferredModelAlias) =>
+        IsPreferredGenAiEntry(candidate, preferredModelAlias) && IsUninstalledCommercialDownload(context, candidate);
+
+    private static bool IsPreferredGenAiEntry(BundledModelManifestEntry candidate, string preferredModelAlias) =>
+        HasAlias(candidate, preferredModelAlias) && IsGenAiPivotEngineFamily(candidate.EngineFamily);
+
+    private static bool IsUninstalledCommercialDownload(TranslationRoutingContext context, BundledModelManifestEntry candidate)
+    {
+        if (context.CacheIndex.ContainsKey(candidate.ModelId))
+        {
+            return false;
+        }
+
+        bool commerciallyUsable = candidate.CommercialAllowed && candidate.CommercialUseVerified;
+        bool hasDownloadFiles = candidate.DownloadFiles.Count > 0 || candidate.Variants.Any(variant => variant.DownloadFiles.Count > 0);
+        return commerciallyUsable && hasDownloadFiles;
     }
 
     private static TranslationRouteSelection CreateUnavailablePreferredRoute(

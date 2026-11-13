@@ -3,6 +3,7 @@ using Trackdub.Contracts.Pipeline;
 using Trackdub.Inference.Onnx.Translation;
 using Trackdub.Inference.Runtime.ModelManifest;
 using Trackdub.Inference.Runtime.Planning;
+using static Trackdub.Inference.Tests.TranslationRouterManifestSpecs;
 
 namespace Trackdub.Inference.Tests;
 

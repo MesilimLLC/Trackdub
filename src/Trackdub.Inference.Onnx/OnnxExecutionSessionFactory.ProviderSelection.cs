@@ -47,7 +47,7 @@ internal static partial class OnnxExecutionSessionFactory
         if (provider is ExecutionProviderKind.Cpu)
         {
             return new SessionOptionsSelection(options, ExecutionProviderKind.Cpu,
-                BuildIneligiblePolicyReason(request.DevicePolicy, provider));
+                ProviderNames.BuildIneligiblePolicyReason(request.DevicePolicy, provider));
         }
 
         if (useCatalogDevicePolicy && devicePolicyApplied)
@@ -59,14 +59,9 @@ internal static partial class OnnxExecutionSessionFactory
             ?? throw new ArgumentOutOfRangeException(nameof(request), provider, "Unsupported execution provider kind.");
         string? policyReason = useCatalogDevicePolicy
             ? BuildDevicePolicyFallbackReason(request.DevicePolicy, devicePolicyApplied)
-            : BuildIneligiblePolicyReason(request.DevicePolicy, provider);
+            : ProviderNames.BuildIneligiblePolicyReason(request.DevicePolicy, provider);
         return selection with { FallbackReason = MergeFallbackReasons(selection.FallbackReason, policyReason) };
     }
-
-    private static string? BuildIneligiblePolicyReason(WindowsMlExecutionDevicePolicy policy, ExecutionProviderKind provider) =>
-        OperatingSystem.IsWindows() && policy != WindowsMlExecutionDevicePolicy.Explicit
-            ? $"Windows ML policy '{WindowsMlExecutionDevicePolicySettings.ToKey(policy)}' was not applied to {provider}."
-            : null;
 
     private static SessionOptionsSelection? AppendProviderSpecificSelection(
         SessionOptions options,

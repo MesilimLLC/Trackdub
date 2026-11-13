@@ -76,6 +76,17 @@ internal static class ProviderNames
         IsWindowsMlCatalogProvider(provider);
 
     /// <summary>
+    /// Why a non-explicit Windows ML device policy was not applied to a provider that cannot take it,
+    /// or null when no policy applies.
+    /// </summary>
+    internal static string? BuildIneligiblePolicyReason(
+        WindowsMlExecutionDevicePolicy policy,
+        ExecutionProviderKind provider) =>
+        OperatingSystem.IsWindows() && policy != WindowsMlExecutionDevicePolicy.Explicit
+            ? $"Windows ML policy '{WindowsMlExecutionDevicePolicySettings.ToKey(policy)}' was not applied to {provider}."
+            : null;
+
+    /// <summary>
     /// WinML catalog EPs that can take ORT <c>SetEpSelectionPolicy</c> (device auto-select among
     /// registered catalog devices). DirectML stays on the legacy explicit-append path; native
     /// CUDA/TensorRT/TensorRT RTX/DNNL/CoreML are not Windows ML catalog routes.
