@@ -1,1 +1,0 @@
-xUnit test framework with custom `FactAttribute` derivatives for conditional skipping; .NET projects using `packages.lock.json` for deterministic NuGet resolution; Fakes/Stub pattern via a shared `Trackdub.TestDoubles` library implementing domain/application contracts.

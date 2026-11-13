@@ -1,1 +1,0 @@
-Prerequisites are pinned in `mise.toml` (dotnet 10.0.302, node 22.16.0, pnpm 11.15.1). Build and test the full solution via `dotnet build Trackdub.slnx -m:1` and `dotnet test Trackdub.slnx -m:1`; use `Trackdub.Inference.slnx` or `Trackdub.Sdk.slnx` for faster subset builds. Run the CLI through `dotnet run --project src/Trackdub.Cli -- <args>`.

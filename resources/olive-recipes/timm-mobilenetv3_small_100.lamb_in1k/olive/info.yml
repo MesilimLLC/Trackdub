@@ -1,7 +1,0 @@
-keywords:
-    olive
-recipes:
-    - file: "config.json"
-      devices:
-        - cpu
-      ep: CPUExecutionProvider

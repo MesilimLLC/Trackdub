@@ -175,7 +175,7 @@ public sealed class TranscriptWorkflowUtilitiesTests
     }
 
     [Fact]
-    public void BuildStemAudioRoute_warns_when_only_legacy_demucs_stems_exist()
+    public void BuildStemAudioRoute_warns_when_only_legacy_hush_stems_exist()
     {
         MediaAsset mediaAsset = CreateMediaAsset();
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -184,14 +184,14 @@ public sealed class TranscriptWorkflowUtilitiesTests
             mediaAsset.ProjectId,
             mediaAsset.Id,
             ArtifactKind.Vocals,
-            "artifacts/stems/demucs-v4/vocals.wav",
+            "artifacts/stems/hush-dialogue/vocals.wav",
             "sha-vocals",
             100,
             mediaAsset.DurationSeconds,
             44100,
             1,
             now,
-            Provenance: "generated-demucs-v4-vocals;engine_family=demucs-v4");
+            Provenance: "generated-hush-dialogue-vocals;engine_family=hush-dialogue");
 
         StemAudioRoute route = TranscriptWorkflowUtilities.BuildStemAudioRoute([vocals], stageRuns: null);
 

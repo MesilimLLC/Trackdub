@@ -6,7 +6,7 @@ Use this brief alongside the combined `docs/**/combined.md` files when asking Co
 
 ## 1. Company and Product (from source docs)
 
-**Trackdub LLC** is building a cross-platform, local-first AI dubbing workstation for Windows, macOS, and Linux. It is a desktop application, not a browser shell or a one-click SaaS demo.
+**Mesilim LLC** is building Trackdub, a cross-platform, local-first AI dubbing workstation for Windows, macOS, and Linux. It is a desktop application, not a browser shell or a one-click SaaS demo.
 
 The product spine is a staged editorial workflow:
 
@@ -86,7 +86,7 @@ Long-term exploration lanes include speech/noise split, dialogue enhancement, ov
 - **Public core:** `Mesililm-LLC/Trackdub` is Apache-2.0 and contains the reusable engine, SDK, CLI, pipeline, inference, media, licensing mechanisms, tooling, and tests.
 - **Private product:** `Mesililm-LLC/Trackdub-gated` is the proprietary desktop product with the Avalonia shell, branding, installer, signing, activation, and tier gating.
 - **Future private services:** `api.trackdub`, `portal.trackdub`, and `trackdub.com` repositories are reserved for server-side activation, product API, portal, and marketing site.
-- **Contributor licensing:** A contributor license agreement lets Trackdub LLC relicense contributions under commercial terms.
+- **Contributor licensing:** A contributor license agreement lets Mesilim LLC relicense contributions under commercial terms.
 
 This open-core model allows developer adoption through the public core while the commercial product carries tiered features, activation, and support.
 
