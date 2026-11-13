@@ -64,7 +64,9 @@ internal sealed class StreamingProcessRunner : IStreamingProcessRunner
         {
             if (!process.HasExited)
             {
-                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (NotSupportedException) { }
             }
         }
     }
