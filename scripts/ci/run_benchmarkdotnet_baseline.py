@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,16 @@ def report_path(artifacts: Path) -> Path:
     if not reports:
         raise RuntimeError(f"No BenchmarkDotNet full JSON report found under {artifacts}.")
     return reports[0]
+
+
+def benchmarkdotnet_version(root: Path) -> str:
+    props = root / "Directory.Packages.props"
+    if not props.exists():
+        raise RuntimeError(f"Directory.Packages.props not found under {root}.")
+    match = re.search(r'<PackageVersion Include="BenchmarkDotNet" Version="([^"]+)"', props.read_text(encoding="utf-8"))
+    if match is None:
+        raise RuntimeError(f"BenchmarkDotNet is not pinned in {props}.")
+    return match.group(1)
 
 
 def load_report(path: Path) -> dict[str, dict[str, float]]:
@@ -99,6 +110,13 @@ def main() -> int:
 
         run(["git", "worktree", "add", "--detach", str(baseline_worktree), baseline_commit], repo)
         try:
+            current_version = benchmarkdotnet_version(repo)
+            baseline_version = benchmarkdotnet_version(baseline_worktree)
+            if current_version != baseline_version:
+                raise RuntimeError(
+                    f"BenchmarkDotNet versions differ: baseline {baseline_commit} pins {baseline_version}, "
+                    f"current checkout pins {current_version}. Results would come from different harnesses."
+                )
             current_command = [
                 "dotnet",
                 "run",
