@@ -27,6 +27,25 @@ public sealed class CatalogTranslationModelProvisionerTests
         Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
         Assert.Equal("cuda-int4", downloader.Variant);
     }
+
+    [Theory]
+    [InlineData("Cuda", "cuda-int4")]
+    [InlineData("Cpu", "cpu-int4")]
+    public async Task Qwen_selection_without_a_variant_provisions_the_variant_for_the_requested_provider(string provider, string expectedVariant)
+    {
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var downloader = new Downloader();
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader,
+            new TrackdubStoragePaths(Path.GetTempPath()));
+
+        await service.EnsureAsync("en", "fr", "qwen3-4b-translation", CancellationToken.None, preferredExecutionProvider: provider);
+
+        Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
+        Assert.Equal(expectedVariant, downloader.Variant);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -151,7 +151,8 @@ public sealed partial class TranslationOrchestrationService
         string SourceLanguage,
         string TargetLanguage,
         string? PreferredModelAlias,
-        string? PreferredModelVariantAlias);
+        string? PreferredModelVariantAlias,
+        ExecutionProviderKind? PreferredExecutionProvider);
 
     private sealed record TranslationGenerationInput(
         TranscriptProjectState CurrentState,

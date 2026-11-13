@@ -56,7 +56,7 @@ public sealed class CatalogTranslationModelProvisioner(
             .Select(group => CreateEntry(group, snapshot.PolicyVersion)).OfType<BundledModelManifestEntry>());
 
     public async Task<string?> EnsureAsync(string sourceLanguage, string targetLanguage, string? preferredModelAlias, CancellationToken cancellationToken,
-        IProgress<string>? preparationProgress = null, string? preferredModelVariantAlias = null)
+        IProgress<string>? preparationProgress = null, string? preferredModelVariantAlias = null, string? preferredExecutionProvider = null)
     {
         if (string.IsNullOrWhiteSpace(sourceLanguage) || sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase) ||
             sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) return preferredModelAlias;
@@ -95,7 +95,11 @@ public sealed class CatalogTranslationModelProvisioner(
         if (!CanProvisionSelectedModel(selected, explicitSelection))
             return preferredModelAlias;
         preparationProgress?.Report($"Preparing {selected.ModelId}");
-        var result = await downloader.DownloadAsync(selected.ModelId, preferredModelVariantAlias,
+        // Without an explicit variant, the default CPU variant would be downloaded even for a CUDA plan.
+        string? variantAlias = string.IsNullOrWhiteSpace(preferredModelVariantAlias)
+            ? ResolveVariantForProvider(selected, preferredExecutionProvider)
+            : preferredModelVariantAlias;
+        var result = await downloader.DownloadAsync(selected.ModelId, variantAlias,
             preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
             cancellationToken).ConfigureAwait(false);
         if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
@@ -105,6 +109,11 @@ public sealed class CatalogTranslationModelProvisioner(
     private static bool CanProvisionSelectedModel(BundledModelManifestEntry selected, bool explicitSelection) =>
         selected.EngineFamily == "opus-mt" ||
         (explicitSelection && selected.EngineFamily == "qwen-genai");
+
+    private static string? ResolveVariantForProvider(BundledModelManifestEntry selected, string? executionProvider) =>
+        string.IsNullOrWhiteSpace(executionProvider) ? null
+        : selected.Variants.FirstOrDefault(variant =>
+            variant.SupportedProviders?.Contains(executionProvider.Trim(), StringComparer.OrdinalIgnoreCase) == true)?.Alias;
 
     private static bool Covers(IReadOnlyList<string> languages, string language) =>
         languages.Any(candidate => candidate.Equals(language, StringComparison.OrdinalIgnoreCase) || candidate is "multi" or "any" or "*");
