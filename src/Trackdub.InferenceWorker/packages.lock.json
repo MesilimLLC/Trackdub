@@ -72,7 +72,7 @@
           "Microsoft.ML.OnnxRuntimeGenAI.WinML": "[0.19.0, )",
           "Microsoft.ML.Tokenizers": "[3.0.0-preview.26502.1, )",
           "Microsoft.Windows.AI.MachineLearning": "[2.4.89, )",
-          "System.Numerics.Tensors": "[11.0.0-rc.3.26522.148, )",
+          "System.Numerics.Tensors": "[11.0.0, )",
           "Trackdub.Contracts": "[1.0.0, )",
           "Trackdub.Domain": "[1.0.0, )",
           "Trackdub.Inference": "[1.0.0, )"
@@ -131,9 +131,9 @@
       },
       "System.Numerics.Tensors": {
         "type": "CentralTransitive",
-        "requested": "[11.0.0-rc.3.26522.148, )",
-        "resolved": "11.0.0-rc.3.26522.148",
-        "contentHash": "9IVKWWs7IRbKJXWdBKbZBr32BOTvJ71qY6Um44w6iAI2kcQ4MS/ucaBGTHWY8HLfH2KEV+uQTwJaKGwWyaiYWA=="
+        "requested": "[11.0.0, )",
+        "resolved": "11.0.0",
+        "contentHash": "thx6y1hMzB6LumB/aLcZoLHWq8wr+dbldk/FiNghyT+4ynxo9u2oCTFfb5iDMDG6hykDXLorXuaf4EPEij2BBg=="
       }
     }
   }

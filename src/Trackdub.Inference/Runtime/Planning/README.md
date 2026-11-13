@@ -20,5 +20,5 @@ Runtime planning: manifest-driven provider selection, smoke-test gating, and sta
 
 - Reuse `BundledModelManifestRegistry` as the source of model metadata truth; commercial eligibility is enforced when manifests are loaded and in bundled-inventory tests, not via runtime filtering.
 - Treat preferred aliases as soft ranking hints inside `StageRuntimeRequirements`.
-- Commercial-safe ASR blocking is driven by manifest fields (commercial_allowed, commercial_use_verified, lane) via CommercialSafeEvaluator -- there is no runtime CommercialSafeMode flag. Blocking behaviour with the current bundled inventory is covered by planner tests.
+- Commercial-safe ASR blocking is driven by manifest fields (commercial_allowed, commercial_use_verified, lane) read by the planner. `ModelManifest.CommercialSafeMode` is a read-only property computed from commercial_use_verified, not a runtime toggle, and there is no CommercialSafeEvaluator type. Blocking behaviour with the current bundled inventory is covered by planner tests.
 - On Windows, TensorRT RTX is the standalone ORT EP ABI plugin route, while Windows ML catalog EPs (MIGraphX/OpenVINO/QNN/VitisAI) are preferred over DirectML legacy fallback per [ADR-0002](../../../../docs/adr/ADR-0002-windows-ml-provider-strategy.md); registration != readiness.

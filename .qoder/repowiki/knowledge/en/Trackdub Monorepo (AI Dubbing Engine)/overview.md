@@ -1,1 +1,0 @@
-.NET 10 monorepo that assembles Trackdub's layered C# projects, tests, docs, scripts, and GitHub automation into a single buildable dubbing engine with ONNX inference, FFmpeg media processing, and an SDK/CLI surface.

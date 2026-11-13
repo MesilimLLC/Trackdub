@@ -44,16 +44,6 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
 
     public const string EngineFamilyName = "qwen3-asr";
 
-    // The encoder sees a different mel length for almost every chunk, so capture would record a new
-    // graph per length for little gain; it stays out of the CUDA graph default.
-    internal static readonly IReadOnlyDictionary<string, string> TrtEncoderOptions = new Dictionary<string, string>
-    {
-        ["enable_cuda_graph"] = "0",
-        ["trt_profile_min_shapes"] = "mel:1x128x1",
-        ["trt_profile_max_shapes"] = "mel:1x128x3000",
-        ["trt_profile_opt_shapes"] = "mel:1x128x3000",
-    };
-
     private readonly Qwen3AsrMelFeatureExtractor featureExtractor = new();
 
     // Tokenizer and embedding table are audio-independent, so they are loaded once per model root
@@ -369,7 +359,8 @@ public sealed class Qwen3AsrOnnxAudioTranscriptionEngine
                 Provider = plan.ExecutionProvider!.Value,
                 HasExplicitProviderPreference = plan.HasExplicitProviderPreference,
                 CancellationToken = cancellationToken,
-                AdditionalTrtEncoderOptions = TrtEncoderOptions,
+                AdditionalTrtEncoderOptions = Qwen3AsrTrtProfiles.Encoder,
+                AdditionalTrtDecoderOptions = Qwen3AsrTrtProfiles.Decoder,
             },
             new OnnxExecutionSessionFactory.QwenAsrModelPaths(
                 modelPaths.EncoderPath,

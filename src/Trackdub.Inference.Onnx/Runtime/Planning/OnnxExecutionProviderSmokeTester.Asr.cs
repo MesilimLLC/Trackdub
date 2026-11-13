@@ -76,7 +76,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         string decoderInitPath = Path.Join(root, "decoder_init.onnx");
         string decoderStepPath = Path.Join(root, "decoder_step.onnx");
         using OnnxExecutionSessionFactory.Qwen3AsrSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
+            .CreatePooledQwen3AsrAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "qwen3-asr", Provider = provider, HasExplicitProviderPreference = request.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = Qwen3AsrTrtProfiles.Encoder, AdditionalTrtDecoderOptions = Qwen3AsrTrtProfiles.Decoder }, new OnnxExecutionSessionFactory.QwenAsrModelPaths(encoderModelPath, decoderInitPath, decoderStepPath))
             .ConfigureAwait(false);
         EnsureSelectedProviderMatchesRequested(provider, sessionLease.SelectedProvider, request.AllowPolicyProviderSelection);
 

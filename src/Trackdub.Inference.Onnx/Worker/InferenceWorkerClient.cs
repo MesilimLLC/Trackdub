@@ -59,6 +59,7 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     public const string WorkerExecutableName = "Trackdub.InferenceWorker.exe";
     private const int MaxStarts = 3;
     private const int StderrTailLines = 40;
+    private const long MaxTranslationCharsPerWorkerCall = 16L * 1024 * 1024;
 
     private readonly string? executablePath;
     private readonly SemaphoreSlim startGate = new(1, 1);
@@ -93,10 +94,46 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(plan);
-        return await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
-            InferenceWorkerProtocol.Translation,
-            new WorkerTranslationRequest(request, WorkerPlan.From(plan)),
-            cancellationToken).ConfigureAwait(false);
+        WorkerPlan workerPlan = WorkerPlan.From(plan);
+        var segments = new List<TranslatedTextSegment>(request.Segments.Count);
+        StageRuntimeExecutionSummary? executionSummary = null;
+        foreach (IReadOnlyList<TranslationInputSegment> chunk in ChunkSegments(request.Segments))
+        {
+            WorkerTranslationResult partial = await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
+                InferenceWorkerProtocol.Translation,
+                new WorkerTranslationRequest(request with { Segments = chunk }, workerPlan),
+                cancellationToken).ConfigureAwait(false);
+            segments.AddRange(partial.Segments);
+            executionSummary = partial.ExecutionSummary ?? executionSummary;
+        }
+
+        return new WorkerTranslationResult(segments, executionSummary);
+    }
+
+    /// <summary>
+    /// Splits segments so each worker call stays well below <see cref="InferenceWorkerProtocol.MaxMessageBytes"/>.
+    /// Always yields at least one chunk so empty requests still reach the worker.
+    /// </summary>
+    internal static IEnumerable<IReadOnlyList<TranslationInputSegment>> ChunkSegments(
+        IReadOnlyList<TranslationInputSegment> segments)
+    {
+        var chunk = new List<TranslationInputSegment>();
+        long chunkChars = 0;
+        foreach (TranslationInputSegment segment in segments)
+        {
+            int length = segment.Text.Length;
+            if (chunk.Count > 0 && chunkChars + length > MaxTranslationCharsPerWorkerCall)
+            {
+                yield return chunk;
+                chunk = [];
+                chunkChars = 0;
+            }
+
+            chunk.Add(segment);
+            chunkChars += length;
+        }
+
+        yield return chunk;
     }
 
     public static string? LocateExecutable()

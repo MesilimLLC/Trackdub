@@ -179,7 +179,7 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
             return false;
         }
 
-        if (workerClient is null || CudaOrtProbe.IsCudaProviderListed())
+        if (workerClient is null)
         {
             return false;
         }

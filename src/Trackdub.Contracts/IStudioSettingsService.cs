@@ -493,8 +493,6 @@ public static class SeparationModelOverrideSettings
             : key.Trim().ToLowerInvariant() switch
             {
                 SpleeterKey or "spleeter-2stems" or "spleeter-non-commercial" => SeparationModelOverride.Spleeter,
-                // Known aliases that are intentionally treated as Auto (no explicit override).
-                "demucs-v4" or "demucs" or "htdemucs" => SeparationModelOverride.Auto,
                 _ => SeparationModelOverride.Auto
             };
 

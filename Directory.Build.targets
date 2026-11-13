@@ -105,7 +105,7 @@
 
   <Target Name="CopyGenAiCudaSidecarToOutput"
           AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
+          Condition="'$(OS)' == 'Windows_NT' And '$(TargetFramework)' == 'net11.0-windows10.0.19041.0' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)' != ''">
     <ItemGroup>
       <_GenAiCudaSidecarCopy Include="$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll"
                              Condition="Exists('$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\onnxruntime-genai-cuda.dll')"

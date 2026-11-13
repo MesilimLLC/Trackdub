@@ -248,7 +248,7 @@ public sealed class PhiGenAiTranslationEngine(
         OperatingSystem.IsWindows() &&
         plan.ExecutionProvider == ExecutionProviderKind.Cuda &&
         string.Equals(engineFamily, QwenEngineFamilyName, StringComparison.OrdinalIgnoreCase) &&
-        workerClient is not null && !CudaOrtProbe.IsCudaProviderListed();
+        workerClient is not null;
 
     private async Task<StageRuntimePlan> PlanTranslationAsync(
         TranslationRequest request,
@@ -441,6 +441,9 @@ public sealed class PhiGenAiTranslationEngine(
             hint.IsCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
     }
 
+    private const int MaxGlossaryHintsInInstruction = 32;
+    private const int MaxGlossaryTermLength = 100;
+
     internal static string BuildSystemInstruction(
         string targetLanguageName,
         IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null)
@@ -451,11 +454,23 @@ public sealed class PhiGenAiTranslationEngine(
         if (glossaryHints is { Count: > 0 })
         {
             builder.Append(" Adhere strictly to the following glossary terms: ");
-            builder.Append(string.Join(", ", glossaryHints.Select(static g => $"{g.SourceTerm.Trim()} -> {g.TargetTerm.Trim()}")));
+            builder.Append(string.Join(
+                ", ",
+                glossaryHints
+                    .Take(MaxGlossaryHintsInInstruction)
+                    .Select(static g => $"{BoundGlossaryTerm(g.SourceTerm)} -> {BoundGlossaryTerm(g.TargetTerm)}")));
             builder.Append('.');
         }
 
         return builder.ToString();
+    }
+
+    private static string BoundGlossaryTerm(string term)
+    {
+        string flattened = term.Trim().ReplaceLineEndings(" ");
+        return flattened.Length <= MaxGlossaryTermLength
+            ? flattened
+            : flattened[..MaxGlossaryTermLength];
     }
 
     internal static string BuildTranslationPrompt(
