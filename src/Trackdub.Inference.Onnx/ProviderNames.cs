@@ -86,5 +86,4 @@ internal static class ProviderNames
         OperatingSystem.IsWindows() && policy != WindowsMlExecutionDevicePolicy.Explicit
             ? $"Windows ML policy '{WindowsMlExecutionDevicePolicySettings.ToKey(policy)}' was not applied to {provider}."
             : null;
-
 }

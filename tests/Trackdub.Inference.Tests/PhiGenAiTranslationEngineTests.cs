@@ -534,7 +534,6 @@ public sealed class PhiGenAiTranslationEngineTests
                 Stage = request.Stage
             });
     }
-
 }
 
 public sealed class QwenTranslationModelFactAttribute : FactAttribute

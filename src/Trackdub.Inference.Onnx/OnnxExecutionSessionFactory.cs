@@ -789,5 +789,4 @@ internal static partial class OnnxExecutionSessionFactory
                 ex);
         }
     }
-
 }
