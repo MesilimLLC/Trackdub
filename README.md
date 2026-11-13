@@ -107,7 +107,7 @@ Trackdub operates an **open-core** model:
   Avalonia shell, branding, installer, signing, activation, and tier gating.
 - **Future private services**: `api.trackdub`, `portal.trackdub`, and `trackdub.com`
   are reserved for server-side activation, product API, portal, and marketing site.
-- **Contributor licensing**: a contributor license agreement lets Trackdub LLC
+- **Contributor licensing**: a contributor license agreement lets Mesilim LLC
   relicense contributions under commercial terms.
 
 This split enables developer adoption through the public core while the commercial
