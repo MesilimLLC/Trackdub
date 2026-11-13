@@ -61,6 +61,11 @@ public sealed class SupervisedSidecarWorker : IAsyncDisposable
             RedirectStandardError = false,   // worker stderr inherits, same as supervisor.rs
             CreateNoWindow = true,
         };
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            psi.KillOnParentExit = true;
+        }
+
         foreach (string arg in args)
         {
             psi.ArgumentList.Add(arg);
