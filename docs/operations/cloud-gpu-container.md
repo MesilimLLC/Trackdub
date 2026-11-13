@@ -1,7 +1,10 @@
 # Cloud GPU container: publish, seed, and warm
 
-For the asynchronous AWS API/supervisor, use the [SnapSoft application acceptance contract](snapsoft-poc-acceptance.md).
-That path adds a CPU API and derived supervisor image; the CLI image below remains one-shot.
+For the SnapSoft cloud render POC (Cloudflare API -> SQS -> EC2 GPU worker -> S3), start with
+[docs/handoff/snapsoft-onboarding.md](../handoff/snapsoft-onboarding.md); this runbook covers building, seeding and
+warming the worker image it runs. The earlier AWS-only API/supervisor stack, which is outside the POC scope, is
+described in [snapsoft-poc-acceptance.md](snapsoft-poc-acceptance.md); it adds a CPU API and derived supervisor
+image, and the CLI image below remains one-shot.
 `poc-server-v1` uses `docker/poc-server-models.txt` (MADLAD quantized/CUDA), distinct from
 the historical TRT warm list. `seed-and-warm-gpu-worker.sh` seeds that list by default for
 `TRACKDUB_GPU_PROFILE=server`; `TRACKDUB_MODEL_SET` still overrides it.

@@ -105,7 +105,7 @@ gh workflow run opencode.yml -f prompt="Summarize recent pipeline changes"
 
 - **Trigger:** Manual (`workflow_dispatch`) only; the push/PR triggers are disabled so the Linux CI test run is not duplicated
 - **Runs:** `ubuntu-latest`
-- **Tasks:** Coverlet on `Trackdub.slnx` (`-f net10.0`), ReportGenerator merge, `actions/upload-code-coverage`
+- **Tasks:** Coverlet on `Trackdub.slnx` (`--framework net11.0`), ReportGenerator merge, `actions/upload-code-coverage`
 
 ## Secrets (review + audit)
 

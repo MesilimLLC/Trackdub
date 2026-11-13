@@ -1,5 +1,13 @@
 # SnapSoft application contract and functional acceptance
 
+> **Scope note.** This document was written on 2026-10-21, before the SnapSoft statement of work was signed
+> (2026-10-30). It describes the AWS-only job stack (`Trackdub.Api`, DynamoDB, Cognito, `IJobScheduler`,
+> `Trackdub.CloudJobAdapter`), which is **outside the POC scope**. The POC job path is Cloudflare API -> SQS -> EC2
+> GPU worker -> S3, and its success criteria are in
+> [docs/handoff/snapsoft-onboarding.md](../handoff/snapsoft-onboarding.md). Keep this page as the reference contract
+> for that stack and for the pieces the SQS job loop may reuse (CLI supervision, fixed-preset arguments, artifact
+> verification).
+
 Application implementation was approved on 2026-10-21. AWS provisioning, deployment,
 paid GPU runs and production cutover were not authorized. This document supplies the
 application integration contract; infrastructure allocations remain proposed until
@@ -9,7 +17,7 @@ SnapSoft confirms them. No AWS readiness or dubbing quality is claimed from loca
 
 `Trackdub.Api -> Trackdub.Cloud.Aws -> Trackdub.Cloud -> Trackdub.Contracts -> Domain`.
 The CPU API contains no SDK, Composition, ONNX, CUDA or inference project references.
-It needs .NET 10 and CPU `ffprobe` for uploaded-media validation. `Dockerfile.api`
+It needs .NET 11 and CPU `ffprobe` for uploaded-media validation. `Dockerfile.api`
 supplies these. HTTP requests never wait for inference. Dispatch/reconciliation is one
 bounded background loop in the API deployment, not another service.
 

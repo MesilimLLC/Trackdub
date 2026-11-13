@@ -10,7 +10,7 @@ readiness: no AWS resource has been created and no GPU run on G6/G6e has happene
 
 | SOW prerequisite | Location |
 |---|---|
-| Technical Overview documentation | [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) (section 3.6 covers headless and cloud execution), [docs/index.md](../index.md) |
+| Technical Overview documentation | [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) (section 2.6 covers headless and cloud execution), [docs/index.md](../index.md) |
 | Premium model manifest (license + hash status) | Section 4 below; source `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json` |
 | Provider allow-list for Linux NVIDIA workers | Section 5 below |
 | `trackdub` CLI and SDK source | `src/Trackdub.Cli`, `src/Trackdub.Sdk` |
@@ -18,6 +18,7 @@ readiness: no AWS resource has been created and no GPU run on G6/G6e has happene
 | Container build, seed and warm runbook | [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) |
 | What was verified locally and what was not | [docs/operations/snapsoft-poc-validation.md](../operations/snapsoft-poc-validation.md) |
 | Smoke fixture | `tests/Fixtures/cloud-poc/en-speech.mp4` (single speaker, EN) |
+| Kickoff item "containerization of application code" | The `Dockerfile` `server` target, published as `ghcr.io/mesilimllc/trackdub:<tag>-server` (section 6) |
 
 The 10-clip test set (English-to-Spanish and English-to-Chinese) with reference output from a local RTX 5070 run
 is Mesilim's deliverable, due by the end of Day 5 (SOW, Customer Responsibilities). It is not in the repository.
@@ -38,6 +39,31 @@ Cloudflare API (existing; auth and job record)
   `trackdub run pipeline`, parse the structured result (`--result-file`, `--progress-file`), and write artifacts to S3.
 - SnapSoft defines the Cloudflare-to-SQS/S3 interface contract. Mesilim makes the Cloudflare-side changes.
 - Status wiring back into the Cloudflare job API, Spot capacity and autoscaling are deferred to the follow-on phase.
+- The SOW's initial architecture diagram labels the account region `us-east-1`; the target US region is still
+  confirmed in the Design phase.
+
+### Success criteria (SOW)
+
+The POC is complete when:
+
+1. The worker image is deployed into Mesilim's AWS account, passes the `trackdub doctor` health check, and runs
+   `trackdub run pipeline` end to end against the 10-clip test set on at least one EC2 GPU instance type.
+2. All POC AWS resources are provisioned by infrastructure-as-code in Mesilim's account, with no dependency on
+   SnapSoft tooling.
+3. A readout covers the monthly run-rate estimate, the orchestrator and model-cache decisions, and the follow-on plan.
+
+The SOW also names these metrics for the pass/fail record: job success rate of at least 95%, cold start under two
+minutes, and output parity with the local RTX 5070 reference (see section 3 item 6 for who measures parity).
+
+### Out of scope (SOW)
+
+- Replacing any pipeline stage with Amazon Transcribe, Amazon Polly or another AWS-managed AI service. Trackdub's
+  own models do all transcription, translation and synthesis.
+- Multi-region deployment and EU data residency. The POC is one US region.
+- Billing, subscription metering and cloud-tier pricing.
+- Status wiring into the Cloudflare job API, Spot capacity and autoscaling.
+- Production deployment and go-live cutover.
+- Later use cases, which reuse the POC's GPU workers and are scoped separately.
 
 ### AWS job code already in the repository (outside POC scope)
 

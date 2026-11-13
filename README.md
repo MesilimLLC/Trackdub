@@ -55,8 +55,9 @@ providers only with explicit consent and disclosure.
   are used. Unknown or non-commercial licenses are treated as unsafe and blocked. The
   bundled manifest is the single source of truth for model inventory.
 - **Hardware-aware inference.** The runtime probes and falls back across TensorRT-RTX,
-  DirectML, Windows ML, MIGraphX, and CPU. Unsupported acceleration never blocks a
-  workflow; the app explains the fallback.
+  DirectML, Windows ML, MIGraphX, and CPU on the desktop, and CUDA plus classic
+  TensorRT on Linux datacenter GPUs. Unsupported acceleration never blocks a workflow;
+  the app explains the fallback.
 - **Cross-platform desktop shell.** Avalonia on .NET 11, with Windows, macOS, and
   Linux as first-class targets. No browser shell, no one-click SaaS demo.
 - **Engineering discipline.** Clean layered architecture (Domain depends on nothing),
@@ -97,6 +98,13 @@ analyzers, Japanese/Chinese/Arabic tokenization, visual dubbing, and generated
 portrait branches. The current source is the source of truth for what is actually
 implemented.
 
+An opt-in **cloud render tier** is in a proof of concept with SnapSoft on AWS. The
+headless pipeline is packaged as a Linux GPU container (the `Dockerfile` `server`
+target, published to GHCR), and two cloud presets are defined: English to Spanish and
+English to Chinese. The AWS infrastructure and the worker job loop are SnapSoft's POC
+deliverables and are not in this repository yet. No run on the target AWS GPU instances
+has happened. See [Headless and cloud render](#headless-and-cloud-render).
+
 ## Commercial model
 
 Trackdub operates an **open-core** model:
@@ -105,8 +113,9 @@ Trackdub operates an **open-core** model:
   inference, media, licensing mechanisms, tooling, and tests.
 - **Private product** (`Trackdub-gated`): the proprietary desktop product with the
   Avalonia shell, branding, installer, signing, activation, and tier gating.
-- **Future private services**: `api.trackdub`, `portal.trackdub`, and `trackdub.com`
-  are reserved for server-side activation, product API, portal, and marketing site.
+- **Private services**: `api.trackdub` (the Cloudflare API for activation and job
+  records, and the front door for cloud render jobs), `portal.trackdub` (web portal),
+  and `trackdub.com` (marketing site) live in separate private repositories.
 - **Contributor licensing**: a contributor license agreement lets Mesilim LLC
   relicense contributions under commercial terms.
 
@@ -125,15 +134,22 @@ product carries tiered features, activation, and support.
 | `Trackdub.Media.Playback` | libmpv/LibVLC playback surface |
 | `Trackdub.Inference` | Model abstractions and pipeline stage contracts |
 | `Trackdub.Inference.Onnx` | ONNX Runtime session management and EP registration |
+| `Trackdub.InferenceWorker` | Windows-only out-of-process ONNX Runtime worker ([ADR-0017](docs/decisions/ADR-0017-ort130-inference-worker.md)) |
 | `Trackdub.Composition` | DI wiring root |
 | `Trackdub.Sdk` | Programmatic session API for integrations |
-| `Trackdub.Cli` | Headless CLI entry point |
+| `Trackdub.Cli` | Headless CLI entry point; runs in the Linux GPU container |
+| `Trackdub.Cloud` | Cloud job contracts, cloud presets, media validation, `IJobScheduler` seam |
+| `Trackdub.Cloud.Aws` | DynamoDB job store and S3 artifact store |
+| `Trackdub.Api` | CPU ASP.NET job API (Cognito JWT); not part of the SnapSoft POC path |
+| `Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (`Dockerfile.cloud-worker`) |
 | `Trackdub.Licensing` | Neutral license validation mechanisms |
 | `Trackdub.Benchmarks` | Performance benchmarks |
+| `Trackdub.Benchmarks.DevHost` | Development host for the benchmark harness |
 | `Trackdub.Benchmarks.Micro` | BenchmarkDotNet microbenchmarks for CPU, tensor, tokenizer, and opt-in ONNX paths |
 | `Trackdub.Tools` | Development utilities |
 | `Trackdub.Analyzers` | Roslyn analyzers |
 | `Trackdub.DubBench` | Benchmark harness and Avalonia sidecar launcher |
+| `Trackdub.DubBench.DevHost` | Development host for DubBench |
 | `Trackdub.OnnxRuntime.Dnnl.Native` | Native oneDNN/DNNL execution provider for ONNX Runtime |
 
 ## Requirements
@@ -141,6 +157,7 @@ product carries tiered features, activation, and support.
 - .NET 11 SDK (11.0.100)
 - FFmpeg (for audio/video processing)
 - libmpv or LibVLC (for playback)
+- Optional: Docker with the NVIDIA Container Toolkit, for the Linux GPU container
 
 ## Build
 
@@ -176,6 +193,31 @@ dotnet run --project src/Trackdub.Cli --framework net11.0 -- --help
 On non-Windows platforms the project targets only `net11.0`, so a plain
 `dotnet run --project src/Trackdub.Cli -- <args>` works without the flag.
 
+## Headless and cloud render
+
+The same pipeline runs without the desktop UI. `trackdub run pipeline` writes the usual
+per-stage project artifacts plus a structured result file (`--result-file`) and a
+progress stream (`--progress-file`) that a job runner can parse. Cloud presets fix the
+models, variants, and per-stage providers so clients choose a preset name and never
+supply commands, model IDs, or paths: `poc-server-v1` (English to Spanish) and
+`poc-server-zh-v1` (English to Chinese).
+
+The `Dockerfile` publishes two Linux GPU images: `rtx` (consumer RTX GPUs,
+TensorRT-RTX) and `server` (datacenter GPUs such as AWS G6/L4 and G6e/L40S, CUDA and
+classic TensorRT). TensorRT engine caches are specific to a GPU model and driver, so
+each instance type builds its own with `trackdub cache warm --provider tensorrt`.
+
+The cloud render tier is opt-in per project and needs explicit consent before source
+media leaves the device. The SnapSoft proof of concept targets this job path:
+
+```text
+Cloudflare API (auth, job record) -> SQS -> EC2 GPU worker (trackdub run pipeline)
+  -> S3 (KMS encryption, presigned URLs, 7-day lifecycle)
+```
+
+- Runbook (build, seed, warm): [docs/operations/cloud-gpu-container.md](docs/operations/cloud-gpu-container.md)
+- POC scope, model pack, provider allow-list, and open design decisions: [docs/handoff/snapsoft-onboarding.md](docs/handoff/snapsoft-onboarding.md)
+
 ## Solution Filters
 
 - `Trackdub.Inference.slnx` — Inference, Composition, benchmarks, and tests
@@ -192,11 +234,18 @@ Media -> Application, Analyzers, Contracts, Domain
 Media.Playback -> Application, Domain
 Inference -> Contracts, Domain
 Inference.Onnx -> Inference, Contracts, Domain
-Composition -> Application, Inference, Inference.Onnx, Infrastructure, Licensing, Media, Media.Playback
+InferenceWorker -> Inference.Onnx
+Composition -> Application, Inference, Inference.Onnx, InferenceWorker, Infrastructure, Licensing, Media, Media.Playback
 Sdk -> Application, Composition, Licensing
 Cli -> Sdk
+Cloud -> Contracts
+Cloud.Aws -> Cloud
+Api -> Cloud.Aws
+CloudJobAdapter -> Cloud.Aws
 DubBench -> Benchmarks, Domain, Inference, Inference.Onnx
+DubBench.DevHost -> DubBench, Infrastructure
 Benchmarks -> Application, Composition, Domain, Inference, Inference.Onnx, Infrastructure
+Benchmarks.DevHost -> Benchmarks
 Benchmarks.Micro -> Inference.Onnx
 Tools -> Application, Domain, Infrastructure, Media
 Contracts -> Domain
