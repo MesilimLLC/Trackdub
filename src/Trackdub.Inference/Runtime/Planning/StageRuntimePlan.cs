@@ -21,6 +21,9 @@ public sealed record StageRuntimePlan
 
     public ExecutionProviderKind? ExecutionProvider { get; init; }
 
+    /// <summary>True when the caller selected a stage provider instead of Auto.</summary>
+    public bool HasExplicitProviderPreference { get; init; }
+
     /// <summary>
     /// When <see langword="true"/>, the caller required the preferred EP (hard pin).
     /// Session factories must not soft-retry TensorRT RTX init onto DirectML/CPU.
@@ -117,6 +120,12 @@ public sealed record ExecutionProviderSmokeTestRequest(
     string EntryPath,
     string? ModelRevisionHash = null)
 {
+    /// <summary>Use explicit catalog selection when the stage has a provider override.</summary>
+    public bool HasExplicitProviderPreference { get; init; }
+
+    /// <summary>Set by the smoke tester only when a Windows ML policy can select another provider.</summary>
+    public bool AllowPolicyProviderSelection { get; init; }
+
     /// <summary>
     /// Set only by optimization-only warmup callers: a GenAI smoke must then never evict
     /// a resident model (or wait for eviction headroom) to make room. When loading the

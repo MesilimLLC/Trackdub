@@ -110,13 +110,15 @@ public sealed class OnnxExecutionProviderDiscoveryTests
         Assert.Contains(availabilities, a => a.Provider == ExecutionProviderKind.VitisAi);
     }
 
-    [Fact]
-    public async Task DiscoverAsync_Windows_DirectMlFollowsBuildCapabilities()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DiscoverAsync_Windows_DirectMlFollowsBuildCapabilitiesRegardlessOfNativePolicy(bool allowNative)
     {
         var discovery = new OnnxExecutionProviderDiscovery(
             new StubOpenVinoProvider(false),
             new StubLinuxNativeGpuRuntimeProbe(nvidiaDriverLoaded: false, nativeTensorRtAvailable: false),
-            new StubNativeCudaTensorRtWindowsPolicy(allowed: false),
+            new StubNativeCudaTensorRtWindowsPolicy(allowed: allowNative),
             new StubMigraphxReadinessProbe(),
             new StubDnnlReadinessProbe(isReady: false),
             new StubTensorRtRtxReadinessProbe(),

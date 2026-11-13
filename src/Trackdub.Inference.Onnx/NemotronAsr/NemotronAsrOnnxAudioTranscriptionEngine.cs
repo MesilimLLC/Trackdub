@@ -256,6 +256,7 @@ public sealed class NemotronAsrOnnxAudioTranscriptionEngine(
             {
                 EngineFamily = EngineFamilyName,
                 Provider = plan.ExecutionProvider!.Value,
+                HasExplicitProviderPreference = plan.HasExplicitProviderPreference,
                 CancellationToken = cancellationToken,
                 ModelId = plan.ModelId,
                 Variant = plan.Variant,
@@ -272,7 +273,7 @@ public sealed class NemotronAsrOnnxAudioTranscriptionEngine(
     private static StageRuntimeExecutionSummary CreatePlannedOnlySummary(StageRuntimePlan plan, string bootstrapDetail) =>
         new(
             "auto",
-            plan.ExecutionProvider!.Value.ToString().ToLowerInvariant(),
+            "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,

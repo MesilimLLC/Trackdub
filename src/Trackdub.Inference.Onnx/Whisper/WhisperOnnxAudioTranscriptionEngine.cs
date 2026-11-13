@@ -235,7 +235,7 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
         }
 
         OnnxExecutionSessionFactory.WhisperSessionLease lease = await OnnxExecutionSessionFactory
-            .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = provider, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
+            .CreatePooledWhisperAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "whisper-onnx", Provider = provider, HasExplicitProviderPreference = plan.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = encoderOptions, AdditionalTrtDecoderOptions = decoderOptions }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
         return new WhisperSessionBundle(lease, encoderModelPath, decoderModelPath, modelRootPath);
     }
@@ -1037,7 +1037,7 @@ public sealed class WhisperOnnxAudioTranscriptionEngine : IAudioTranscriptionEng
     private static StageRuntimeExecutionSummary CreatePlannedOnlySummary(StageRuntimePlan plan, string bootstrapDetail) =>
         new(
             "auto",
-            plan.ExecutionProvider!.Value.ToString().ToLowerInvariant(),
+            "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,

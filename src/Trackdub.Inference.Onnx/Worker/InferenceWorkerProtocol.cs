@@ -14,12 +14,13 @@ namespace Trackdub.Inference.Onnx.Worker;
 /// </summary>
 public static class InferenceWorkerProtocol
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public const int MaxMessageBytes = 256 * 1024 * 1024;
 
     public const string Hello = "hello";
     public const string TtsSynthesize = "tts.synthesize";
     public const string TtsWarm = "tts.warm";
+    public const string Translation = "translation.run";
     public const string Cancel = "cancel";
     public const string Shutdown = "shutdown";
     public const string Result = "result";
@@ -207,6 +208,22 @@ public sealed record WorkerTtsResult(
     string VoiceId,
     string Provider,
     StageRuntimeExecutionSummary? ExecutionSummary);
+
+/// <param name="NonEvictingWarmup">
+/// Set for optimization-only warmups: the worker must lease the model without evicting a resident
+/// one, and answer with <see cref="WorkerTranslationResult.NotAttempted"/> when it cannot.
+/// </param>
+public sealed record WorkerTranslationRequest(TranslationRequest Request, WorkerPlan Plan, bool NonEvictingWarmup = false);
+
+/// <param name="NotAttempted">
+/// True when a non-evicting warmup was declined because loading the model would have evicted a
+/// resident one. <paramref name="Segments"/> is then empty and nothing was proven about the model.
+/// </param>
+public sealed record WorkerTranslationResult(
+    IReadOnlyList<TranslatedTextSegment> Segments,
+    StageRuntimeExecutionSummary? ExecutionSummary,
+    bool NotAttempted = false,
+    string? Detail = null);
 
 /// <summary>
 /// Warm request: construct the worker's Kokoro engine and create its real pooled session

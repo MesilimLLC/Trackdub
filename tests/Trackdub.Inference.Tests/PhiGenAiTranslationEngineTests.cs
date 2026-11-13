@@ -3,6 +3,7 @@ using Trackdub.Contracts.Pipeline;
 using Trackdub.Domain;
 using Trackdub.Inference.Onnx;
 using Trackdub.Inference.Onnx.Phi;
+using Trackdub.Inference.Onnx.Worker;
 using Trackdub.Inference.Runtime.Planning;
 using Trackdub.TestDoubles;
 
@@ -16,6 +17,260 @@ namespace Trackdub.Inference.Tests;
 /// </summary>
 public sealed class PhiGenAiTranslationEngineTests
 {
+    [Fact]
+    public async Task EmptyTranslationDoesNotClaimAProviderRan()
+    {
+        var provenance = new Trackdub.Domain.Translation.TranslationModelProvenance(
+            "mesilim/qwen3", "revision", "sha256", new Dictionary<string, string>(), null, null);
+        var plan = new StageRuntimePlan
+        {
+            Stage = RuntimeStage.Translation,
+            Status = StageRuntimePlanStatus.Ready,
+            ModelId = "Qwen/Qwen3-4B",
+            ModelAlias = "qwen3-4b-translation",
+            EngineFamily = "qwen-genai",
+            ExecutionProvider = ExecutionProviderKind.Cuda,
+        };
+        var engine = new PhiGenAiTranslationEngine(new StubRuntimePlanner(plan),
+            BenchmarkModelPathResolver.CreateDefault(), engineFamily: "qwen-genai");
+        Assert.Empty(await engine.TranslateAsync(new TranslationRequest("en", "fr", [], ModelProvenance: provenance), CancellationToken.None));
+        Assert.Equal("not-run", engine.LastExecutionSummary?.SelectedProvider);
+        Assert.Same(provenance, engine.LastExecutionMetadata?.ModelProvenance);
+    }
+
+    [Fact]
+    public async Task WindowsQwenCudaPlanWithoutWorkerFailsWithActionableMessage()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var plan = CreateQwenCudaPlan();
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(plan), BenchmarkModelPathResolver.CreateDefault(),
+            engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName);
+        var request = new TranslationRequest(
+            "en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]);
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => engine.TranslateAsync(request, CancellationToken.None));
+
+        Assert.Contains("requires the inference worker", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task QwenCudaWorkerForwardsNonEvictingWarmupFlag()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var worker = new RecordingWorkerClient();
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(CreateQwenCudaPlan()), BenchmarkModelPathResolver.CreateDefault(),
+            engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            workerClient: worker)
+        {
+            NonEvictingWarmup = true
+        };
+
+        await engine.TranslateAsync(
+            new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]),
+            CancellationToken.None);
+
+        Assert.Equal([true], worker.NonEvictingWarmupValues);
+
+        await foreach (PipelineStreamItem<TranslatedTextSegment> _ in engine.TranslateStreamAsync(
+            new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]),
+            Guid.NewGuid(), "qwen-snapshot", Guid.NewGuid(), CancellationToken.None))
+        {
+        }
+
+        Assert.Equal([true, true], worker.NonEvictingWarmupValues);
+    }
+
+    [WorkerExecutableFact]
+    public async Task TranslationWorkerRejectsUnsupportedFamilyAndHonorsCancellation()
+    {
+        using var client = new InferenceWorkerClient(Environment.GetEnvironmentVariable("TRACKDUB_INFERENCE_WORKER_PATH"));
+        var request = new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]);
+        var plan = new StageRuntimePlan
+        {
+            Stage = RuntimeStage.Translation,
+            Status = StageRuntimePlanStatus.Ready,
+            EngineFamily = "unsupported",
+            ExecutionProvider = ExecutionProviderKind.Cuda,
+        };
+        InferenceWorkerException failure = await Assert.ThrowsAsync<InferenceWorkerException>(
+            () => client.TranslateAsync(request, plan, CancellationToken.None));
+        Assert.Contains("qwen-genai", failure.Message, StringComparison.OrdinalIgnoreCase);
+
+        StageRuntimePlan missingModel = plan with
+        {
+            ModelId = "Qwen/Qwen3-4B",
+            ModelAlias = "qwen3-4b-translation",
+            EngineFamily = "qwen-genai",
+            Variant = "cuda-int4",
+            ModelRootPath = Path.Join(Path.GetTempPath(), "trackdub-missing-model-" + Guid.NewGuid().ToString("N")),
+        };
+        await Assert.ThrowsAsync<InferenceWorkerException>(
+            () => client.TranslateAsync(request, missingModel, CancellationToken.None));
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.TranslateAsync(request, plan, cancelled.Token));
+    }
+
+    [QwenWorkerFact]
+    public async Task Qwen3_CudaWorker_TranslatesWithGlossary()
+    {
+        string root = Environment.GetEnvironmentVariable("TRACKDUB_QWEN_TRANSLATION_MODEL")!;
+        using var client = new InferenceWorkerClient(Environment.GetEnvironmentVariable("TRACKDUB_INFERENCE_WORKER_PATH"));
+        var plan = new StageRuntimePlan
+        {
+            Stage = RuntimeStage.Translation,
+            Status = StageRuntimePlanStatus.Ready,
+            ModelId = "Qwen/Qwen3-4B",
+            ModelAlias = "qwen3-4b-translation",
+            EngineFamily = "qwen-genai",
+            Variant = "cuda-int4",
+            ExecutionProvider = ExecutionProviderKind.Cuda,
+            ModelEntryPath = Path.Join(root, "genai_config.json"),
+            ModelRootPath = root
+        };
+        var request = new TranslationRequest("en", "fr",
+            [new TranslationInputSegment(0, 0, 1, "Hello, how are you today?")],
+            PreferredModelAlias: "qwen3-4b-translation",
+            GlossaryHints: [new TranslationGlossaryHint("Hello", "Bonjour", false)]);
+
+        WorkerTranslationResult result = await client.TranslateAsync(request, plan, CancellationToken.None);
+
+        Assert.Equal("cuda", result.ExecutionSummary?.SelectedProvider);
+        Assert.Contains("Bonjour", Assert.Single(result.Segments).Text, StringComparison.OrdinalIgnoreCase);
+
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(plan), BenchmarkModelPathResolver.CreateDefault(),
+            engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName, workerClient: client);
+        var translated = await engine.TranslateAsync(request, CancellationToken.None);
+        Assert.Contains("Bonjour", Assert.Single(translated).Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("cuda", engine.LastExecutionSummary?.SelectedProvider);
+        var streamed = new List<PipelineStreamItem<TranslatedTextSegment>>();
+        await foreach (var item in engine.TranslateStreamAsync(
+            request, Guid.NewGuid(), "qwen-worker", Guid.NewGuid(), CancellationToken.None))
+        {
+            streamed.Add(item);
+        }
+        Assert.Contains("Bonjour", Assert.Single(streamed).Payload.Text, StringComparison.OrdinalIgnoreCase);
+    }
+    [GemmaTranslationModelFact]
+    public async Task Gemma4_Model_TranslatesWithGlossary()
+    {
+        string root = Environment.GetEnvironmentVariable("TRACKDUB_GEMMA_TRANSLATION_MODEL")!;
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(new StageRuntimePlan
+            {
+                Stage = RuntimeStage.Translation,
+                Status = StageRuntimePlanStatus.Ready,
+                ModelId = "google/gemma-4-E4B-it",
+                ModelAlias = "gemma-4-e4b-translation",
+                Variant = "cpu-int4",
+                ExecutionProvider = ExecutionProviderKind.Cpu,
+                ModelEntryPath = Path.Join(root, "genai_config.json"),
+                ModelRootPath = root
+            }), BenchmarkModelPathResolver.CreateDefault(), engineFamily: "gemma-genai");
+        var request = new TranslationRequest("en", "fr",
+            [new TranslationInputSegment(0, 0, 1, "Hello, how are you today?")],
+            PreferredModelAlias: "gemma-4-e4b-translation",
+            GlossaryHints: [new TranslationGlossaryHint("Hello", "Bonjour", false)]);
+        var result = await engine.TranslateAsync(request, CancellationToken.None);
+        Assert.Contains("Bonjour", Assert.Single(result).Text, StringComparison.OrdinalIgnoreCase);
+    }
+    [QwenTranslationModelFact]
+    public async Task Qwen3_Model_TranslatesWithGlossary()
+    {
+        string root = Environment.GetEnvironmentVariable("TRACKDUB_QWEN_TRANSLATION_MODEL")!;
+        bool useCuda = string.Equals(Environment.GetEnvironmentVariable("TRACKDUB_QWEN_TRANSLATION_PROVIDER"), "cuda", StringComparison.OrdinalIgnoreCase);
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(new StageRuntimePlan
+            {
+                Stage = RuntimeStage.Translation,
+                Status = StageRuntimePlanStatus.Ready,
+                ModelId = "Qwen/Qwen3-4B",
+                ModelAlias = "qwen3-4b-translation",
+                Variant = useCuda ? "cuda-int4" : "cpu-int4",
+                ExecutionProvider = useCuda ? ExecutionProviderKind.Cuda : ExecutionProviderKind.Cpu,
+                ModelEntryPath = Path.Join(root, "genai_config.json"),
+                ModelRootPath = root
+            }), BenchmarkModelPathResolver.CreateDefault(), engineFamily: "qwen-genai");
+        var request = new TranslationRequest("en", "fr",
+            [new TranslationInputSegment(0, 0, 1, "Hello, how are you today?")],
+            PreferredModelAlias: "qwen3-4b-translation",
+            GlossaryHints: [new TranslationGlossaryHint("Hello", "Bonjour", false)]);
+        var result = await engine.TranslateAsync(request, CancellationToken.None);
+        Assert.Contains("Bonjour", Assert.Single(result).Text, StringComparison.OrdinalIgnoreCase);
+        var streamed = new List<PipelineStreamItem<TranslatedTextSegment>>();
+        await foreach (var item in engine.TranslateStreamAsync(request, Guid.NewGuid(), "qwen-snapshot", Guid.NewGuid(), CancellationToken.None))
+        {
+            streamed.Add(item);
+        }
+        Assert.Contains("Bonjour", Assert.Single(streamed).Payload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(useCuda ? "cuda" : "cpu", engine.LastExecutionSummary?.SelectedProvider);
+    }
+    [Fact]
+    public void GlossaryHints_AreSelectedForEachSegmentAndIncludedInPrompt()
+    {
+        TranslationGlossaryHint[] hints =
+        [
+            new("Trackdub", "Trackdub FR", false),
+            new("CAT", "chat", true),
+            new("ignored", "retenu", false, [new(1, 0, 1, "ignored")]),
+            new("Trackdub", "Trackdub FR", false)
+        ];
+        var segment = new TranslationInputSegment(0, 0, 1, "trackdub cat");
+        var selected = PhiGenAiTranslationEngine.SelectApplicableGlossaryHints(segment, hints);
+        string prompt = PhiGenAiTranslationEngine.BuildTranslationPrompt(segment.Text, "French", GenAiTranslationPromptFormat.Qwen3, selected);
+        Assert.Single(selected);
+        Assert.Contains("Trackdub -> Trackdub FR", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("retenu", prompt, StringComparison.Ordinal);
+    }
+    [Theory]
+    [InlineData("qwen3-genai", "qwen-genai", GenAiTranslationPromptFormat.Qwen3)]
+    [InlineData("google/gemma-4-e2b-it", "gemma-genai", GenAiTranslationPromptFormat.Gemma4)]
+    public void ResolvePromptFormat_SelectsModelFamilyFormat(
+        string modelId,
+        string engineFamily,
+        GenAiTranslationPromptFormat expected)
+    {
+        Assert.Equal(expected, PhiGenAiTranslationEngine.ResolvePromptFormat(modelId, null, engineFamily));
+    }
+
+    [Fact]
+    public void BuildTranslationPrompt_UsesQwenAndGemma4ChatMarkers()
+    {
+        string qwenPrompt = PhiGenAiTranslationEngine.BuildTranslationPrompt(
+            "Hello", "French", GenAiTranslationPromptFormat.Qwen3);
+        string gemmaPrompt = PhiGenAiTranslationEngine.BuildTranslationPrompt(
+            "Hello", "French", GenAiTranslationPromptFormat.Gemma4);
+
+        Assert.Contains("<|im_start|>assistant", qwenPrompt, StringComparison.Ordinal);
+        Assert.Contains("<|turn>model", gemmaPrompt, StringComparison.Ordinal);
+    }
+
+    private static StageRuntimePlan CreateQwenCudaPlan() =>
+        new()
+        {
+            Stage = RuntimeStage.Translation,
+            Status = StageRuntimePlanStatus.Ready,
+            ModelId = "Qwen/Qwen3-4B",
+            ModelAlias = "qwen3-4b-translation",
+            EngineFamily = PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            ExecutionProvider = ExecutionProviderKind.Cuda,
+            Variant = "cuda-int4"
+        };
+
     /// <summary>Model root the bundled manifest declares for the Phi-3.5 CPU int4 variant.</summary>
     private const string BundledModelRootRelativePath =
         "phi-3.5-mini-genai/cpu_and_mobile/cpu-int4-awq-block-128-acc-level-4";
@@ -278,5 +533,50 @@ public sealed class PhiGenAiTranslationEngineTests
             {
                 Stage = request.Stage
             });
+    }
+}
+
+public sealed class QwenTranslationModelFactAttribute : FactAttribute
+{
+    public QwenTranslationModelFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TRACKDUB_QWEN_TRANSLATION_MODEL")))
+        {
+            Skip = "Set TRACKDUB_QWEN_TRANSLATION_MODEL to run the real Qwen model test.";
+        }
+    }
+}
+
+public sealed class GemmaTranslationModelFactAttribute : FactAttribute
+{
+    public GemmaTranslationModelFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TRACKDUB_GEMMA_TRANSLATION_MODEL")))
+        {
+            Skip = "Set TRACKDUB_GEMMA_TRANSLATION_MODEL to run the real Gemma model test.";
+        }
+    }
+}
+
+public sealed class QwenWorkerFactAttribute : FactAttribute
+{
+    public QwenWorkerFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TRACKDUB_QWEN_TRANSLATION_MODEL")) ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TRACKDUB_INFERENCE_WORKER_PATH")))
+        {
+            Skip = "Set TRACKDUB_QWEN_TRANSLATION_MODEL and TRACKDUB_INFERENCE_WORKER_PATH to run the CUDA worker test.";
+        }
+    }
+}
+
+public sealed class WorkerExecutableFactAttribute : FactAttribute
+{
+    public WorkerExecutableFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TRACKDUB_INFERENCE_WORKER_PATH")))
+        {
+            Skip = "Set TRACKDUB_INFERENCE_WORKER_PATH to run the worker protocol test.";
+        }
     }
 }

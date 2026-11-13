@@ -22,8 +22,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
         int targetFrames = stftProcessor.GetTargetFrameCount(originalLength);
         int numSplits = targetFrames / SpleeterModelConstants.TimePad;
 
-        ExecutionProviderKind provider = request.Plan.ExecutionProvider ?? ExecutionProviderKind.Cpu;
-        bool allowTrtInitFallback = !request.Plan.RequirePreferredExecutionProvider;
+        PooledProviderRequest providerRequest = PooledProviderRequest.ForPlan(request.Plan);
 
         string vocalsModelPath = SpleeterModelConstants.ResolveModelPath(
             request.ModelRootPath,
@@ -54,8 +53,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
             StemMaskResult vocalsResult = await RunStemMaskAsync(
                 "spleeter-vocals",
                 vocalsModelPath,
-                provider,
-                allowTrtInitFallback,
+                providerRequest,
                 block.Magnitudes,
                 cancellationToken).ConfigureAwait(false);
             if (selectedProvider is null)
@@ -75,8 +73,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
             StemMaskResult accResult = await RunStemMaskAsync(
                 "spleeter-acc",
                 accModelPath,
-                provider,
-                allowTrtInitFallback,
+                providerRequest,
                 block.Magnitudes,
                 cancellationToken).ConfigureAwait(false);
             EnsureConsistentProvider(selectedProvider, accResult.SelectedProvider);
@@ -94,7 +91,7 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
 
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["selected_provider"] = selectedProvider ?? provider.ToString()
+            ["selected_provider"] = selectedProvider ?? providerRequest.Provider.ToString()
         };
 
         if (!string.IsNullOrWhiteSpace(bootstrapDetail))
@@ -129,13 +126,12 @@ internal sealed class SpleeterOnnxSeparator : ISpleeterSeparator
     private async Task<StemMaskResult> RunStemMaskAsync(
         string poolKey,
         string modelPath,
-        ExecutionProviderKind provider,
-        bool allowTrtInitFallback,
+        PooledProviderRequest providerRequest,
         Memory<float> magnitudes,
         CancellationToken cancellationToken)
     {
         using OnnxExecutionSessionFactory.SingleSessionLease sessionLease = await OnnxExecutionSessionFactory
-            .CreatePooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = poolKey, Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelPath)
+            .CreatePooledSingleAsync(providerRequest.ToSessionRequest(poolKey, cancellationToken), modelPath)
             .ConfigureAwait(false);
 
         // Bind by the model's actual input name: the sherpa-onnx spleeter export names its

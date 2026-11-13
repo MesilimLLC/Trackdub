@@ -260,7 +260,7 @@ public sealed partial class TranslationOrchestrationService(
 
         (string sourceLanguage, string targetLanguage, TranslationScopePlan scopePlan) = preparation;
         TranslationRouteSelection route = await ResolveTranslationRouteAsync(
-            new TranslationRouteRequest(sourceLanguage, targetLanguage, request.PreferredModelAlias),
+            new TranslationRouteRequest(sourceLanguage, targetLanguage, request.PreferredModelAlias, request.PreferredModelVariantAlias, request.PreferredExecutionProvider),
             runProgress.Progress,
             cancellationToken).ConfigureAwait(false);
         StageRunRecord translationStageRun = await StageRunHelper
@@ -345,7 +345,8 @@ public sealed partial class TranslationOrchestrationService(
                 routeRequest.TargetLanguage,
                 routeRequest.PreferredModelAlias,
                 cancellationToken,
-                new TranslationPreparationProgress(progress)).ConfigureAwait(false);
+                new TranslationPreparationProgress(progress), routeRequest.PreferredModelVariantAlias,
+                routeRequest.PreferredExecutionProvider?.ToString()).ConfigureAwait(false);
         PipelineProgressReporter.Phase(progress, StageNames.Translation, "Initializing translation model");
         TranslationRouteSelection route = await translationLanguageRouter.ResolveRouteAsync(
             routeRequest.SourceLanguage,
@@ -776,7 +777,7 @@ public sealed partial class TranslationOrchestrationService(
             ?? throw new InvalidOperationException("The selected transcript segment is no longer available.");
 
         TranslationRouteSelection route = await ResolveTranslationRouteAsync(
-            new TranslationRouteRequest(sourceLanguage, targetLanguage, request.PreferredModelAlias),
+            new TranslationRouteRequest(sourceLanguage, targetLanguage, request.PreferredModelAlias, request.PreferredModelVariantAlias, request.PreferredExecutionProvider),
             progress: null,
             cancellationToken).ConfigureAwait(false);
         StageRunRecord translationStageRun = await StageRunHelper

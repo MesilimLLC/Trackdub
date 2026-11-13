@@ -15,6 +15,13 @@ public sealed class TranslationLanguageRouter(
     IStudioSettingsService? settingsService = null)
     : ITranslationLanguageRouter
 {
+    private static readonly HashSet<string> GenAiPivotEngineFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "phi-genai",
+        "qwen-genai",
+        "gemma-genai"
+    };
+
     private readonly BundledModelManifestRegistry manifestRegistry = manifestRegistry ?? throw new ArgumentNullException(nameof(manifestRegistry));
     private readonly IModelCacheInventory modelCacheInventory = modelCacheInventory ?? throw new ArgumentNullException(nameof(modelCacheInventory));
 
@@ -23,6 +30,10 @@ public sealed class TranslationLanguageRouter(
     // Optional only so existing test doubles that build the router without DI continue to compile;
     // the production composition root always supplies a planner.
     private readonly IRuntimePlanner? runtimePlanner = runtimePlanner;
+
+    public static bool IsGenAiPivotEngineFamily(string? engineFamily) =>
+        !string.IsNullOrWhiteSpace(engineFamily) &&
+        GenAiPivotEngineFamilies.Contains(engineFamily.Trim());
 
     public async Task<IReadOnlyList<TranslationTargetLanguageOption>> GetSupportedTargetLanguagesAsync(
         string sourceLanguage,
@@ -106,7 +117,7 @@ public sealed class TranslationLanguageRouter(
             IsPivotTranslationEntry(entry))
             .ToArray();
 
-        IReadOnlyDictionary<string, bool> planAvailabilityByModelId = await BuildPlanAvailabilityAsync(
+        IReadOnlyDictionary<string, PlanAvailability> planAvailabilityByModelId = await BuildPlanAvailabilityAsync(
             directEntriesByPair.Values.SelectMany(static entries => entries).Concat(pivotEntries),
             cancellationToken).ConfigureAwait(false);
 
@@ -127,16 +138,16 @@ public sealed class TranslationLanguageRouter(
     /// When no planner is configured (legacy test wiring) the router falls back to the
     /// inline cache+file checks below.
     /// </summary>
-    private async Task<IReadOnlyDictionary<string, bool>> BuildPlanAvailabilityAsync(
+    private async Task<IReadOnlyDictionary<string, PlanAvailability>> BuildPlanAvailabilityAsync(
         IEnumerable<BundledModelManifestEntry> entries,
         CancellationToken cancellationToken)
     {
         if (runtimePlanner is null)
         {
-            return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, PlanAvailability>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var availability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var availability = new Dictionary<string, PlanAvailability>(StringComparer.OrdinalIgnoreCase);
         foreach (BundledModelManifestEntry entry in entries.DistinctBy(e => e.ModelId, StringComparer.OrdinalIgnoreCase))
         {
             string? primaryAlias = entry.Aliases.FirstOrDefault();
@@ -149,7 +160,7 @@ public sealed class TranslationLanguageRouter(
                         PreferredEngineFamily: entry.EngineFamily,
                         RequirePreferredModelAlias: !string.IsNullOrWhiteSpace(primaryAlias)),
                     cancellationToken).ConfigureAwait(false);
-                availability[entry.ModelId] = plan.IsRunnable();
+                availability[entry.ModelId] = new PlanAvailability(plan.IsRunnable(), plan.ModelEntryPath);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -159,7 +170,7 @@ public sealed class TranslationLanguageRouter(
             {
                 // Planner failure is treated as "not runnable" — a strictly more conservative
                 // outcome than silently masking an underlying problem with the planner stack.
-                availability[entry.ModelId] = false;
+                availability[entry.ModelId] = new PlanAvailability(false, null);
             }
         }
 
@@ -176,7 +187,7 @@ public sealed class TranslationLanguageRouter(
             return true;
         }
 
-        return context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out bool isRunnable) && isRunnable;
+        return context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out PlanAvailability? planAvailability) && planAvailability.IsRunnable;
     }
 
     private TranslationRouteSelection ResolveRoute(
@@ -244,9 +255,9 @@ public sealed class TranslationLanguageRouter(
                 ExpectedDownloadBytes: downloadable.ExpectedDownloadBytes);
 
         if (!string.IsNullOrWhiteSpace(preferredModelAlias))
-            return new TranslationRouteSelection(normalizedSourceLanguage, normalizedTargetLanguage,
-                TranslationRoutingKind.Unavailable, false, "none", "Unavailable",
-                UnavailableReason: $"Selected translation model '{preferredModelAlias}' is not available for this language pair.");
+        {
+            return CreateUnavailablePreferredRoute(normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias);
+        }
 
         if (TryResolveMadladPivotRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, out TranslationRouteSelection? madladRoute))
         {
@@ -310,14 +321,77 @@ public sealed class TranslationLanguageRouter(
                 return true;
             }
 
-            if (string.Equals(entry.EngineFamily, "phi-genai", StringComparison.OrdinalIgnoreCase) &&
+            if (IsGenAiPivotEngineFamily(entry.EngineFamily) &&
                 TryResolveGenAiPivotRoute(context, sourceLanguage, targetLanguage, entry, out route))
             {
                 return true;
             }
         }
 
-        return false;
+        return TryResolvePreferredGenAiDownload(context, sourceLanguage, targetLanguage, preferredModelAlias, out route);
+    }
+
+    private static bool TryResolvePreferredGenAiDownload(
+        TranslationRoutingContext context,
+        string sourceLanguage,
+        string targetLanguage,
+        string preferredModelAlias,
+        out TranslationRouteSelection? route)
+    {
+        route = null;
+        if (!context.CanDownload)
+        {
+            return false;
+        }
+
+        BundledModelManifestEntry? entry = GetPivotEntriesForPair(context, sourceLanguage, targetLanguage)
+            .FirstOrDefault(candidate => IsUninstalledPreferredGenAiDownload(context, candidate, preferredModelAlias));
+        if (entry is null)
+        {
+            return false;
+        }
+
+        route = new TranslationRouteSelection(sourceLanguage, targetLanguage,
+            TranslationRoutingKind.Pivot, false, entry.EngineFamily, "Download required",
+            ModelId: entry.ModelId, PreferredModelAlias: entry.Aliases.FirstOrDefault(),
+            EngineFamily: entry.EngineFamily, PreparationStatus: TranslationPreparationStatus.DownloadRequired,
+            ExpectedDownloadBytes: entry.ExpectedDownloadBytes);
+        return true;
+    }
+
+    private static bool IsUninstalledPreferredGenAiDownload(
+        TranslationRoutingContext context,
+        BundledModelManifestEntry candidate,
+        string preferredModelAlias) =>
+        IsPreferredGenAiEntry(candidate, preferredModelAlias) && IsUninstalledCommercialDownload(context, candidate);
+
+    private static bool IsPreferredGenAiEntry(BundledModelManifestEntry candidate, string preferredModelAlias) =>
+        HasAlias(candidate, preferredModelAlias) && IsGenAiPivotEngineFamily(candidate.EngineFamily);
+
+    private static bool IsUninstalledCommercialDownload(TranslationRoutingContext context, BundledModelManifestEntry candidate)
+    {
+        if (context.CacheIndex.ContainsKey(candidate.ModelId))
+        {
+            return false;
+        }
+
+        bool commerciallyUsable = candidate.CommercialAllowed && candidate.CommercialUseVerified;
+        bool hasDownloadFiles = candidate.DownloadFiles.Count > 0 || candidate.Variants.Any(variant => variant.DownloadFiles.Count > 0);
+        return commerciallyUsable && hasDownloadFiles;
+    }
+
+    private static TranslationRouteSelection CreateUnavailablePreferredRoute(
+        string sourceLanguage,
+        string targetLanguage,
+        string preferredModelAlias)
+    {
+        bool gemmaRuntimeUnavailable = preferredModelAlias.Equals("gemma-4-e4b-translation", StringComparison.OrdinalIgnoreCase);
+        string reason = gemmaRuntimeUnavailable
+            ? "Gemma 4 E4B translation is not available until its runtime and memory requirements have been validated."
+            : $"Selected translation model '{preferredModelAlias}' is not available for this language pair.";
+        return new TranslationRouteSelection(sourceLanguage, targetLanguage,
+            TranslationRoutingKind.Unavailable, false, gemmaRuntimeUnavailable ? "gemma-genai" : "none", "Unavailable",
+            UnavailableReason: reason);
     }
 
     private bool TryResolveMadladPivotRoute(
@@ -471,8 +545,8 @@ public sealed class TranslationLanguageRouter(
         out TranslationRouteSelection? route)
     {
         route = null;
-        foreach (BundledModelManifestEntry entry in context.PivotEntries
-            .Where(static e => string.Equals(e.EngineFamily, "phi-genai", StringComparison.OrdinalIgnoreCase)))
+        foreach (BundledModelManifestEntry entry in GetPivotEntriesForPair(context, sourceLanguage, targetLanguage)
+            .Where(static e => IsGenAiPivotEngineFamily(e.EngineFamily)))
         {
             if (TryResolveGenAiPivotRoute(context, sourceLanguage, targetLanguage, entry, out route))
             {
@@ -496,7 +570,12 @@ public sealed class TranslationLanguageRouter(
             return false;
         }
 
-        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry))
+        string? plannedEntryPath = context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out PlanAvailability? planned)
+            ? planned.PlannedEntryPath
+            : null;
+        // The planner's chosen variant goes first so route provenance describes the variant that will run.
+        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry, includeVariants: true)
+            .OrderBy(path => IsPlannedEntryPath(path, plannedEntryPath) ? 0 : 1))
         {
             string? modelRootPath = Path.GetDirectoryName(entryPath);
             if (modelRootPath is null || !HasGenAiSupportingFiles(modelRootPath))
@@ -515,15 +594,24 @@ public sealed class TranslationLanguageRouter(
                 PreferredModelAlias: entry.Aliases.FirstOrDefault(),
                 ResolvedModelEntryPath: entryPath,
                 EngineFamily: entry.EngineFamily,
-                ModelProvenance: new Trackdub.Domain.Translation.TranslationModelProvenance(
-                    ResolveProvenanceRepository(entry), entry.Revision, entry.Sha256,
-                    new Dictionary<string, string>(entry.DownloadFileHashes),
-                    entry.TargetPrefixes?.GetValueOrDefault(targetLanguage), entry.CatalogPolicyVersion));
+                ModelProvenance: GenAiPivotProvenanceResolver.Resolve(new GenAiPivotProvenanceRequest
+                {
+                    CacheIndex = context.CacheIndex,
+                    Entry = entry,
+                    ResolvedEntryPath = entryPath,
+                    TargetLanguage = targetLanguage
+                }));
             return true;
         }
 
         return false;
     }
+
+    private static bool IsPlannedEntryPath(string path, string? plannedEntryPath) =>
+        !string.IsNullOrWhiteSpace(plannedEntryPath) &&
+        Path.GetFullPath(path).Equals(
+            Path.GetFullPath(plannedEntryPath),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static bool HasGenAiSupportingFiles(string modelRootPath) =>
         File.Exists(Path.Join(modelRootPath, "genai_config.json"));
@@ -566,20 +654,27 @@ public sealed class TranslationLanguageRouter(
 
     private static IEnumerable<string> EnumerateResolvedEntryPaths(
         IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex,
-        BundledModelManifestEntry entry)
+        BundledModelManifestEntry entry,
+        bool includeVariants = false)
     {
         if (!cacheIndex.TryGetValue(entry.ModelId, out IReadOnlyList<LocalModelCacheRecord>? records))
         {
             yield break;
         }
 
-        string relativeEntryPath = Path.GetRelativePath(entry.RootDirectory, entry.DefaultBenchmarkEntryPath);
         foreach (LocalModelCacheRecord record in records)
         {
-            string resolvedPath = Path.GetFullPath(Path.Join(record.RootPath, relativeEntryPath));
-            if (File.Exists(resolvedPath))
+            IEnumerable<string> paths = includeVariants
+                ? entry.Variants.Select(variant => variant.EntryPath).Prepend(entry.DefaultBenchmarkEntryPath)
+                : [entry.DefaultBenchmarkEntryPath];
+            foreach (string candidatePath in paths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                yield return resolvedPath;
+                string relativeEntryPath = Path.GetRelativePath(entry.RootDirectory, candidatePath);
+                string resolvedPath = Path.GetFullPath(Path.Join(record.RootPath, relativeEntryPath));
+                if (File.Exists(resolvedPath))
+                {
+                    yield return resolvedPath;
+                }
             }
         }
     }
@@ -777,7 +872,7 @@ public sealed class TranslationLanguageRouter(
         entry.EngineFamily.ToLowerInvariant() switch
         {
             "madlad" => "MADLAD-400 pivot",
-            "phi-genai" => "Multilingual pivot",
+            var family when IsGenAiPivotEngineFamily(family) => "Multilingual pivot",
             _ => "Pivot translation"
         };
 
@@ -790,6 +885,8 @@ public sealed class TranslationLanguageRouter(
         IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> CacheIndex,
         IReadOnlyDictionary<(string SourceLanguage, string TargetLanguage), IReadOnlyList<BundledModelManifestEntry>> DirectEntriesByPair,
         IReadOnlyList<BundledModelManifestEntry> PivotEntries,
-        IReadOnlyDictionary<string, bool> PlanAvailabilityByModelId,
+        IReadOnlyDictionary<string, PlanAvailability> PlanAvailabilityByModelId,
         bool CanDownload);
+
+    private sealed record PlanAvailability(bool IsRunnable, string? PlannedEntryPath);
 }

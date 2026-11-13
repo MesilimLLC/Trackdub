@@ -10,7 +10,7 @@ namespace Trackdub.Inference.Tests;
 public sealed class NativeCudaTensorRtWindowsDiscoveryTests
 {
     [Fact]
-    public async Task DiscoverAsync_WindowsWithNativePolicyDisabled_ReportsCudaUnavailableOffByDefault()
+    public async Task DiscoverAsync_WindowsWithNativePolicyDisabled_ReportsCudaUnavailable()
     {
         var discovery = new OnnxExecutionProviderDiscovery(
             new StubOpenVinoProvider(false),
@@ -23,7 +23,7 @@ public sealed class NativeCudaTensorRtWindowsDiscoveryTests
 
         ExecutionProviderAvailability cuda = availabilities.Single(a => a.Provider == ExecutionProviderKind.Cuda);
         Assert.False(cuda.IsAvailable);
-        Assert.Contains("off by default", cuda.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("host policy", cuda.Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class StubOpenVinoProvider(bool isAvailable) : IOpenVinoAvailabilityProvider

@@ -17,6 +17,16 @@ public interface IInferenceWorkerClient
     /// <summary>Starts the worker if needed and returns its handshake, or null when it is unusable.</summary>
     Task<WorkerHelloResult?> TryGetHelloAsync(CancellationToken cancellationToken);
 
+    /// <param name="nonEvictingWarmup">
+    /// Optimization-only warmups pass true: the worker then declines to evict a resident model and
+    /// returns a result with <see cref="WorkerTranslationResult.NotAttempted"/> set instead.
+    /// </param>
+    Task<WorkerTranslationResult> TranslateAsync(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken,
+        bool nonEvictingWarmup = false);
+
     /// <remarks>
     /// Cancelling a call while its request is still being written kills the worker, because its
     /// input pipe may then hold a partial frame. Other calls in flight on that worker fail with
@@ -54,6 +64,7 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     public const string WorkerExecutableName = "Trackdub.InferenceWorker.exe";
     private const int MaxStarts = 3;
     private const int StderrTailLines = 40;
+    private const long MaxTranslationCharsPerWorkerCall = 16L * 1024 * 1024;
 
     private readonly string? executablePath;
     private readonly SemaphoreSlim startGate = new(1, 1);
@@ -80,6 +91,61 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     }
 
     public bool IsInstalled => executablePath is not null;
+
+    public async Task<WorkerTranslationResult> TranslateAsync(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken,
+        bool nonEvictingWarmup = false)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(plan);
+        WorkerPlan workerPlan = WorkerPlan.From(plan);
+        var segments = new List<TranslatedTextSegment>(request.Segments.Count);
+        StageRuntimeExecutionSummary? executionSummary = null;
+        foreach (IReadOnlyList<TranslationInputSegment> chunk in ChunkSegments(request.Segments.OrderBy(static segment => segment.Index).ToList()))
+        {
+            WorkerTranslationResult partial = await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
+                InferenceWorkerProtocol.Translation,
+                new WorkerTranslationRequest(request with { Segments = chunk }, workerPlan, nonEvictingWarmup),
+                cancellationToken).ConfigureAwait(false);
+            if (partial.NotAttempted)
+            {
+                return new WorkerTranslationResult([], partial.ExecutionSummary, NotAttempted: true, Detail: partial.Detail);
+            }
+
+            segments.AddRange(partial.Segments);
+            executionSummary = partial.ExecutionSummary ?? executionSummary;
+        }
+
+        return new WorkerTranslationResult(segments, executionSummary);
+    }
+
+    /// <summary>
+    /// Splits segments so each worker call stays well below <see cref="InferenceWorkerProtocol.MaxMessageBytes"/>.
+    /// Always yields at least one chunk so empty requests still reach the worker.
+    /// </summary>
+    internal static IEnumerable<IReadOnlyList<TranslationInputSegment>> ChunkSegments(
+        IReadOnlyList<TranslationInputSegment> segments)
+    {
+        var chunk = new List<TranslationInputSegment>();
+        long chunkChars = 0;
+        foreach (TranslationInputSegment segment in segments)
+        {
+            int length = segment.Text.Length;
+            if (chunk.Count > 0 && chunkChars + length > MaxTranslationCharsPerWorkerCall)
+            {
+                yield return chunk;
+                chunk = [];
+                chunkChars = 0;
+            }
+
+            chunk.Add(segment);
+            chunkChars += length;
+        }
+
+        yield return chunk;
+    }
 
     public static string? LocateExecutable()
     {
@@ -153,11 +219,22 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        WorkerMessage response = await SendAsync(
+        return await SendRequestAsync<WorkerWarmRequest, WorkerWarmResult>(
             InferenceWorkerProtocol.TtsWarm,
-            InferenceWorkerProtocol.ToPayload(new WorkerWarmRequest(WorkerPlan.From(plan))),
+            new WorkerWarmRequest(WorkerPlan.From(plan)),
             cancellationToken).ConfigureAwait(false);
-        return InferenceWorkerProtocol.FromPayload<WorkerWarmResult>(response.Payload);
+    }
+
+    private async Task<TResponse> SendRequestAsync<TRequest, TResponse>(
+        string messageKind,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        WorkerMessage response = await SendAsync(
+            messageKind,
+            InferenceWorkerProtocol.ToPayload(request),
+            cancellationToken).ConfigureAwait(false);
+        return InferenceWorkerProtocol.FromPayload<TResponse>(response.Payload);
     }
 
     /// <summary>Execution summary the worker reported for the most recent synthesis.</summary>

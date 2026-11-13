@@ -5,6 +5,7 @@
          IMPORTANT: Keep this a literal version string. The build script (tools/onnxruntime-dnnl/Build-OnnxRuntimeDnnlNativePackage.ps1)
          reads it with a regex and will capture the raw text literally if this is set to another MSBuild property reference. -->
     <OnnxRuntimeVersion>1.31.0</OnnxRuntimeVersion>
+    <OnnxRuntimeGenAiCudaVersion>0.19.0</OnnxRuntimeGenAiCudaVersion>
     <!-- Native ORT version inside the Microsoft.Windows.AI.MachineLearning pin below. Bump the two together:
          EP-context artifact stamps record it, so a stale value would reuse artifacts across ORT runtimes. -->
     <WindowsMlOnnxRuntimeVersion>1.27.1</WindowsMlOnnxRuntimeVersion>
@@ -45,7 +46,7 @@
       feed entry from NuGet.Config at that point.
     -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.19.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.19.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="$(OnnxRuntimeGenAiCudaVersion)" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.19.0" />
     <!-- GenAI built against the Windows ML runtime (one onnxruntime.dll shared with DirectML and the
          catalog EPs). Windows TFM only; the portable TFM keeps the CPU/CUDA GenAI packages. -->

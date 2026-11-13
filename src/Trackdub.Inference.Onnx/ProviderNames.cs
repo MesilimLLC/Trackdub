@@ -2,6 +2,7 @@ using Microsoft.ML.OnnxRuntime;
 using Trackdub.Contracts.ApplicationContracts;
 using Trackdub.Domain;
 using Trackdub.Inference.Onnx.Dnnl;
+using Trackdub.Inference.Runtime.Planning;
 using Trackdub.Inference.Runtime.TensorRtRtx;
 
 namespace Trackdub.Inference.Onnx;
@@ -68,25 +69,21 @@ internal static class ProviderNames
         string.Equals(epName, DnnlExecutionProviderName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(epName, DnnlUpperExecutionProviderName, StringComparison.OrdinalIgnoreCase);
 
-    internal static bool IsCatalogGpuProvider(ExecutionProviderKind provider) =>
-        provider is ExecutionProviderKind.DirectMl
-            or ExecutionProviderKind.Migraphx;
-
     internal static bool ShouldUseCatalogDevicePolicy(
         WindowsMlExecutionDevicePolicy devicePolicy,
         ExecutionProviderKind provider) =>
         OperatingSystem.IsWindows() &&
         devicePolicy != WindowsMlExecutionDevicePolicy.Explicit &&
-        IsWindowsMlCatalogProvider(provider);
+        SmokeVerdictPolicy.IsWindowsMlPolicyDependent(provider);
 
     /// <summary>
-    /// WinML catalog EPs that can take ORT <c>SetEpSelectionPolicy</c> (device auto-select among
-    /// registered catalog devices). DirectML stays on the legacy explicit-append path; native
-    /// CUDA/TensorRT/TensorRT RTX/DNNL/CoreML are not Windows ML catalog routes.
+    /// Why a non-explicit Windows ML device policy was not applied to a provider that cannot take it,
+    /// or null when no policy applies.
     /// </summary>
-    private static bool IsWindowsMlCatalogProvider(ExecutionProviderKind provider) =>
-        provider is ExecutionProviderKind.Migraphx
-            or ExecutionProviderKind.Qnn
-            or ExecutionProviderKind.VitisAi
-            or ExecutionProviderKind.OpenVinoCatalog;
+    internal static string? BuildIneligiblePolicyReason(
+        WindowsMlExecutionDevicePolicy policy,
+        ExecutionProviderKind provider) =>
+        OperatingSystem.IsWindows() && policy != WindowsMlExecutionDevicePolicy.Explicit
+            ? $"Windows ML policy '{WindowsMlExecutionDevicePolicySettings.ToKey(policy)}' was not applied to {provider}."
+            : null;
 }

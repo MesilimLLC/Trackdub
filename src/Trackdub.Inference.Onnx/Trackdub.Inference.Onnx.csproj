@@ -82,6 +82,7 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net11.0-windows10.0.19041.0'">
     <PackageReference Include="Microsoft.Windows.AI.MachineLearning" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
     <!-- Restored so the worker and native-pair hash can see the CUDA build. Assets stay out of this project. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
     <!-- Stock managed binding for the worker host only. ExcludeAssets keeps it out of the Windows ML host graph. -->

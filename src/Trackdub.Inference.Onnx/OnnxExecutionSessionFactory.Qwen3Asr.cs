@@ -108,7 +108,7 @@ internal static partial class OnnxExecutionSessionFactory
         var bootstrapResult = await BootstrapTrackedAsync(
                 bootstrapProvider, allowDownloads: true, create.Request.CancellationToken)
             .ConfigureAwait(false);
-        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(create.Request.CancellationToken)
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(create.Request.CancellationToken, create.Request.HasExplicitProviderPreference)
             .ConfigureAwait(false);
         SessionOptionsSelection encoderSelection = CreateSessionOptions(new SessionOptionsRequest(
             ResolveQwenRoleOptionsProvider(create.EncoderProvider, bootstrapProvider, bootstrapResult),

@@ -103,7 +103,9 @@ public sealed class RoutedTranslationEngine(
         ResolveRouteAdapterAsync(TranslationRequest request, CancellationToken cancellationToken)
     {
         string? provisionedAlias = modelProvisioner is null ? request.PreferredModelAlias :
-            await modelProvisioner.EnsureAsync(request.SourceLanguage, request.TargetLanguage, request.PreferredModelAlias, cancellationToken).ConfigureAwait(false);
+            await modelProvisioner.EnsureAsync(request.SourceLanguage, request.TargetLanguage, request.PreferredModelAlias, cancellationToken,
+                preferredModelVariantAlias: request.PreferredModelVariantAlias,
+                preferredExecutionProvider: request.PreferredExecutionProvider).ConfigureAwait(false);
         TranslationRouteSelection route = await translationLanguageRouter.ResolveRouteAsync(
             request.SourceLanguage,
             request.TargetLanguage,

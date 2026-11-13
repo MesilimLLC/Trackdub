@@ -87,11 +87,7 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
         try
         {
             ThrowIfDisposed();
-            PinnedSessions pinned = await GetOrCreatePinnedSessionsAsync(
-                modelFiles,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider).ConfigureAwait(false);
+            PinnedSessions pinned = await GetOrCreatePinnedSessionsAsync(modelFiles, plan, cancellationToken).ConfigureAwait(false);
 
             string conditionedText = ApplyMultilingualLanguagePrefix(
                 request.Text,
@@ -651,7 +647,7 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
         string bootstrapDetail) =>
         new(
             plan.ExecutionProvider is ExecutionProviderKind.Cpu ? "cpu" : "auto",
-            plan.ExecutionProvider is ExecutionProviderKind.DirectMl ? "dml" : "cpu",
+            "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,
@@ -747,24 +743,19 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
 
     private async Task<PinnedSessions> GetOrCreatePinnedSessionsAsync(
         ChatterboxModelFiles modelFiles,
-        ExecutionProviderKind provider,
-        CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken)
     {
-        if (pinnedSessions is not null &&
-            string.Equals(pinnedSessions.ModelRootDirectory, modelFiles.RootDirectory, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pinnedSessions.SpeechEncoderPath, modelFiles.SpeechEncoderPath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pinnedSessions.EmbedTokensPath, modelFiles.EmbedTokensPath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pinnedSessions.LanguageModelPath, modelFiles.LanguageModelPath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pinnedSessions.ConditionalDecoderPath, modelFiles.ConditionalDecoderPath, StringComparison.OrdinalIgnoreCase) &&
-            pinnedSessions.Provider == provider &&
-            pinnedSessions.AllowTrtInitFallback == allowTrtInitFallback)
+        if (pinnedSessions?.Matches(modelFiles, plan) == true)
         {
             return pinnedSessions;
         }
 
         pinnedSessions?.Dispose();
         pinnedSessions = null;
+        ExecutionProviderKind provider = plan.ExecutionProvider!.Value;
+        bool allowTrtInitFallback = !plan.RequirePreferredExecutionProvider;
+        bool hasExplicitProviderPreference = plan.HasExplicitProviderPreference;
 
         OnnxExecutionSessionFactory.PooledSingleSessionPin? speechEncoder = null;
         OnnxExecutionSessionFactory.PooledSingleSessionPin? embedTokens = null;
@@ -776,16 +767,16 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
             ExecutionProviderKind languageModelProvider = ResolveLanguageModelProvider(provider);
             ExecutionProviderKind conditionalDecoderProvider = ResolveConditionalDecoderProvider(provider);
             speechEncoder = await OnnxExecutionSessionFactory
-                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditioningProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelFiles.SpeechEncoderPath)
+                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditioningProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelFiles.SpeechEncoderPath)
                 .ConfigureAwait(false);
             embedTokens = await OnnxExecutionSessionFactory
-                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditioningProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelFiles.EmbedTokensPath)
+                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditioningProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelFiles.EmbedTokensPath)
                 .ConfigureAwait(false);
             languageModel = await OnnxExecutionSessionFactory
-                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = languageModelProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelFiles.LanguageModelPath)
+                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = languageModelProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelFiles.LanguageModelPath)
                 .ConfigureAwait(false);
             conditionalDecoder = await OnnxExecutionSessionFactory
-                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditionalDecoderProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback }, modelFiles.ConditionalDecoderPath)
+                .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "chatterbox", Provider = conditionalDecoderProvider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelFiles.ConditionalDecoderPath)
                 .ConfigureAwait(false);
         }
         catch
@@ -819,6 +810,7 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
             modelFiles.ConditionalDecoderPath,
             provider,
             allowTrtInitFallback,
+            hasExplicitProviderPreference,
             speechEncoder,
             embedTokens,
             languageModel,
@@ -848,6 +840,7 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
         string conditionalDecoderPath,
         ExecutionProviderKind provider,
         bool allowTrtInitFallback,
+        bool hasExplicitProviderPreference,
         OnnxExecutionSessionFactory.PooledSingleSessionPin speechEncoder,
         OnnxExecutionSessionFactory.PooledSingleSessionPin embedTokens,
         OnnxExecutionSessionFactory.PooledSingleSessionPin languageModel,
@@ -862,11 +855,22 @@ public sealed class ChatterboxVoiceCloneTtsEngine(
         public string ConditionalDecoderPath { get; } = conditionalDecoderPath;
         public ExecutionProviderKind Provider { get; } = provider;
         public bool AllowTrtInitFallback { get; } = allowTrtInitFallback;
+        public bool HasExplicitProviderPreference { get; } = hasExplicitProviderPreference;
         private OnnxExecutionSessionFactory.PooledSingleSessionPin SpeechEncoderPin { get; } = speechEncoder;
         private OnnxExecutionSessionFactory.PooledSingleSessionPin EmbedTokensPin { get; } = embedTokens;
         private OnnxExecutionSessionFactory.PooledSingleSessionPin LanguageModelPin { get; } = languageModel;
         private OnnxExecutionSessionFactory.PooledSingleSessionPin ConditionalDecoderPin { get; } = conditionalDecoder;
         public ChatterboxTokenizer Tokenizer { get; } = tokenizer;
+
+        public bool Matches(ChatterboxModelFiles modelFiles, StageRuntimePlan plan) =>
+            string.Equals(ModelRootDirectory, modelFiles.RootDirectory, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(SpeechEncoderPath, modelFiles.SpeechEncoderPath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(EmbedTokensPath, modelFiles.EmbedTokensPath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(LanguageModelPath, modelFiles.LanguageModelPath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ConditionalDecoderPath, modelFiles.ConditionalDecoderPath, StringComparison.OrdinalIgnoreCase) &&
+            Provider == plan.ExecutionProvider &&
+            AllowTrtInitFallback == !plan.RequirePreferredExecutionProvider &&
+            HasExplicitProviderPreference == plan.HasExplicitProviderPreference;
 
         /// <summary>Short execution leases for one synthesis (audit §3A: residency ≠ exclusivity).</summary>
         public async Task<LeasedSessions> AcquireLeasesAsync(CancellationToken cancellationToken)

@@ -77,7 +77,7 @@ public sealed class LatentSyncOnnxLipSynthesisEngine(
 
         LastExecutionSummary = new StageRuntimeExecutionSummary(
             RequestedProvider: plan.ExecutionProvider?.ToString() ?? ExecutionProviderKind.Cpu.ToString(),
-            SelectedProvider: plan.ExecutionProvider?.ToString() ?? ExecutionProviderKind.Cpu.ToString(),
+            SelectedProvider: "not-run",
             ModelId: plan.ModelId ?? LatentSyncModelPaths.ModelId,
             ModelAlias: plan.ModelAlias ?? LatentSyncModelPaths.ManifestAlias,
             ModelVariant: plan.Variant,

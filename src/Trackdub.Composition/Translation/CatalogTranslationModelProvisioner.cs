@@ -14,7 +14,9 @@ public sealed class CatalogTranslationModelProvisioner(
     IStudioSettingsService settingsService,
     IModelDownloadOrchestrator downloader,
     TrackdubStoragePaths storagePaths,
-    IModelCacheInventory? cacheInventory = null) : ITranslationModelProvisioner
+    IModelCacheInventory? cacheInventory = null,
+    IHardwareProfileProvider? hardwareProfileProvider = null,
+    IExecutionProviderDiscovery? providerDiscovery = null) : ITranslationModelProvisioner
 {
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private DateTimeOffset lastRefresh;
@@ -56,7 +58,7 @@ public sealed class CatalogTranslationModelProvisioner(
             .Select(group => CreateEntry(group, snapshot.PolicyVersion)).OfType<BundledModelManifestEntry>());
 
     public async Task<string?> EnsureAsync(string sourceLanguage, string targetLanguage, string? preferredModelAlias, CancellationToken cancellationToken,
-        IProgress<string>? preparationProgress = null)
+        IProgress<string>? preparationProgress = null, string? preferredModelVariantAlias = null, string? preferredExecutionProvider = null)
     {
         if (string.IsNullOrWhiteSpace(sourceLanguage) || sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase) ||
             sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) return preferredModelAlias;
@@ -91,15 +93,59 @@ public sealed class CatalogTranslationModelProvisioner(
             pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) && pair.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) ||
             (Covers(selected.LanguageCoverage.SourceLanguages, sourceLanguage) && Covers(selected.LanguageCoverage.TargetLanguages, targetLanguage));
         if (!coversPair) return preferredModelAlias;
-        // Only catalog OPUS weights are fetched here; the default-variant download below must not replace an explicitly selected variant.
-        if (selected.EngineFamily != "opus-mt") return preferredModelAlias;
+        // Explicit Qwen selections may request a specific CPU or CUDA variant.
+        if (!CanProvisionSelectedModel(selected, explicitSelection))
+            return preferredModelAlias;
         preparationProgress?.Report($"Preparing {selected.ModelId}");
-        var result = await downloader.DownloadAsync(selected.ModelId,
-            preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
-            cancellationToken).ConfigureAwait(false);
-        if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
+        // Without an explicit variant, the default CPU variant would be downloaded even for a CUDA plan.
+        foreach (string? variantAlias in await ResolveVariantAliasesAsync(selected, new VariantSelection(preferredModelVariantAlias, preferredExecutionProvider), cancellationToken).ConfigureAwait(false))
+        {
+            var result = await downloader.DownloadAsync(selected.ModelId, variantAlias,
+                preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
+                cancellationToken).ConfigureAwait(false);
+            if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
+        }
         return selected.Aliases.FirstOrDefault() ?? selected.ModelId;
     }
+
+    private static bool CanProvisionSelectedModel(BundledModelManifestEntry selected, bool explicitSelection) =>
+        selected.EngineFamily == "opus-mt" ||
+        (explicitSelection && selected.EngineFamily == "qwen-genai");
+
+    private sealed record VariantSelection(string? VariantAlias, string? ExecutionProvider);
+
+    private async Task<IReadOnlyList<string?>> ResolveVariantAliasesAsync(
+        BundledModelManifestEntry selected, VariantSelection selection, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(selection.VariantAlias)) return [selection.VariantAlias];
+        if (!string.IsNullOrWhiteSpace(selection.ExecutionProvider)) return [ResolveVariantForProvider(selected, selection)];
+        // Auto provider mode: provision every variant this host can run so the planner can pick the accelerated one.
+        HashSet<string>? available = await DiscoverAvailableProvidersAsync(cancellationToken).ConfigureAwait(false);
+        if (available is null) return [null];
+        string?[] aliases = selected.Variants
+            .Where(variant => variant.SupportedProviders?.Any(available.Contains) == true)
+            .Select(variant => variant.Alias).ToArray();
+        return aliases.Length > 0 ? aliases : [null];
+    }
+
+    private async Task<HashSet<string>?> DiscoverAvailableProvidersAsync(CancellationToken cancellationToken)
+    {
+        if (hardwareProfileProvider is null || providerDiscovery is null) return null;
+        try
+        {
+            var profile = await hardwareProfileProvider.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+            var providers = await providerDiscovery.DiscoverAsync(profile, cancellationToken).ConfigureAwait(false);
+            var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu" };
+            foreach (var provider in providers.Where(provider => provider.IsAvailable)) available.Add(provider.Provider.ToString());
+            return available;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+    }
+
+    private static string? ResolveVariantForProvider(BundledModelManifestEntry selected, VariantSelection selection) =>
+        string.IsNullOrWhiteSpace(selection.ExecutionProvider) ? null
+        : selected.Variants.FirstOrDefault(variant =>
+            variant.SupportedProviders?.Contains(selection.ExecutionProvider.Trim(), StringComparer.OrdinalIgnoreCase) == true)?.Alias;
 
     private static bool Covers(IReadOnlyList<string> languages, string language) =>
         languages.Any(candidate => candidate.Equals(language, StringComparison.OrdinalIgnoreCase) || candidate is "multi" or "any" or "*");

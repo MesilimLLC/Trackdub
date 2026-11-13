@@ -10,13 +10,71 @@ namespace Trackdub.Composition.Tests;
 
 public sealed class CatalogTranslationModelProvisionerTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExplicitSelectionsDoNotWaitForUnrelatedCatalogRefresh(bool registered)
+    public enum QwenProviderSelection
+    {
+        Cuda,
+        Cpu
+    }
+
+    public enum ExplicitSelectionScenario
+    {
+        Registered,
+        Unregistered
+    }
+
+    public enum NoDownloadScenario
+    {
+        Offline,
+        AutomaticDownloadDisabled,
+        UnknownSource
+    }
+
+    [Fact]
+    public async Task ExplicitQwenSelectionDownloadsTheRegisteredModel()
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
-        string alias = registered
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var downloader = new Downloader();
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader,
+            new TrackdubStoragePaths(Path.GetTempPath()));
+
+        string? alias = await service.EnsureAsync("en", "fr", "qwen3-4b-translation", CancellationToken.None,
+            preferredModelVariantAlias: "cuda-int4");
+
+        Assert.Equal("qwen3-4b-translation", alias);
+        Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
+        Assert.Equal("cuda-int4", downloader.Variant);
+    }
+
+    [Theory]
+    [InlineData(QwenProviderSelection.Cuda)]
+    [InlineData(QwenProviderSelection.Cpu)]
+    public async Task Qwen_selection_without_a_variant_provisions_the_variant_for_the_requested_provider(
+        QwenProviderSelection selection)
+    {
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var downloader = new Downloader();
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader,
+            new TrackdubStoragePaths(Path.GetTempPath()));
+
+        string provider = selection is QwenProviderSelection.Cuda ? "Cuda" : "Cpu";
+        string expectedVariant = selection is QwenProviderSelection.Cuda ? "cuda-int4" : "cpu-int4";
+        await service.EnsureAsync("en", "fr", "qwen3-4b-translation", CancellationToken.None, preferredExecutionProvider: provider);
+
+        Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
+        Assert.Equal(expectedVariant, downloader.Variant);
+    }
+
+    [Theory]
+    [InlineData(ExplicitSelectionScenario.Registered)]
+    [InlineData(ExplicitSelectionScenario.Unregistered)]
+    public async Task ExplicitSelectionsDoNotWaitForUnrelatedCatalogRefresh(ExplicitSelectionScenario scenario)
+    {
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        string alias = scenario is ExplicitSelectionScenario.Registered
             ? registry!.Entries.First(entry => entry.Task == "translation" && entry.EngineFamily != "opus-mt").Aliases.First()
             : "deepl";
         var catalog = new Catalog { Snapshot = TranslationModelCatalogSnapshot.Empty, FailRefresh = true };
@@ -49,46 +107,24 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Theory]
-    [InlineData(true, true, "xx")]
-    [InlineData(false, false, "xx")]
-    [InlineData(false, true, "auto")]
-    public async Task Offline_disabled_and_unknown_source_do_not_download(bool offline, bool automatic, string source)
+    [InlineData(NoDownloadScenario.Offline)]
+    [InlineData(NoDownloadScenario.AutomaticDownloadDisabled)]
+    [InlineData(NoDownloadScenario.UnknownSource)]
+    public async Task Offline_disabled_and_unknown_source_do_not_download(NoDownloadScenario scenario)
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        (bool offline, bool automatic, string source) = scenario switch
+        {
+            NoDownloadScenario.Offline => (true, true, "xx"),
+            NoDownloadScenario.AutomaticDownloadDisabled => (false, false, "xx"),
+            NoDownloadScenario.UnknownSource => (false, true, "auto"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null)
+        };
         var settings = new FakeStudioSettingsService();
         await settings.SaveAsync(StudioSettings.Default with { OfflineMode = offline, AutoDownloadTranslationModels = automatic }, CancellationToken.None);
         var downloader = new Downloader();
         var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader, new TrackdubStoragePaths(Path.GetTempPath()));
         await service.EnsureAsync(source, "yy", null, CancellationToken.None);
         Assert.Null(downloader.Selected);
-    }
-
-    private sealed class Catalog : ITranslationModelCatalog
-    {
-        public bool FailRefresh { get; init; }
-        public int RefreshCalls { get; private set; }
-        public TranslationModelCatalogSnapshot Snapshot { get; set; } = new(DateTimeOffset.UtcNow, "opus-mt-publishers-v1",
-            [new("hf:onnx-community/opus-mt-xx-yy", "onnx-community/opus-mt-xx-yy", new string('a', 40), "xx", "yy", null, false,
-                "apache-2.0", "pinned repository card", [.. new[] { "onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx", "config.json", "tokenizer_config.json", "vocab.json", "source.spm", "target.spm" }.Select(path => new TranslationModelFile(path, 10, new string('c', 64)))])], []);
-        public Task<TranslationModelCatalogSnapshot> RefreshAsync(bool offline, CancellationToken cancellationToken)
-        {
-            RefreshCalls++;
-            if (FailRefresh) throw new HttpRequestException("Unrelated catalog is unavailable.");
-            return Task.FromResult(Snapshot);
-        }
-    }
-
-    private sealed class Downloader : IModelDownloadOrchestrator
-    {
-        public string? Selected { get; private set; }
-        public IObservable<ModelStateChange> StateChanges => throw new NotSupportedException();
-        public Task<ModelDownloadResult> DownloadAsync(string modelId, IProgress<ModelDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
-        {
-            Selected = modelId;
-            return Task.FromResult(new ModelDownloadResult(modelId, true, ModelCacheState.Installed, null));
-        }
-        public Task<ModelDownloadResult> DownloadAsync(string modelId, string? variantAlias, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken = default) => DownloadAsync(modelId, progress, cancellationToken);
-        public Task<ModelDownloadResult> RepairAsync(string modelId, IProgress<ModelDownloadProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> UninstallAsync(string modelId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

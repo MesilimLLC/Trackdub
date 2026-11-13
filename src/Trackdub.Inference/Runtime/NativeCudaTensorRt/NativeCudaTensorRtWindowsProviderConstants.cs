@@ -5,14 +5,14 @@ public static class NativeCudaTensorRtWindowsProviderConstants
     public const string CudaOrtExecutionProviderName = "CUDAExecutionProvider";
 
     public const string WindowsCudaInstallHint =
-        "Install NVIDIA drivers, CUDA 12 runtime, and cuDNN 9 (cudnn64_9.dll).";
+        "Use NVIDIA drivers and the CUDA runtime libraries required by the loaded ONNX Runtime build.";
 
     public const string WindowsCuDnn9InstallHint =
-        "Install cuDNN 9 for CUDA 12: pip install nvidia-cudnn-cu12 and add the bin/ directory to PATH, or install the NVIDIA cuDNN 9 package.";
+        "Make cuDNN 9 for the installed CUDA runtime available on PATH.";
 
     public const string WindowsTensorRtInstallHint =
         "Install NVIDIA drivers and TensorRT (nvinfer.dll on PATH), then verify ONNX Runtime lists TensorrtExecutionProvider.";
 
     public const string SettingDisabledHint =
-        "Native CUDA / TensorRT on Windows is off. Trackdub uses TensorRT RTX and Windows ML instead.";
+        "The host policy disabled native CUDA and TensorRT discovery.";
 }

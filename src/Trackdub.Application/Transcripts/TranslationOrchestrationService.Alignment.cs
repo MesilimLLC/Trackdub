@@ -150,7 +150,9 @@ public sealed partial class TranslationOrchestrationService
     private sealed record TranslationRouteRequest(
         string SourceLanguage,
         string TargetLanguage,
-        string? PreferredModelAlias);
+        string? PreferredModelAlias,
+        string? PreferredModelVariantAlias,
+        ExecutionProviderKind? PreferredExecutionProvider);
 
     private sealed record TranslationGenerationInput(
         TranscriptProjectState CurrentState,

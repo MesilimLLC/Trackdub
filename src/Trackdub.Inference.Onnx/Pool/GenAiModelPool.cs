@@ -121,8 +121,7 @@ internal sealed class GenAiModelKey : IEquatable<GenAiModelKey>
         }
 
         var artifacts = new List<(string RelativePath, string ContentHash)>();
-        foreach (string path in Directory.EnumerateFiles(modelRootPath, "*", SearchOption.AllDirectories)
-                     .Order(StringComparer.Ordinal))
+        foreach (string path in EnumerateModelFiles(modelRootPath).Order(StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
             string? contentHash = await SessionPoolKey.HashModelContentAsync(path, cancellationToken)
@@ -157,12 +156,11 @@ internal sealed class GenAiModelKey : IEquatable<GenAiModelKey>
             }
 
             long totalBytes = 0;
-            foreach (FileInfo file in new DirectoryInfo(modelRootPath)
-                         .EnumerateFiles("*", SearchOption.AllDirectories))
+            foreach (string path in EnumerateModelFiles(modelRootPath))
             {
                 try
                 {
-                    long length = file.Length;
+                    long length = new FileInfo(path).Length;
                     totalBytes = length > long.MaxValue - totalBytes
                         ? long.MaxValue
                         : totalBytes + length;
@@ -182,6 +180,32 @@ internal sealed class GenAiModelKey : IEquatable<GenAiModelKey>
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return floorMb;
+        }
+    }
+
+    /// <summary>
+    /// Files that belong to this model root. A subdirectory with its own <c>genai_config.json</c> is a
+    /// sibling variant with a separate root (for example <c>cuda-int4</c> under the CPU variant), so it
+    /// must not change this root's identity hash or inflate its memory estimate.
+    /// </summary>
+    private static IEnumerable<string> EnumerateModelFiles(string modelRootPath)
+    {
+        foreach (string file in Directory.EnumerateFiles(modelRootPath))
+        {
+            yield return file;
+        }
+
+        foreach (string directory in Directory.EnumerateDirectories(modelRootPath))
+        {
+            if (File.Exists(Path.Join(directory, "genai_config.json")))
+            {
+                continue;
+            }
+
+            foreach (string file in EnumerateModelFiles(directory))
+            {
+                yield return file;
+            }
         }
     }
 

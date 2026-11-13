@@ -27,8 +27,6 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     internal const string GenAiSmokeSource = "smoke:genai";
 
     /// <summary>Signals a non-evicting GenAI warmup that declined to load its model.</summary>
-    private sealed class GenAiWarmupSkippedException(string message) : Exception(message);
-
     /// <summary>
     /// Leases a GenAI model for a smoke. Authoritative smokes use the regular
     /// (evicting) lease; non-evicting warmup smokes lease only an already-resident
@@ -94,6 +92,8 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     internal static bool UsesOrtGenAiTranslationSmoke(string? engineFamily) =>
         engineFamily is not null
         && (engineFamily.Equals("phi-genai", StringComparison.OrdinalIgnoreCase)
+            || engineFamily.Equals("qwen-genai", StringComparison.OrdinalIgnoreCase)
+            || engineFamily.Equals("gemma-genai", StringComparison.OrdinalIgnoreCase)
             || engineFamily.Equals("qwen-instruct", StringComparison.OrdinalIgnoreCase));
 
     private async Task SmokeTestGenAiLoadAsync(

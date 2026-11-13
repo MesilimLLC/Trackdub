@@ -1,4 +1,6 @@
 using Trackdub.Inference.Onnx.TensorRtRtx;
+using Trackdub.Domain;
+using Trackdub.Inference.Runtime.Planning;
 
 namespace Trackdub.Inference.Onnx.Tests;
 
@@ -17,5 +19,19 @@ public sealed class WindowsMlCatalogProviderFilterTests
     public void Only_the_trt_rtx_catalog_provider_is_excluded_from_bulk_registration(string? providerName, bool expected)
     {
         Assert.Equal(expected, WindowsMlCatalogProviderFilter.IsExcludedFromBulkRegistration(providerName));
+    }
+
+    [Theory]
+    [InlineData(ExecutionProviderKind.Qnn, true)]
+    [InlineData(ExecutionProviderKind.VitisAi, true)]
+    [InlineData(ExecutionProviderKind.OpenVinoCatalog, true)]
+    [InlineData(ExecutionProviderKind.Migraphx, true)]
+    [InlineData(ExecutionProviderKind.DirectMl, false)]
+    [InlineData(ExecutionProviderKind.Cuda, false)]
+    public void Windows_ml_policy_dependent_providers_use_the_shared_classification(
+        ExecutionProviderKind provider,
+        bool expected)
+    {
+        Assert.Equal(expected, SmokeVerdictPolicy.IsWindowsMlPolicyDependent(provider));
     }
 }

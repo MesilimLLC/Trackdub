@@ -46,8 +46,8 @@ public sealed partial record StudioSettings(
     /// </summary>
     bool StarterPackOnboardingCompleted = false,
     /// <summary>
-    /// Advanced native ORT CUDA/TensorRT on Windows. Default off. Not exposed in Settings UI;
-    /// kept so JSON / <c>INativeCudaTensorRtWindowsPolicy</c> wiring still functions.
+    /// Legacy persisted preference retained for settings compatibility.
+    /// Windows native CUDA and TensorRT discovery now uses runtime readiness.
     /// </summary>
     bool AllowNativeCudaTensorRtOnWindows = false,
     WindowsMlExecutionDevicePolicy WindowsMlExecutionDevicePolicy = WindowsMlExecutionDevicePolicy.Explicit,

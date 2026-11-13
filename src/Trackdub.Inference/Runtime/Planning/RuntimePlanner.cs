@@ -7,7 +7,7 @@ using System.Collections.Concurrent;
 
 namespace Trackdub.Inference.Runtime.Planning;
 
-public sealed class RuntimePlanner : IRuntimePlanner
+public sealed partial class RuntimePlanner : IRuntimePlanner
 {
     private readonly IHardwareProfileProvider hardwareProfileProvider;
     private readonly IExecutionProviderDiscovery executionProviderDiscovery;
@@ -55,20 +55,90 @@ public sealed class RuntimePlanner : IRuntimePlanner
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        StageRuntimePlan plan = await PlanCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        return plan with { HasExplicitProviderPreference = request.PreferredExecutionProvider.HasValue };
+    }
 
+    private async Task<StageRuntimePlan> PlanCoreAsync(
+        StageRuntimePlanningRequest request,
+        CancellationToken cancellationToken)
+    {
         // Cold-start attribution: planning runs per stage (often with plan-cache hits) and is
         // a named phase of the pipeline-start overhead this run evidence exists to explain.
         using IDisposable planPhase = BenchmarkPhaseCapture.Start("runtime-plan");
-
-        // Resolve the effective device exclusion set: explicit request parameter takes
-        // precedence, otherwise fall back to the provider's current run exclusions.
-        DeviceExclusionSet? effectiveExclusions = request.DeviceExclusions
-            ?? deviceExclusionProvider?.CurrentExclusions;
 
         if (!stageRequirements.TryGetValue(request.Stage, out StageRuntimeRequirements? requirements))
         {
             throw new InvalidOperationException($"Runtime stage '{request.Stage}' is not configured for runtime planning.");
         }
+
+        PlanningSnapshot snapshot = await CaptureSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
+
+        // Check the plan cache before performing the expensive ranking/resolution work.
+        if (_planCache.TryGetValue(snapshot.CacheKey, out StageRuntimePlan? cachedPlan))
+        {
+            return StampRequirePreferred(cachedPlan, request.RequirePreferredExecutionProvider);
+        }
+
+        IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex = await cacheIndexBuilder.BuildAsync(cancellationToken).ConfigureAwait(false);
+        (RankedManifestEntry[] planEntries, StageRuntimePlan? blockedPlan) = SelectPlanEntries(request, requirements);
+        if (blockedPlan is not null)
+        {
+            return blockedPlan;
+        }
+
+        var context = new PlanningContext(
+            request,
+            requirements,
+            snapshot.HardwareProfile,
+            snapshot.ProviderAvailabilities,
+            cacheIndex,
+            // File existence cache scoped to this planning call: avoids redundant File.Exists calls
+            // across the two TryResolvePlanFromEntriesAsync passes, but stays fresh across calls.
+            new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase),
+            MigraphxProviderOrdering.ShouldPreferMigraphxOnAmdGpu(snapshot.HardwareProfile),
+            snapshot.Devices,
+            snapshot.EffectiveExclusions,
+            planEntries);
+
+        StageRuntimePlan? resolvedPlan = await TryResolvePlanFromEntriesAsync(context, cancellationToken).ConfigureAwait(false);
+        if (resolvedPlan is not null)
+        {
+            // A blocked preferred-variant plan is replaced by a base-variant fallback, which
+            // ResolveWithoutPreferredVariantAsync caches under its own key; the preferred-variant
+            // key must keep resolving freshly once that variant becomes available.
+            bool preferredVariantResolved = resolvedPlan.Status != StageRuntimePlanStatus.Blocked;
+            resolvedPlan = await RuntimePlannerPreferredVariantFallback.ResolveAsync(
+                new PreferredVariantFallbackRequest
+                {
+                    ResolvedPlan = resolvedPlan,
+                    PreferredVariantAlias = context.Request.NormalizedPreferredModelVariantAlias,
+                    RequirePreferredExecutionProvider = request.RequirePreferredExecutionProvider,
+                    ResolveFallbackAsync = (alias, token) => ResolveWithoutPreferredVariantAsync(
+                        context, snapshot.CacheKey, alias, token)
+                },
+                cancellationToken).ConfigureAwait(false);
+            if (preferredVariantResolved)
+            {
+                TryCachePlan(snapshot.CacheKey, resolvedPlan);
+            }
+
+            return resolvedPlan;
+        }
+
+        return request.NormalizedPreferredModelVariantAlias is string preferredVariantAlias
+            ? await ResolveWithoutPreferredVariantAsync(context, snapshot.CacheKey, preferredVariantAlias, cancellationToken).ConfigureAwait(false)
+            : BlockedNoCompatibleVariant(request, DescribeNoCompatibleVariant(request, requirements));
+    }
+
+    private async Task<PlanningSnapshot> CaptureSnapshotAsync(
+        StageRuntimePlanningRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Resolve the effective device exclusion set: explicit request parameter takes
+        // precedence, otherwise fall back to the provider's current run exclusions.
+        DeviceExclusionSet? effectiveExclusions = request.DeviceExclusions
+            ?? deviceExclusionProvider?.CurrentExclusions;
 
         // Load hardware profile and base provider availabilities from cache (or populate on first call).
         (HardwareProfile hardwareProfile, IReadOnlyList<ExecutionProviderAvailability> baseProviderAvailabilities) =
@@ -96,7 +166,6 @@ public sealed class RuntimePlanner : IRuntimePlanner
         // Build the exclusion snapshot for use in the plan cache key.
         string exclusionSnapshot = BuildExclusionSnapshot(effectiveExclusions, devices);
 
-        // Check the plan cache before performing the expensive ranking/resolution work.
         PlanCacheKey cacheKey = new(
             Stage: request.Stage,
             ModelAlias: request.NormalizedPreferredModelAlias, RequireModelAlias: request.RequirePreferredModelAlias,
@@ -106,44 +175,34 @@ public sealed class RuntimePlanner : IRuntimePlanner
             SourceLanguage: request.SourceLanguage,
             TargetLanguage: request.TargetLanguage,
             ModelTier: request.PreferredModelTier,
+            PreferredEngineFamily: request.PreferredEngineFamily,
             ExclusionSetSnapshot: exclusionSnapshot,
             NvidiaGpuArchitecture: hardwareProfile.NvidiaGpuArchitecture,
             SkipProviderSmokeTest: request.SkipProviderSmokeTest);
+        return new PlanningSnapshot(hardwareProfile, providerAvailabilities, devices, effectiveExclusions, cacheKey);
+    }
 
-        if (_planCache.TryGetValue(cacheKey, out StageRuntimePlan? cachedPlan))
-        {
-            return StampRequirePreferred(cachedPlan, request.RequirePreferredExecutionProvider);
-        }
-
-        IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex = await cacheIndexBuilder.BuildAsync(cancellationToken).ConfigureAwait(false);
-        bool preferMigraphxOnAmdGpu = MigraphxProviderOrdering.ShouldPreferMigraphxOnAmdGpu(hardwareProfile);
-
-        // File existence cache scoped to this planning call: avoids redundant File.Exists calls
-        // across the two TryResolvePlanFromEntriesAsync passes, but stays fresh across calls.
-        var fileExistenceCache = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
+    /// <summary>
+    /// Ranks the manifest entries that may be planned for the request. A non-null blocked plan means
+    /// no entry can be planned and the plan is final.
+    /// </summary>
+    private (RankedManifestEntry[] PlanEntries, StageRuntimePlan? BlockedPlan) SelectPlanEntries(
+        StageRuntimePlanningRequest request,
+        StageRuntimeRequirements requirements)
+    {
         RankedManifestEntry[] rankedEntries = rankingStrategy.RankEntries(request, requirements);
         if (rankedEntries.Length == 0)
         {
-            return StampRequirePreferred(
-                planFactory.CreateBlockedPlan(
-                    request.Stage,
-                    new RuntimePlanFallback(
-                        RuntimePlanFallbackCode.NoCompatibleVariant,
-                        $"No {requirements.RequiredTask.ToManifestValue()} model is registered in the bundled model manifest.")),
-                request.RequirePreferredExecutionProvider);
+            return ([], BlockedNoCompatibleVariant(
+                request,
+                $"No {requirements.RequiredTask.ToManifestValue()} model is registered in the bundled model manifest."));
         }
 
-        if (request.RequirePreferredModelAlias &&
-            request.NormalizedPreferredModelAlias is null)
+        if (request.RequirePreferredModelAlias && request.NormalizedPreferredModelAlias is null)
         {
-            return StampRequirePreferred(
-                planFactory.CreateBlockedPlan(
-                    request.Stage,
-                    new RuntimePlanFallback(
-                        RuntimePlanFallbackCode.NoCompatibleVariant,
-                        "Model override requires a model alias, but no alias was provided.")),
-                request.RequirePreferredExecutionProvider);
+            return ([], BlockedNoCompatibleVariant(
+                request,
+                "Model override requires a model alias, but no alias was provided."));
         }
 
         if (request.RequirePreferredModelAlias)
@@ -151,96 +210,63 @@ public sealed class RuntimePlanner : IRuntimePlanner
             rankedEntries = RuntimePlannerRankingStrategy.FilterPreferredModelAliasEntries(request, rankedEntries);
             if (rankedEntries.Length == 0)
             {
-                return StampRequirePreferred(
-                    planFactory.CreateBlockedPlan(
-                        request.Stage,
-                        new RuntimePlanFallback(
-                            RuntimePlanFallbackCode.NoCompatibleVariant,
-                            $"Model override requires model alias '{request.NormalizedPreferredModelAlias}', but no {requirements.RequiredTask.ToManifestValue()} model with that alias is registered.")),
-                    request.RequirePreferredExecutionProvider);
+                return ([], BlockedNoCompatibleVariant(
+                    request,
+                    $"Model override requires model alias '{request.NormalizedPreferredModelAlias}', but no {requirements.RequiredTask.ToManifestValue()} model with that alias is registered."));
             }
         }
 
-        RankedManifestEntry[] planEntries = RuntimePlannerRankingStrategy.FilterTopRankedEntriesIfRequired(
-            requirements,
-            rankedEntries);
+        return (RuntimePlannerRankingStrategy.FilterTopRankedEntriesIfRequired(requirements, rankedEntries), null);
+    }
 
-        StageRuntimePlan? resolvedPlan = await TryResolvePlanFromEntriesAsync(
-            request,
-            planEntries,
-            requirements,
-            hardwareProfile,
-            providerAvailabilities,
-            cacheIndex,
-            fileExistenceCache,
-            preferMigraphxOnAmdGpu,
-            devices,
-            effectiveExclusions,
-            cancellationToken).ConfigureAwait(false);
-        if (resolvedPlan is not null)
+    private async Task<StageRuntimePlan> ResolveWithoutPreferredVariantAsync(
+        PlanningContext context,
+        PlanCacheKey cacheKey,
+        string preferredVariantAlias,
+        CancellationToken cancellationToken)
+    {
+        StageRuntimePlanningRequest request = context.Request;
+
+        // Build a new cache key for the fallback request (no variant alias).
+        PlanCacheKey fallbackCacheKey = cacheKey with { VariantAlias = null };
+
+        if (_planCache.TryGetValue(fallbackCacheKey, out StageRuntimePlan? cachedFallbackPlan))
         {
-            resolvedPlan = StampRequirePreferred(resolvedPlan, request.RequirePreferredExecutionProvider);
-            TryCachePlan(cacheKey, resolvedPlan);
-            return resolvedPlan;
-        }
-
-        if (request.NormalizedPreferredModelVariantAlias is string preferredVariantAlias)
-        {
-            StageRuntimePlanningRequest requestWithoutPreferredVariant = request with
-            {
-                PreferredModelVariantAlias = null
-            };
-
-            // Build a new cache key for the fallback request (no variant alias).
-            PlanCacheKey fallbackCacheKey = cacheKey with { VariantAlias = null };
-
-            if (_planCache.TryGetValue(fallbackCacheKey, out StageRuntimePlan? cachedFallbackPlan))
-            {
-                return StampRequirePreferred(
-                    AppendPreferredVariantFallbackWarning(cachedFallbackPlan, preferredVariantAlias),
-                    request.RequirePreferredExecutionProvider);
-            }
-
-            StageRuntimePlan? fallbackPlan = await TryResolvePlanFromEntriesAsync(
-                requestWithoutPreferredVariant,
-                planEntries,
-                requirements,
-                hardwareProfile,
-                providerAvailabilities,
-                cacheIndex,
-                fileExistenceCache,
-                preferMigraphxOnAmdGpu,
-                devices,
-                effectiveExclusions,
-                cancellationToken).ConfigureAwait(false);
-            if (fallbackPlan is not null)
-            {
-                fallbackPlan = StampRequirePreferred(fallbackPlan, request.RequirePreferredExecutionProvider);
-                TryCachePlan(fallbackCacheKey, fallbackPlan);
-                return AppendPreferredVariantFallbackWarning(fallbackPlan, preferredVariantAlias);
-            }
-
             return StampRequirePreferred(
-                planFactory.CreateBlockedPlan(
-                    request.Stage,
-                    new RuntimePlanFallback(
-                        RuntimePlanFallbackCode.NoCompatibleVariant,
-                        $"Selected optimized variant '{preferredVariantAlias}' is not available for the requested model and provider. Re-optimize the model or clear the variant selection.")),
+                AppendPreferredVariantFallbackWarning(cachedFallbackPlan, preferredVariantAlias),
                 request.RequirePreferredExecutionProvider);
         }
 
-        return StampRequirePreferred(
-            planFactory.CreateBlockedPlan(
-                request.Stage,
-                new RuntimePlanFallback(
-                    RuntimePlanFallbackCode.NoCompatibleVariant,
-                    request.RequirePreferredExecutionProvider && request.PreferredExecutionProvider is ExecutionProviderKind requiredProvider
-                        ? $"No compatible {requirements.RequiredTask.ToManifestValue()} variant could be planned for required execution provider {requiredProvider}."
-                        : $"No compatible {requirements.RequiredTask.ToManifestValue()} variant could be planned for the current provider policy.")),
-            request.RequirePreferredExecutionProvider);
+        StageRuntimePlan? fallbackPlan = await TryResolvePlanFromEntriesAsync(
+            context with { Request = request with { PreferredModelVariantAlias = null } },
+            cancellationToken).ConfigureAwait(false);
+        if (fallbackPlan is null)
+        {
+            return BlockedNoCompatibleVariant(
+                request,
+                $"Selected optimized variant '{preferredVariantAlias}' is not available for the requested model and provider. Re-optimize the model or clear the variant selection.");
+        }
+
+        fallbackPlan = StampRequirePreferred(fallbackPlan, request.RequirePreferredExecutionProvider);
+        TryCachePlan(fallbackCacheKey, fallbackPlan);
+        return AppendPreferredVariantFallbackWarning(fallbackPlan, preferredVariantAlias);
     }
 
-    private static StageRuntimePlan StampRequirePreferred(StageRuntimePlan plan, bool requirePreferredExecutionProvider) =>
+    private static string DescribeNoCompatibleVariant(
+        StageRuntimePlanningRequest request,
+        StageRuntimeRequirements requirements) =>
+        request.RequirePreferredExecutionProvider && request.PreferredExecutionProvider is ExecutionProviderKind requiredProvider
+            ? $"No compatible {requirements.RequiredTask.ToManifestValue()} variant could be planned for required execution provider {requiredProvider}."
+            : $"No compatible {requirements.RequiredTask.ToManifestValue()} variant could be planned for the current provider policy.";
+
+    private StageRuntimePlan BlockedNoCompatibleVariant(StageRuntimePlanningRequest request, string message) =>
+        StampRequirePreferred(
+            planFactory.CreateBlockedPlan(
+                request.Stage,
+                new RuntimePlanFallback(RuntimePlanFallbackCode.NoCompatibleVariant, message)),
+            request.RequirePreferredExecutionProvider);
+
+    internal static StageRuntimePlan StampRequirePreferred(StageRuntimePlan plan, bool requirePreferredExecutionProvider) =>
         plan.RequirePreferredExecutionProvider == requirePreferredExecutionProvider
             ? plan
             : plan with { RequirePreferredExecutionProvider = requirePreferredExecutionProvider };
@@ -339,68 +365,101 @@ public sealed class RuntimePlanner : IRuntimePlanner
         }
     }
 
+    private sealed record PlanningSnapshot(
+        HardwareProfile HardwareProfile,
+        IReadOnlyList<ExecutionProviderAvailability> ProviderAvailabilities,
+        IReadOnlyList<DeviceEntry>? Devices,
+        DeviceExclusionSet? EffectiveExclusions,
+        PlanCacheKey CacheKey);
+
+    private sealed record PlanningContext(
+        StageRuntimePlanningRequest Request,
+        StageRuntimeRequirements Requirements,
+        HardwareProfile HardwareProfile,
+        IReadOnlyList<ExecutionProviderAvailability> ProviderAvailabilities,
+        IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> CacheIndex,
+        ConcurrentDictionary<string, bool> FileExistenceCache,
+        bool PreferMigraphxOnAmdGpu,
+        IReadOnlyList<DeviceEntry>? Devices,
+        DeviceExclusionSet? EffectiveExclusions,
+        RankedManifestEntry[] PlanEntries);
+
+    /// <summary>
+    /// Remembers the first blocked candidate plan without ending the search: a later candidate
+    /// may still be runnable, and the blocked plan is only the answer when none is.
+    /// </summary>
+    private sealed class PlanSearch
+    {
+        public StageRuntimePlan? BlockedPlan { get; private set; }
+
+        /// <summary>True when the candidate ends the search.</summary>
+        public bool TryAccept(StageRuntimePlan? candidate)
+        {
+            if (candidate?.Status == StageRuntimePlanStatus.Blocked)
+            {
+                BlockedPlan ??= candidate;
+                return false;
+            }
+
+            return candidate is not null;
+        }
+    }
+
     private async Task<StageRuntimePlan?> TryResolvePlanFromEntriesAsync(
-        StageRuntimePlanningRequest request,
-        RankedManifestEntry[] planEntries,
-        StageRuntimeRequirements requirements,
-        HardwareProfile hardwareProfile,
-        IReadOnlyList<ExecutionProviderAvailability> providerAvailabilities,
-        IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex,
-        ConcurrentDictionary<string, bool> fileExistenceCache,
-        bool preferMigraphxOnAmdGpu,
-        IReadOnlyList<DeviceEntry>? devices,
-        DeviceExclusionSet? effectiveExclusions,
+        PlanningContext context,
         CancellationToken cancellationToken)
     {
-        foreach (RankedManifestEntry candidate in planEntries)
+        StageRuntimePlanningRequest request = context.Request;
+        var search = new PlanSearch();
+        foreach (RankedManifestEntry candidate in context.PlanEntries)
         {
             StageRuntimePlan? readyPlan = await planFactory.TryCreateReadyPlanAsync(
                 request.Stage,
-                requirements,
+                context.Requirements,
                 candidate,
-                hardwareProfile,
-                providerAvailabilities,
-                cacheIndex,
-                fileExistenceCache,
+                context.HardwareProfile,
+                context.ProviderAvailabilities,
+                context.CacheIndex,
+                context.FileExistenceCache,
                 request.PreferredExecutionProvider,
                 request.RequirePreferredExecutionProvider,
-                preferMigraphxOnAmdGpu,
+                context.PreferMigraphxOnAmdGpu,
                 request.NormalizedPreferredModelVariantAlias,
                 request.SkipProviderSmokeTest,
                 cancellationToken,
-                devices,
-                effectiveExclusions).ConfigureAwait(false);
+                context.Devices,
+                context.EffectiveExclusions).ConfigureAwait(false);
 
-            if (readyPlan is not null)
+            if (search.TryAccept(readyPlan))
             {
                 return readyPlan;
             }
         }
 
-        foreach (RankedManifestEntry candidate in planEntries)
+        foreach (RankedManifestEntry candidate in context.PlanEntries)
         {
             StageRuntimePlan? downloadPlan = planFactory.TryCreateDownloadRequiredPlan(
                 request.Stage,
-                requirements,
+                context.Requirements,
                 candidate,
-                hardwareProfile,
-                providerAvailabilities,
-                cacheIndex,
-                fileExistenceCache,
+                context.HardwareProfile,
+                context.ProviderAvailabilities,
+                context.CacheIndex,
+                context.FileExistenceCache,
                 request.PreferredExecutionProvider,
                 request.RequirePreferredExecutionProvider,
-                preferMigraphxOnAmdGpu,
+                context.PreferMigraphxOnAmdGpu,
                 request.NormalizedPreferredModelVariantAlias,
-                devices,
-                effectiveExclusions);
+                context.Devices,
+                context.EffectiveExclusions);
 
-            if (downloadPlan is not null)
+            if (search.TryAccept(downloadPlan))
             {
                 return downloadPlan;
             }
         }
 
-        return null;
+        return search.BlockedPlan;
     }
 
     private static StageRuntimePlan AppendPreferredVariantFallbackWarning(
@@ -512,6 +571,7 @@ internal sealed record PlanCacheKey(
     string? SourceLanguage,
     string? TargetLanguage,
     string? ModelTier,
+    string? PreferredEngineFamily,
     string ExclusionSetSnapshot,
     NvidiaGpuArchitectureBucket NvidiaGpuArchitecture,
     bool SkipProviderSmokeTest);

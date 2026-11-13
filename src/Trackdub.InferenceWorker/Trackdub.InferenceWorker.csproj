@@ -25,6 +25,7 @@
          by UseOrtGpuRuntimeAtRoot into this output, never into the application root. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- Inference.Onnx still restores Windows ML, whose managed ORT (assembly 0.0.0.0) would otherwise
@@ -79,12 +80,23 @@
     <ItemGroup>
       <_OrtGpuNative Include="$(_OrtGpuNativeDir)*.dll" />
     </ItemGroup>
+    <PropertyGroup>
+      <_WorkerGenAiCudaNativeDir>$(PkgMicrosoft_ML_OnnxRuntimeGenAI_Cuda)\runtimes\win-x64\native\</_WorkerGenAiCudaNativeDir>
+      <_WorkerGenAiCudaNativeAvailable Condition="'$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And Exists('$(_WorkerGenAiCudaNativeDir)onnxruntime-genai.dll') And Exists('$(_WorkerGenAiCudaNativeDir)onnxruntime-genai-cuda.dll')">true</_WorkerGenAiCudaNativeAvailable>
+    </PropertyGroup>
     <!-- The ORT GPU package ships CUDA binaries for win-x64 only. Elsewhere the worker keeps the
          ORT it already has, and its handshake reports the CUDA provider as unavailable. -->
     <Error Condition="'@(_OrtGpuNative)' == '' And '$(_OrtGpuRid)' == 'win-x64'" Text="ORT GPU runtime not found at $(_OrtGpuNativeDir)." />
     <Warning Condition="'@(_OrtGpuNative)' == '' And '$(_OrtGpuRid)' != 'win-x64'"
              Text="The ORT GPU package has no $(_OrtGpuRid) runtime; the inference worker will not offer native CUDA on $(_OrtGpuRid)." />
     <Copy Condition="'@(_OrtGpuNative)' != ''" SourceFiles="@(_OrtGpuNative)" DestinationFolder="$(TargetDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
+    <ItemGroup Condition="'$(_OrtGpuRid)' == 'win-x64' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(_WorkerGenAiCudaNativeAvailable)' == 'true'">
+      <_WorkerGenAiCudaNative Include="$(_WorkerGenAiCudaNativeDir)onnxruntime-genai.dll;$(_WorkerGenAiCudaNativeDir)onnxruntime-genai-cuda.dll" />
+    </ItemGroup>
+    <Warning Condition="'$(_OrtGpuRid)' == 'win-x64' And '$(TrackdubOrtRuntimeFlavor)' != 'Dnnl' And '$(_WorkerGenAiCudaNativeAvailable)' != 'true'"
+             Text="The ONNX Runtime GenAI CUDA package is incomplete or unavailable; the inference worker will not offer CUDA translation." />
+    <Copy Condition="'@(_WorkerGenAiCudaNative)' != ''" SourceFiles="@(_WorkerGenAiCudaNative)"
+          DestinationFolder="$(TargetDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
     <Copy SourceFiles="$(PkgMicrosoft_ML_OnnxRuntime_Managed)\lib\net8.0\Microsoft.ML.OnnxRuntime.dll"
           DestinationFolder="$(TargetDir)"
           OverwriteReadOnlyFiles="true"

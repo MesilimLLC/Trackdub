@@ -226,7 +226,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         bool boundedTensorRtProfiles = plan.ExecutionProvider is ExecutionProviderKind.TensorRTRtx or ExecutionProviderKind.TensorRt;
         bool classicTensorRt = plan.ExecutionProvider is ExecutionProviderKind.TensorRt;
         return await OnnxExecutionSessionFactory
-            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = plan.ExecutionProvider!.Value, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicEncoder : MadladTrtProfiles.Encoder) : null, AdditionalTrtDecoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicDecoder : MadladTrtProfiles.Decoder) : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
+            .CreatePooledOpusAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "madlad", Provider = plan.ExecutionProvider!.Value, HasExplicitProviderPreference = plan.HasExplicitProviderPreference, CancellationToken = cancellationToken, AdditionalTrtEncoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicEncoder : MadladTrtProfiles.Encoder) : null, AdditionalTrtDecoderOptions = boundedTensorRtProfiles ? (classicTensorRt ? MadladTrtProfiles.ClassicDecoder : MadladTrtProfiles.Decoder) : null }, new OnnxExecutionSessionFactory.DualModelPaths { Encoder = encoderModelPath, Decoder = decoderModelPath })
             .ConfigureAwait(false);
     }
 
@@ -287,7 +287,11 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         CancellationToken cancellationToken)
     {
         using OnnxExecutionSessionFactory.OpusSessionLease lease = await AcquireLeaseAsync(
-            new StageRuntimePlan { ExecutionProvider = request.ExecutionProvider },
+            new StageRuntimePlan
+            {
+                ExecutionProvider = request.ExecutionProvider,
+                HasExplicitProviderPreference = request.HasExplicitProviderPreference
+            },
             encoderPath, decoderPath, cancellationToken).ConfigureAwait(false);
         if (lease.SelectedProviderKind != request.ExecutionProvider)
         {
@@ -487,7 +491,7 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         string bootstrapDetail) =>
         new(
             "auto",
-            plan.ExecutionProvider is ExecutionProviderKind.DirectMl ? "dml" : "cpu",
+            "not-run",
             plan.ModelId,
             plan.ModelAlias,
             plan.Variant,

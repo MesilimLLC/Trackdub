@@ -86,9 +86,8 @@ internal sealed class CosyVoiceSessionPins : IDisposable
 
     public static async Task<CosyVoiceSessionPins> CreateAsync(
         CosyVoiceModelFiles modelFiles,
-        ExecutionProviderKind provider,
-        CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true)
+        PooledProviderRequest providerRequest,
+        CancellationToken cancellationToken)
     {
         string[] paths =
         [
@@ -121,12 +120,8 @@ internal sealed class CosyVoiceSessionPins : IDisposable
             for (int i = 0; i < paths.Length; i++)
             {
                 pins[i] = await OnnxExecutionSessionFactory.PinPooledSingleAsync(
-                    new OnnxExecutionSessionFactory.PooledSessionRequest
+                    providerRequest.ToSessionRequest("cosyvoice", cancellationToken) with
                     {
-                        EngineFamily = "cosyvoice",
-                        Provider = provider,
-                        CancellationToken = cancellationToken,
-                        AllowTrtInitFallback = allowTrtInitFallback,
                         AdditionalTrtOptions = trtOptions[i],
                     },
                     paths[i]).ConfigureAwait(false);

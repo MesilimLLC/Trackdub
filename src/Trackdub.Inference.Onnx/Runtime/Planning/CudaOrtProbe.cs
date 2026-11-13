@@ -30,7 +30,13 @@ internal static class CudaOrtProbe
         string libraryName = OperatingSystem.IsLinux() ? CuDnn9LibraryLinux : CuDnn9LibraryWindows;
         try
         {
-            return System.Runtime.InteropServices.NativeLibrary.TryLoad(libraryName, out _);
+            if (!System.Runtime.InteropServices.NativeLibrary.TryLoad(libraryName, out nint handle))
+            {
+                return false;
+            }
+
+            System.Runtime.InteropServices.NativeLibrary.Free(handle);
+            return true;
         }
         catch
         {

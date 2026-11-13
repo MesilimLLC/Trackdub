@@ -254,12 +254,45 @@ public static partial class CompositionRoot
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, OpusMtTranslationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, MadladTranslationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, PhiGenAiTranslationEngine>());
+        TryAddTranslationEngineAdapterFactory(services, CreateQwenGenAiAdapter);
+        TryAddTranslationEngineAdapterFactory(services, CreateGemmaGenAiAdapter);
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, KokoroTtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, ChatterboxVoiceCloneTtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, Qwen3TtsEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITtsEngineAdapter, CosyVoiceTtsEngine>());
         services.TryAddScoped<QwenTextRefinementEngine>();
     }
+
+    private static void TryAddTranslationEngineAdapterFactory(
+        IServiceCollection services,
+        Func<IServiceProvider, ITranslationEngineAdapter> factory)
+    {
+        if (services.Any(descriptor =>
+                descriptor.ServiceType == typeof(ITranslationEngineAdapter) &&
+                descriptor.ImplementationFactory?.Method == factory.Method))
+        {
+            return;
+        }
+
+        services.AddScoped<ITranslationEngineAdapter>(factory);
+    }
+
+    private static ITranslationEngineAdapter CreateQwenGenAiAdapter(IServiceProvider services) =>
+        new PhiGenAiTranslationEngine(
+            services.GetRequiredService<IRuntimePlanner>(),
+            services.GetRequiredService<BenchmarkModelPathResolver>(),
+            services.GetService<IRuntimePlanningPreferences>(),
+            services.GetService<IApplicationLogger>(),
+            PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            services.GetService<IInferenceWorkerClient>());
+
+    private static ITranslationEngineAdapter CreateGemmaGenAiAdapter(IServiceProvider services) =>
+        new PhiGenAiTranslationEngine(
+            services.GetRequiredService<IRuntimePlanner>(),
+            services.GetRequiredService<BenchmarkModelPathResolver>(),
+            services.GetService<IRuntimePlanningPreferences>(),
+            services.GetService<IApplicationLogger>(),
+            PhiGenAiTranslationEngine.GemmaEngineFamilyName);
 
     private static void AddCloudEngines(IServiceCollection services)
     {

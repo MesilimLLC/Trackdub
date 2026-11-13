@@ -1,25 +1,24 @@
-using Trackdub.Contracts;
 using Trackdub.Contracts.ApplicationContracts;
 using Trackdub.Inference.Runtime.NativeCudaTensorRt;
 
 namespace Trackdub.Composition.Runtime;
 
 public sealed class NativeCudaTensorRtWindowsReadinessService(
-    IStudioSettingsService settingsService,
+    INativeCudaTensorRtWindowsPolicy policy,
     INativeCudaTensorRtWindowsReadinessProbe readinessProbe)
     : INativeCudaTensorRtWindowsReadinessService
 {
-    private readonly IStudioSettingsService settingsService =
-        settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+    private readonly INativeCudaTensorRtWindowsPolicy policy =
+        policy ?? throw new ArgumentNullException(nameof(policy));
     private readonly INativeCudaTensorRtWindowsReadinessProbe readinessProbe =
         readinessProbe ?? throw new ArgumentNullException(nameof(readinessProbe));
 
     public async Task<NativeCudaTensorRtWindowsReadinessSnapshot> ProbeAsync(
         CancellationToken cancellationToken = default)
     {
-        StudioSettings settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
+        bool allowNative = await policy.IsNativeProvidersAllowedOnWindowsAsync(cancellationToken).ConfigureAwait(false);
         NativeCudaTensorRtWindowsReadinessReport report = await readinessProbe
-            .ProbeAsync(settings.AllowNativeCudaTensorRtOnWindows, cancellationToken)
+            .ProbeAsync(allowNative, cancellationToken)
             .ConfigureAwait(false);
 
         if (!report.IsSupportedPlatform)

@@ -13,6 +13,28 @@ public sealed class Qwen3TtsEngineTests
     private const string ReferenceTranscript = "Hello from Qwen3.";
     private const string CloneTargetText = "This is a cloned voice line.";
 
+    [Fact]
+    public void PooledProviderRequest_ForPlan_PreservesRequiredProviderConstraint()
+    {
+        StageRuntimePlan requiredProviderPlan = new()
+        {
+            ExecutionProvider = ExecutionProviderKind.TensorRTRtx,
+            RequirePreferredExecutionProvider = true,
+            HasExplicitProviderPreference = true
+        };
+        StageRuntimePlan fallbackEnabledPlan = requiredProviderPlan with
+        {
+            RequirePreferredExecutionProvider = false
+        };
+
+        PooledProviderRequest requiredRequest = PooledProviderRequest.ForPlan(requiredProviderPlan);
+        PooledProviderRequest fallbackRequest = PooledProviderRequest.ForPlan(fallbackEnabledPlan);
+
+        Assert.False(requiredRequest.AllowTrtInitFallback);
+        Assert.True(fallbackRequest.AllowTrtInitFallback);
+        Assert.NotEqual(requiredRequest, fallbackRequest);
+    }
+
     private static VoiceCatalogEntry TestVoice => new("qwen3:ryan", "mul", "unknown", "Ryan");
 
     [RequiresDirectMlBundledModelFact(
