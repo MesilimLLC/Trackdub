@@ -163,10 +163,8 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
             PinnedSession session = await GetOrCreatePinnedSessionAsync(
                 candidate.ModelPath,
                 modelRootPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider,
-                hasExplicitProviderPreference: plan.HasExplicitProviderPreference).ConfigureAwait(false);
+                PooledProviderRequest.ForPlan(plan),
+                cancellationToken).ConfigureAwait(false);
 
             long[] inputIds = session.Tokenizer.Encode(phonemes);
 
@@ -249,10 +247,8 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
             PinnedSession session = await GetOrCreatePinnedSessionAsync(
                 candidate.ModelPath,
                 modelRootPath,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider,
-                hasExplicitProviderPreference: plan.HasExplicitProviderPreference).ConfigureAwait(false);
+                PooledProviderRequest.ForPlan(plan),
+                cancellationToken).ConfigureAwait(false);
             return new StageRuntimeExecutionSummary(
                 session.Pin.RequestedProvider,
                 session.Pin.SelectedProvider,
@@ -298,17 +294,10 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
     private async Task<PinnedSession> GetOrCreatePinnedSessionAsync(
         string modelPath,
         string modelRootPath,
-        ExecutionProviderKind provider,
-        CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true,
-        bool hasExplicitProviderPreference = false)
+        PooledProviderRequest providerRequest,
+        CancellationToken cancellationToken)
     {
-        if (pinnedSession is not null &&
-            string.Equals(pinnedSession.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pinnedSession.ModelRootPath, modelRootPath, StringComparison.OrdinalIgnoreCase) &&
-            pinnedSession.Provider == provider &&
-            pinnedSession.AllowTrtInitFallback == allowTrtInitFallback &&
-            pinnedSession.HasExplicitProviderPreference == hasExplicitProviderPreference)
+        if (pinnedSession is not null && pinnedSession.Matches(modelPath, modelRootPath, providerRequest))
         {
             return pinnedSession;
         }
@@ -316,7 +305,7 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
         pinnedSession?.Pin.Dispose();
         pinnedSession = null;
         OnnxExecutionSessionFactory.PooledSingleSessionPin pin = await OnnxExecutionSessionFactory
-            .PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = "kokoro", Provider = provider, CancellationToken = cancellationToken, AllowTrtInitFallback = allowTrtInitFallback, HasExplicitProviderPreference = hasExplicitProviderPreference }, modelPath)
+            .PinPooledSingleAsync(providerRequest.ToSessionRequest("kokoro", cancellationToken), modelPath)
             .ConfigureAwait(false);
         try
         {
@@ -332,9 +321,7 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
             pinnedSession = new PinnedSession(
                 modelPath,
                 modelRootPath,
-                provider,
-                allowTrtInitFallback,
-                hasExplicitProviderPreference,
+                providerRequest,
                 pin,
                 tokenizer,
                 voiceCatalog);
@@ -396,22 +383,24 @@ public sealed class KokoroTtsEngine : ITtsEngineAdapter, IStageRuntimeExecutionR
     private sealed class PinnedSession(
         string modelPath,
         string modelRootPath,
-        ExecutionProviderKind provider,
-        bool allowTrtInitFallback,
-        bool hasExplicitProviderPreference,
+        PooledProviderRequest providerRequest,
         OnnxExecutionSessionFactory.PooledSingleSessionPin pin,
         KokoroTokenizer tokenizer,
         KokoroVoiceCatalog voiceCatalog)
     {
         public string ModelPath { get; } = modelPath;
         public string ModelRootPath { get; } = modelRootPath;
-        public ExecutionProviderKind Provider { get; } = provider;
-
-        public bool AllowTrtInitFallback { get; } = allowTrtInitFallback;
-        public bool HasExplicitProviderPreference { get; } = hasExplicitProviderPreference;
+        public PooledProviderRequest ProviderRequest { get; } = providerRequest;
         public OnnxExecutionSessionFactory.PooledSingleSessionPin Pin { get; } = pin;
         public KokoroTokenizer Tokenizer { get; } = tokenizer;
         public KokoroVoiceCatalog VoiceCatalog { get; } = voiceCatalog;
+
+        public bool Matches(string candidatePath, string candidateRoot, PooledProviderRequest candidateRequest) =>
+            ProviderRequest == candidateRequest && IsSameModel(candidatePath, candidateRoot);
+
+        private bool IsSameModel(string candidatePath, string candidateRoot) =>
+            string.Equals(ModelPath, candidatePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ModelRootPath, candidateRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsurePlanReady(StageRuntimePlan plan)

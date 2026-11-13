@@ -37,13 +37,12 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
     public QwenPooledSession? SpeakerEncoder { get; }
 
     public static async Task<Qwen3TtsPooledSessions> CreateAsync(
-        string modelDir,
-        ExecutionProviderKind provider,
+        Qwen3TtsModelFiles modelFiles,
+        PooledProviderRequest providerRequest,
         ExecutionProviderKind vocoderProvider,
-        bool includeSpeakerEncoder,
-        CancellationToken cancellationToken,
-        bool hasExplicitProviderPreference = false)
+        CancellationToken cancellationToken)
     {
+        string modelDir = modelFiles.RootDirectory;
         QwenPooledSession? prefill = null;
         QwenPooledSession? decode = null;
         QwenPooledSession? codePredictor = null;
@@ -51,13 +50,13 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
         QwenPooledSession? speakerEncoder = null;
         try
         {
-            prefill = await PinAsync(modelDir, "talker_prefill.onnx", provider, cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
-            decode = await PinAsync(modelDir, "talker_decode.onnx", provider, cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
-            codePredictor = await PinAsync(modelDir, "code_predictor.onnx", provider, cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
-            vocoder = await PinAsync(modelDir, "vocoder.onnx", vocoderProvider, cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
-            if (includeSpeakerEncoder)
+            prefill = await PinAsync(modelDir, "talker_prefill.onnx", providerRequest, cancellationToken).ConfigureAwait(false);
+            decode = await PinAsync(modelDir, "talker_decode.onnx", providerRequest, cancellationToken).ConfigureAwait(false);
+            codePredictor = await PinAsync(modelDir, "code_predictor.onnx", providerRequest, cancellationToken).ConfigureAwait(false);
+            vocoder = await PinAsync(modelDir, "vocoder.onnx", providerRequest with { Provider = vocoderProvider }, cancellationToken).ConfigureAwait(false);
+            if (modelFiles.IsBaseModel)
             {
-                speakerEncoder = await PinAsync(modelDir, "speaker_encoder.onnx", provider, cancellationToken, hasExplicitProviderPreference).ConfigureAwait(false);
+                speakerEncoder = await PinAsync(modelDir, "speaker_encoder.onnx", providerRequest, cancellationToken).ConfigureAwait(false);
             }
 
             return new Qwen3TtsPooledSessions(prefill, decode, codePredictor, vocoder, speakerEncoder);
@@ -76,9 +75,8 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
     private static async Task<QwenPooledSession> PinAsync(
         string modelDir,
         string fileName,
-        ExecutionProviderKind provider,
-        CancellationToken cancellationToken,
-        bool hasExplicitProviderPreference)
+        PooledProviderRequest providerRequest,
+        CancellationToken cancellationToken)
     {
         string modelPath = Path.Join(modelDir, fileName);
         // SEC-3: file size pre-check before the pool opens the model, mirroring the
@@ -97,7 +95,7 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
         }
 
         OnnxExecutionSessionFactory.PooledSingleSessionPin pin =
-            await OnnxExecutionSessionFactory.PinPooledSingleAsync(new OnnxExecutionSessionFactory.PooledSessionRequest { EngineFamily = Qwen3TtsEngine.EngineFamilyName, Provider = provider, HasExplicitProviderPreference = hasExplicitProviderPreference, CancellationToken = cancellationToken }, modelPath).ConfigureAwait(false);
+            await OnnxExecutionSessionFactory.PinPooledSingleAsync(providerRequest.ToSessionRequest(Qwen3TtsEngine.EngineFamilyName, cancellationToken), modelPath).ConfigureAwait(false);
         return new QwenPooledSession(pin);
     }
 

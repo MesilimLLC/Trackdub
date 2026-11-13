@@ -78,10 +78,8 @@ public sealed class CosyVoiceTtsEngine(
             ThrowIfDisposed();
             PinnedRuntime runtime = await GetOrCreatePinnedRuntimeAsync(
                 modelFiles,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                allowTrtInitFallback: !plan.RequirePreferredExecutionProvider,
-                hasExplicitProviderPreference: plan.HasExplicitProviderPreference).ConfigureAwait(false);
+                PooledProviderRequest.ForPlan(plan),
+                cancellationToken).ConfigureAwait(false);
 
             // Residency pins keep the nine graphs warm; execution leases are taken only
             // for this synthesis (audit §3A: residency ≠ exclusivity).
@@ -142,13 +140,11 @@ public sealed class CosyVoiceTtsEngine(
 
     private async Task<PinnedRuntime> GetOrCreatePinnedRuntimeAsync(
         CosyVoiceModelFiles modelFiles,
-        ExecutionProviderKind provider,
-        CancellationToken cancellationToken,
-        bool allowTrtInitFallback = true,
-        bool hasExplicitProviderPreference = false)
+        PooledProviderRequest providerRequest,
+        CancellationToken cancellationToken)
     {
         if (pinnedRuntime is not null &&
-            pinnedRuntime.Matches(modelFiles.ModelRootPath, modelFiles.Variant, provider, allowTrtInitFallback, hasExplicitProviderPreference))
+            pinnedRuntime.Matches(modelFiles.ModelRootPath, modelFiles.Variant, providerRequest))
         {
             return pinnedRuntime;
         }
@@ -157,9 +153,8 @@ public sealed class CosyVoiceTtsEngine(
         pinnedRuntime = null;
         CosyVoiceSessionPins pins = await CosyVoiceSessionPins.CreateAsync(
             modelFiles,
-            provider,
-            cancellationToken,
-            allowTrtInitFallback, hasExplicitProviderPreference).ConfigureAwait(false);
+            providerRequest,
+            cancellationToken).ConfigureAwait(false);
         CosyVoiceEmbeddingTables embeddings;
         CosyVoiceWhisperTokenizer tokenizer;
         try
@@ -176,9 +171,7 @@ public sealed class CosyVoiceTtsEngine(
         pinnedRuntime = new PinnedRuntime(
             modelFiles.ModelRootPath,
             modelFiles.Variant,
-            provider,
-            allowTrtInitFallback,
-            hasExplicitProviderPreference,
+            providerRequest,
             pins,
             embeddings,
             tokenizer);
@@ -211,18 +204,14 @@ public sealed class CosyVoiceTtsEngine(
         public PinnedRuntime(
             string modelRootPath,
             string variant,
-            ExecutionProviderKind provider,
-            bool allowTrtInitFallback,
-            bool hasExplicitProviderPreference,
+            PooledProviderRequest providerRequest,
             CosyVoiceSessionPins pins,
             CosyVoiceEmbeddingTables embeddings,
             CosyVoiceWhisperTokenizer tokenizer)
         {
             ModelRootPath = modelRootPath;
             Variant = variant;
-            Provider = provider;
-            AllowTrtInitFallback = allowTrtInitFallback;
-            HasExplicitProviderPreference = hasExplicitProviderPreference;
+            ProviderRequest = providerRequest;
             Pins = pins;
             Embeddings = embeddings;
             Tokenizer = tokenizer;
@@ -232,11 +221,7 @@ public sealed class CosyVoiceTtsEngine(
 
         public string Variant { get; }
 
-        public ExecutionProviderKind Provider { get; }
-
-        public bool AllowTrtInitFallback { get; }
-
-        public bool HasExplicitProviderPreference { get; }
+        public PooledProviderRequest ProviderRequest { get; }
 
         public CosyVoiceSessionPins Pins { get; }
 
@@ -244,17 +229,12 @@ public sealed class CosyVoiceTtsEngine(
 
         public CosyVoiceWhisperTokenizer Tokenizer { get; }
 
-        public bool Matches(
-            string modelRootPath,
-            string variant,
-            ExecutionProviderKind provider,
-            bool allowTrtInitFallback,
-            bool hasExplicitProviderPreference) =>
+        public bool Matches(string modelRootPath, string variant, PooledProviderRequest providerRequest) =>
+            ProviderRequest == providerRequest && IsSameModel(modelRootPath, variant);
+
+        private bool IsSameModel(string modelRootPath, string variant) =>
             string.Equals(ModelRootPath, modelRootPath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(Variant, variant, StringComparison.OrdinalIgnoreCase) &&
-            Provider == provider &&
-            AllowTrtInitFallback == allowTrtInitFallback &&
-            HasExplicitProviderPreference == hasExplicitProviderPreference;
+            string.Equals(Variant, variant, StringComparison.OrdinalIgnoreCase);
 
         public void Dispose() => Pins.Dispose();
     }

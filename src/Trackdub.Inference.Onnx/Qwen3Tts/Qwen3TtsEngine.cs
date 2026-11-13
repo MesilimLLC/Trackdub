@@ -84,11 +84,7 @@ public sealed class Qwen3TtsEngine(
         try
         {
             ThrowIfDisposed();
-            PinnedPipeline pipeline = await GetOrCreatePinnedPipelineAsync(
-                modelFiles,
-                plan.ExecutionProvider!.Value,
-                cancellationToken,
-                plan.HasExplicitProviderPreference).ConfigureAwait(false);
+            PinnedPipeline pipeline = await GetOrCreatePinnedPipelineAsync(modelFiles, plan, cancellationToken).ConfigureAwait(false);
             // DirectML runs the language model on the GPU but the vocoder session is
             // explicitly CPU-backed, so account the full operation against CPU admission.
             ExecutionProviderKind admissionProvider = pipeline.SelectedProvider is ExecutionProviderKind.DirectMl
@@ -222,36 +218,29 @@ public sealed class Qwen3TtsEngine(
 
     private async Task<PinnedPipeline> GetOrCreatePinnedPipelineAsync(
         Qwen3TtsModelFiles modelFiles,
-        ExecutionProviderKind requestedProvider,
-        CancellationToken cancellationToken,
-        bool hasExplicitProviderPreference)
+        StageRuntimePlan plan,
+        CancellationToken cancellationToken)
     {
-        if (pinnedPipeline is not null &&
-            string.Equals(pinnedPipeline.RootDirectory, modelFiles.RootDirectory, StringComparison.OrdinalIgnoreCase) &&
-            pinnedPipeline.IsBaseModel == modelFiles.IsBaseModel &&
-            pinnedPipeline.RequestedProvider == requestedProvider &&
-            pinnedPipeline.HasExplicitProviderPreference == hasExplicitProviderPreference)
+        var providerRequest = new PooledProviderRequest(
+            plan.ExecutionProvider!.Value,
+            HasExplicitProviderPreference: plan.HasExplicitProviderPreference);
+        if (pinnedPipeline is not null && pinnedPipeline.Matches(modelFiles, providerRequest))
         {
             return pinnedPipeline;
         }
 
         pinnedPipeline?.Dispose();
-        pinnedPipeline = await CreatePinnedPipelineAsync(
-            modelFiles,
-            requestedProvider,
-            cancellationToken,
-            hasExplicitProviderPreference).ConfigureAwait(false);
+        pinnedPipeline = await CreatePinnedPipelineAsync(modelFiles, providerRequest, cancellationToken).ConfigureAwait(false);
         return pinnedPipeline;
     }
 
     private static async Task<PinnedPipeline> CreatePinnedPipelineAsync(
         Qwen3TtsModelFiles modelFiles,
-        ExecutionProviderKind requestedProvider,
-        CancellationToken cancellationToken,
-        bool hasExplicitProviderPreference)
+        PooledProviderRequest providerRequest,
+        CancellationToken cancellationToken)
     {
         OnnxExecutionSessionFactory.SessionOptionsFactoryBundle sessionOptions = await OnnxExecutionSessionFactory
-            .CreateSessionOptionsFactoryAsync(requestedProvider, cancellationToken, hasExplicitProviderPreference: hasExplicitProviderPreference)
+            .CreateSessionOptionsFactoryAsync(providerRequest.Provider, cancellationToken, hasExplicitProviderPreference: providerRequest.HasExplicitProviderPreference)
             .ConfigureAwait(false);
 
         string requestedLabel = ProviderNames.FormatProviderLabel(sessionOptions.RequestedProvider);
@@ -267,12 +256,10 @@ public sealed class Qwen3TtsEngine(
             ? ExecutionProviderKind.Cpu
             : sessionOptions.SelectedProvider;
         Qwen3TtsPooledSessions pooledSessions = await Qwen3TtsPooledSessions.CreateAsync(
-            modelFiles.RootDirectory,
-            requestedProvider,
+            modelFiles,
+            providerRequest,
             vocoderProvider,
-            modelFiles.IsBaseModel,
-            cancellationToken,
-            hasExplicitProviderPreference).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false);
         try
         {
             if (modelFiles.IsBaseModel)
@@ -281,8 +268,7 @@ public sealed class Qwen3TtsEngine(
                 return new PinnedPipeline(
                     modelFiles.RootDirectory,
                     true,
-                    requestedProvider,
-                    hasExplicitProviderPreference,
+                    providerRequest,
                     sessionOptions.SelectedProvider,
                     requestedLabel,
                     selectedLabel,
@@ -300,8 +286,7 @@ public sealed class Qwen3TtsEngine(
             return new PinnedPipeline(
                 modelFiles.RootDirectory,
                 false,
-                requestedProvider,
-                hasExplicitProviderPreference,
+                providerRequest,
                 sessionOptions.SelectedProvider,
                 requestedLabel,
                 selectedLabel,
@@ -356,8 +341,7 @@ public sealed class Qwen3TtsEngine(
         public PinnedPipeline(
             string rootDirectory,
             bool isBaseModel,
-            ExecutionProviderKind requestedProvider,
-            bool hasExplicitProviderPreference,
+            PooledProviderRequest providerRequest,
             ExecutionProviderKind selectedProvider,
             string requestedProviderLabel,
             string selectedProviderLabel,
@@ -367,8 +351,7 @@ public sealed class Qwen3TtsEngine(
         {
             RootDirectory = rootDirectory;
             IsBaseModel = isBaseModel;
-            RequestedProvider = requestedProvider;
-            HasExplicitProviderPreference = hasExplicitProviderPreference;
+            ProviderRequest = providerRequest;
             SelectedProvider = selectedProvider;
             RequestedProviderLabel = requestedProviderLabel;
             SelectedProviderLabel = selectedProviderLabel;
@@ -381,9 +364,7 @@ public sealed class Qwen3TtsEngine(
 
         public bool IsBaseModel { get; }
 
-        public ExecutionProviderKind RequestedProvider { get; }
-
-        public bool HasExplicitProviderPreference { get; }
+        public PooledProviderRequest ProviderRequest { get; }
 
         public ExecutionProviderKind SelectedProvider { get; }
 
@@ -396,6 +377,13 @@ public sealed class Qwen3TtsEngine(
         public TtsPipeline? CustomVoicePipeline { get; }
 
         public VoiceClonePipeline? VoiceClonePipeline { get; }
+
+        public bool Matches(Qwen3TtsModelFiles modelFiles, PooledProviderRequest providerRequest) =>
+            ProviderRequest == providerRequest && IsSameModel(modelFiles);
+
+        private bool IsSameModel(Qwen3TtsModelFiles modelFiles) =>
+            string.Equals(RootDirectory, modelFiles.RootDirectory, StringComparison.OrdinalIgnoreCase) &&
+            IsBaseModel == modelFiles.IsBaseModel;
 
         public void Dispose()
         {
