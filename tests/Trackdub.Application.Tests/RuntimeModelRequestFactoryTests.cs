@@ -144,13 +144,13 @@ public sealed class RuntimeModelRequestFactoryTests
     {
         var preferences = new InferenceModelPreferences(
             LipSyncModelAlias: "latentsync",
-            LipSynthesisModelAlias: "musetalk");
+            LipSynthesisModelAlias: "latentsync-1.6");
 
         RuntimeModelSelections selections =
             RuntimeModelRequestFactory.CreateSelectionsFromPreferences(preferences);
 
         Assert.Equal("latentsync", selections.LipSyncModelAlias);
-        Assert.Equal("musetalk", selections.LipSynthesisModelAlias);
+        Assert.Equal("latentsync-1.6", selections.LipSynthesisModelAlias);
     }
 
     [Fact]

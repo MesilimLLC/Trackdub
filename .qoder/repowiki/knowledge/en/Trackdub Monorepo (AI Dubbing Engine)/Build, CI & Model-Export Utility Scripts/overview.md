@@ -1,1 +1,0 @@
-Cross-platform helper scripts for the Trackdub monorepo: agent-driven development loops, CI boundary checks, sequential test runners, and ONNX model export/inspection/mirroring utilities.

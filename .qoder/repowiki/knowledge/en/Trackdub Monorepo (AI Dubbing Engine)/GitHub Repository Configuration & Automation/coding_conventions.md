@@ -1,3 +1,0 @@
-- All source directories under `src/Trackdub.*` and build/configuration files are owned by the `@Mesililm-LLC/maintainers` team via CODEOWNERS rules.
-- Pull requests follow a fixed checklist template that enforces single-responsibility scope, targeted testing, architecture layer boundaries, and license/model compliance before merging.
-- Dependency updates are scheduled on a weekly cadence through Dependabot rather than ad-hoc manual updates.

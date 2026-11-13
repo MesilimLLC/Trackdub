@@ -362,7 +362,7 @@ public partial class TranscriptProjectServiceTests
     }
 
     [Fact]
-    public async Task OpenAsync_with_demucs_v4_stems_warns_as_legacy_and_uses_normalized_audio_routes()
+    public async Task OpenAsync_with_hush_dialogue_stems_warns_as_legacy_and_uses_normalized_audio_routes()
     {
         string tempDirectory = CreateTempDirectory();
         string sourcePath = Path.Join(tempDirectory, "sample.mp4");
@@ -370,9 +370,8 @@ public partial class TranscriptProjectServiceTests
 
         var stemEngine = new FakeStemSeparationEngine
         {
-            EngineFamily = "demucs-v4",
-            Model = "demucs-v4",
-            RawStemNames = ["drums", "bass", "other", "vocals"],
+            EngineFamily = "hush-dialogue",
+            Model = "hush-dialogue",
             WriteSoundEffects = false
         };
         FakeServiceScope scope = CreateScope(tempDirectory, stemSeparationEngine: stemEngine);
@@ -391,11 +390,11 @@ public partial class TranscriptProjectServiceTests
         Assert.Contains("older/non-current separator", result.StemSeparationWarning, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(ProjectArtifactPaths.NormalizedAudioRelativePath, result.AsrAudioRelativePath);
         Assert.Equal(ProjectArtifactPaths.NormalizedAudioRelativePath, result.MixSourceAudioRelativePath);
-        Assert.Contains("/demucs-v4/", vocals.RelativePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("/demucs-v4/", ambiance.RelativePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("/demucs-v4/", music.RelativePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/hush-dialogue/", vocals.RelativePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/hush-dialogue/", ambiance.RelativePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/hush-dialogue/", music.RelativePath, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(result.ProjectState.Artifacts, artifact => artifact.Kind == ArtifactKind.SoundEffects);
-        Assert.Contains("generated-demucs-v4-vocals", vocals.Provenance, StringComparison.Ordinal);
-        Assert.Contains("engine_family=demucs-v4", vocals.Provenance, StringComparison.Ordinal);
+        Assert.Contains("generated-hush-dialogue-vocals", vocals.Provenance, StringComparison.Ordinal);
+        Assert.Contains("engine_family=hush-dialogue", vocals.Provenance, StringComparison.Ordinal);
     }
 }
