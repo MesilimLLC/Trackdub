@@ -1,19 +1,23 @@
 using System.Buffers.Binary;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Trackdub.Inference.Onnx.Qwen3Asr;
 
 internal sealed class Qwen3AsrEmbedTokens
 {
-    private readonly float[,] embeddings;
+    private readonly Half[] embeddings;
 
-    private Qwen3AsrEmbedTokens(float[,] embeddings)
+    private Qwen3AsrEmbedTokens(Half[] embeddings, int vocabSize, int hiddenSize)
     {
         this.embeddings = embeddings;
+        VocabularySize = vocabSize;
+        HiddenSize = hiddenSize;
     }
 
-    public int VocabularySize => embeddings.GetLength(0);
+    public int VocabularySize { get; }
 
-    public int HiddenSize => embeddings.GetLength(1);
+    public int HiddenSize { get; }
 
     public static Qwen3AsrEmbedTokens Load(string embedTokensPath)
     {
@@ -23,43 +27,36 @@ internal sealed class Qwen3AsrEmbedTokens
             throw new FileNotFoundException("Qwen3-ASR embed_tokens.bin was not found.", embedTokensPath);
         }
 
-        byte[] bytes = File.ReadAllBytes(embedTokensPath);
-        int offset;
-        int vocabSize;
-        int hiddenSize;
-        if (TryReadShapeHeader(bytes, out vocabSize, out hiddenSize))
-        {
-            offset = 8;
-        }
-        else if (TryInferMatrixShape(bytes.Length, out vocabSize, out hiddenSize))
-        {
-            offset = 0;
-        }
-        else
+        using FileStream stream = new(embedTokensPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        long fileLength = stream.Length;
+        EmbedLayout? layout = ResolveLayout(stream, fileLength);
+        if (layout is not { } resolved)
         {
             throw new InvalidDataException(
-                $"embed_tokens.bin size {bytes.Length} is not a recognized float16 embedding matrix.");
+                $"embed_tokens.bin size {fileLength} is not a recognized float16 embedding matrix.");
         }
 
-        int expectedBytes = offset + (vocabSize * hiddenSize * sizeof(ushort));
-        if (bytes.Length != expectedBytes)
+        long expectedPayloadBytes = (long)resolved.VocabSize * resolved.HiddenSize * sizeof(ushort);
+        if (resolved.PayloadOffset + expectedPayloadBytes != fileLength)
         {
             throw new InvalidDataException(
-                $"embed_tokens.bin size {bytes.Length} does not match expected float16 matrix {vocabSize}x{hiddenSize}.");
+                $"embed_tokens.bin size {fileLength} does not match expected float16 matrix {resolved.VocabSize}x{resolved.HiddenSize}.");
         }
 
-        var matrix = new float[vocabSize, hiddenSize];
-        for (int tokenIndex = 0; tokenIndex < vocabSize; tokenIndex++)
+        int elementCount = checked((int)(expectedPayloadBytes / sizeof(ushort)));
+        var matrix = new Half[elementCount];
+        stream.Position = resolved.PayloadOffset;
+        stream.ReadExactly(MemoryMarshal.AsBytes(matrix.AsSpan()));
+        if (!BitConverter.IsLittleEndian)
         {
-            for (int hiddenIndex = 0; hiddenIndex < hiddenSize; hiddenIndex++)
+            Span<ushort> halves = MemoryMarshal.Cast<Half, ushort>(matrix);
+            for (int i = 0; i < halves.Length; i++)
             {
-                ushort halfBits = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset, 2));
-                offset += 2;
-                matrix[tokenIndex, hiddenIndex] = (float)BitConverter.UInt16BitsToHalf(halfBits);
+                halves[i] = BinaryPrimitives.ReverseEndianness(halves[i]);
             }
         }
 
-        return new Qwen3AsrEmbedTokens(matrix);
+        return new Qwen3AsrEmbedTokens(matrix, resolved.VocabSize, resolved.HiddenSize);
     }
 
     public float[] Lookup(int tokenId)
@@ -84,46 +81,53 @@ internal sealed class Qwen3AsrEmbedTokens
                 nameof(destination));
         }
 
-        for (int hiddenIndex = 0; hiddenIndex < HiddenSize; hiddenIndex++)
-        {
-            destination[hiddenIndex] = embeddings[tokenId, hiddenIndex];
-        }
+        ReadOnlySpan<Half> row = embeddings.AsSpan(tokenId * HiddenSize, HiddenSize);
+        TensorPrimitives.ConvertToSingle(row, destination);
     }
 
-    private static bool TryReadShapeHeader(ReadOnlySpan<byte> bytes, out int vocabSize, out int hiddenSize)
+    private static EmbedLayout? ResolveLayout(FileStream stream, long fileLength)
     {
-        vocabSize = 0;
-        hiddenSize = 0;
-        if (bytes.Length < 8)
+        if (fileLength >= 8 && TryReadHeaderLayout(stream, fileLength) is { } headerLayout)
         {
-            return false;
+            return headerLayout;
         }
 
-        int candidateVocab = BinaryPrimitives.ReadInt32LittleEndian(bytes[..4]);
-        int candidateHidden = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..8]);
-        int expectedBytes = 8 + (candidateVocab * candidateHidden * sizeof(ushort));
-        if (candidateVocab <= 0 ||
-            candidateHidden <= 0 ||
-            bytes.Length != expectedBytes)
-        {
-            return false;
-        }
-
-        vocabSize = candidateVocab;
-        hiddenSize = candidateHidden;
-        return true;
+        return TryInferLayout(fileLength);
     }
 
-    private static bool TryInferMatrixShape(int byteLength, out int vocabSize, out int hiddenSize)
+    private static EmbedLayout? TryReadHeaderLayout(FileStream stream, long fileLength)
     {
-        vocabSize = 0;
-        hiddenSize = 0;
-        if (byteLength % sizeof(ushort) != 0)
+        Span<byte> header = stackalloc byte[8];
+        stream.ReadExactly(header);
+        int candidateVocab = BinaryPrimitives.ReadInt32LittleEndian(header[..4]);
+        int candidateHidden = BinaryPrimitives.ReadInt32LittleEndian(header[4..8]);
+        if (candidateVocab <= 0)
         {
-            return false;
+            return null;
         }
 
-        int elementCount = byteLength / sizeof(ushort);
+        if (candidateHidden <= 0)
+        {
+            return null;
+        }
+
+        long expectedPayloadBytes = (long)candidateVocab * candidateHidden * sizeof(ushort);
+        if (expectedPayloadBytes != fileLength - header.Length)
+        {
+            return null;
+        }
+
+        return new EmbedLayout(candidateVocab, candidateHidden, header.Length);
+    }
+
+    private static EmbedLayout? TryInferLayout(long fileLength)
+    {
+        if (fileLength % sizeof(ushort) != 0)
+        {
+            return null;
+        }
+
+        long elementCount = fileLength / sizeof(ushort);
         (int vocab, int hidden)[] knownShapes =
         [
             (151_936, 1024),
@@ -132,14 +136,14 @@ internal sealed class Qwen3AsrEmbedTokens
 
         foreach ((int vocab, int hidden) in knownShapes)
         {
-            if (vocab * hidden == elementCount)
+            if ((long)vocab * hidden == elementCount)
             {
-                vocabSize = vocab;
-                hiddenSize = hidden;
-                return true;
+                return new EmbedLayout(vocab, hidden, 0);
             }
         }
 
-        return false;
+        return null;
     }
+
+    private readonly record struct EmbedLayout(int VocabSize, int HiddenSize, long PayloadOffset);
 }

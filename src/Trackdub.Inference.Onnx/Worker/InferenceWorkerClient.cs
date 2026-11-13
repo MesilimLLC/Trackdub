@@ -400,6 +400,11 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(path)!,
         };
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            startInfo.KillOnParentExit = true;
+        }
+
         Process started = Process.Start(startInfo)
             ?? throw new InferenceWorkerException($"The inference worker at '{path}' did not start.");
         started.ErrorDataReceived += (_, e) =>
