@@ -472,12 +472,12 @@ internal static class AudioResampler
 
     private static float ScalarDotProduct(float[] filter, ReadOnlySpan<float> input)
     {
-        float sum = 0;
+        double sum = 0;
         for (int index = 0; index < filter.Length; index++)
         {
             sum += filter[index] * input[index];
         }
 
-        return sum;
+        return (float)sum;
     }
 }
