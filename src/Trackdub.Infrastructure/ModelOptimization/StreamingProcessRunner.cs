@@ -23,27 +23,7 @@ internal sealed class StreamingProcessRunner : IStreamingProcessRunner
         [EnumeratorCancellation] CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? environment = null)
     {
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = workingDirectory
-        };
-
-        foreach (string arg in arguments)
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
-
-        if (environment is not null)
-        {
-            foreach ((string name, string value) in environment)
-            {
-                startInfo.Environment[name] = value;
-            }
-        }
+        ProcessStartInfo startInfo = CreateStartInfo(executable, arguments, workingDirectory, environment);
 
         var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
 
@@ -73,14 +53,56 @@ internal sealed class StreamingProcessRunner : IStreamingProcessRunner
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-        await foreach (string line in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            yield return line;
+            await foreach (string line in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return line;
+            }
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (NotSupportedException) { }
+            }
+        }
+    }
+
+    private static ProcessStartInfo CreateStartInfo(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string>? environment)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = workingDirectory
+        };
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            startInfo.KillOnParentExit = true;
         }
 
-        if (!process.HasExited)
+        foreach (string arg in arguments)
         {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            startInfo.ArgumentList.Add(arg);
         }
+
+        if (environment is not null)
+        {
+            foreach ((string name, string value) in environment)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
+        return startInfo;
     }
 }

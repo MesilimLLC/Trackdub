@@ -91,6 +91,11 @@ internal sealed class PipedProcess : IPipedProcess
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            startInfo.KillOnParentExit = true;
+        }
+
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
