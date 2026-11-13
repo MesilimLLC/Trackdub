@@ -38,6 +38,36 @@ def benchmarkdotnet_version(root: Path) -> str:
     return match.group(1)
 
 
+def require_matching_benchmarkdotnet(repo: Path, baseline_worktree: Path, baseline_commit: str) -> None:
+    current_version = benchmarkdotnet_version(repo)
+    baseline_version = benchmarkdotnet_version(baseline_worktree)
+    if current_version != baseline_version:
+        raise RuntimeError(
+            f"BenchmarkDotNet versions differ: baseline {baseline_commit} pins {baseline_version}, "
+            f"current checkout pins {current_version}. Results would come from different harnesses."
+        )
+
+
+def benchmark_command(root: Path, filters: list[str], job: str, artifacts: Path) -> list[str]:
+    return [
+        "dotnet",
+        "run",
+        "--project",
+        str(root / PROJECT),
+        "--configuration",
+        "Release",
+        "--",
+        "--filter",
+        *filters,
+        "--job",
+        job,
+        "--exporters",
+        "fulljson",
+        "--artifacts",
+        str(artifacts),
+    ]
+
+
 def load_report(path: Path) -> dict[str, dict[str, float]]:
     payload: Any = json.loads(path.read_text(encoding="utf-8"))
     entries = payload.get("Benchmarks", [])
@@ -110,50 +140,9 @@ def main() -> int:
 
         run(["git", "worktree", "add", "--detach", str(baseline_worktree), baseline_commit], repo)
         try:
-            current_version = benchmarkdotnet_version(repo)
-            baseline_version = benchmarkdotnet_version(baseline_worktree)
-            if current_version != baseline_version:
-                raise RuntimeError(
-                    f"BenchmarkDotNet versions differ: baseline {baseline_commit} pins {baseline_version}, "
-                    f"current checkout pins {current_version}. Results would come from different harnesses."
-                )
-            current_command = [
-                "dotnet",
-                "run",
-                "--project",
-                str(project),
-                "--configuration",
-                "Release",
-                "--",
-                "--filter",
-                *args.filter,
-                "--job",
-                args.job,
-                "--exporters",
-                "fulljson",
-                "--artifacts",
-                str(current_artifacts),
-            ]
-            run(current_command, repo)
-
-            baseline_command = [
-                "dotnet",
-                "run",
-                "--project",
-                str(baseline_worktree / PROJECT),
-                "--configuration",
-                "Release",
-                "--",
-                "--filter",
-                *args.filter,
-                "--job",
-                args.job,
-                "--exporters",
-                "fulljson",
-                "--artifacts",
-                str(baseline_artifacts),
-            ]
-            run(baseline_command, baseline_worktree)
+            require_matching_benchmarkdotnet(repo, baseline_worktree, baseline_commit)
+            run(benchmark_command(repo, args.filter, args.job, current_artifacts), repo)
+            run(benchmark_command(baseline_worktree, args.filter, args.job, baseline_artifacts), baseline_worktree)
 
             current = load_report(report_path(current_artifacts))
             baseline = load_report(report_path(baseline_artifacts))
