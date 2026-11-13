@@ -57,27 +57,7 @@ internal sealed class ProcessRunner : IProcessRunner
         ArgumentNullException.ThrowIfNull(arguments);
         options ??= new ProcessRunOptions();
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executablePath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (string argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        if (options.EnvironmentVariables is not null)
-        {
-            foreach ((string name, string value) in options.EnvironmentVariables)
-            {
-                startInfo.Environment[name] = value;
-            }
-        }
+        ProcessStartInfo startInfo = CreateStartInfo(executablePath, arguments, options);
 
         using var process = new System.Diagnostics.Process { StartInfo = startInfo };
         if (!process.Start())
@@ -129,6 +109,40 @@ internal sealed class ProcessRunner : IProcessRunner
             completedStandardError.Text,
             completedStandardOutput.Truncated,
             completedStandardError.Truncated);
+    }
+
+    private static ProcessStartInfo CreateStartInfo(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        ProcessRunOptions options)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executablePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            startInfo.KillOnParentExit = true;
+        }
+
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        if (options.EnvironmentVariables is not null)
+        {
+            foreach ((string name, string value) in options.EnvironmentVariables)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
+        return startInfo;
     }
 
     private static async Task<(BoundedProcessOutput StandardOutput, BoundedProcessOutput StandardError)> KillAndDrainAsync(

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Trackdub.Contracts.Serving;
@@ -136,8 +137,7 @@ internal static class ServeTensorConverter
         return tensor.DType switch
         {
             ServeTensorTypes.Float32 => OrtValue.CreateTensorValueFromMemory((float[])tensor.Data, shape),
-            ServeTensorTypes.Float16 => OrtValue.CreateTensorValueFromMemory(
-                Array.ConvertAll((Half[])tensor.Data, static value => new Float16(BitConverter.HalfToUInt16Bits(value))), shape),
+            ServeTensorTypes.Float16 => ToFloat16OrtValue((Half[])tensor.Data, shape),
             ServeTensorTypes.Int64 => OrtValue.CreateTensorValueFromMemory((long[])tensor.Data, shape),
             ServeTensorTypes.Int32 => OrtValue.CreateTensorValueFromMemory((int[])tensor.Data, shape),
             ServeTensorTypes.Int8 => OrtValue.CreateTensorValueFromMemory((sbyte[])tensor.Data, shape),
@@ -160,9 +160,8 @@ internal static class ServeTensorConverter
         Array data = info.ElementDataType switch
         {
             TensorElementType.Float => value.GetTensorDataAsSpan<float>().ToArray(),
-            TensorElementType.Float16 => Array.ConvertAll(
-                value.GetTensorDataAsSpan<Float16>().ToArray(),
-                static item => BitConverter.UInt16BitsToHalf(item.value)),
+            TensorElementType.Float16 => MemoryMarshal.Cast<Float16, Half>(
+                value.GetTensorDataAsSpan<Float16>()).ToArray(),
             TensorElementType.Int64 => value.GetTensorDataAsSpan<long>().ToArray(),
             TensorElementType.Int32 => value.GetTensorDataAsSpan<int>().ToArray(),
             TensorElementType.Int8 => value.GetTensorDataAsSpan<sbyte>().ToArray(),
@@ -196,6 +195,15 @@ internal static class ServeTensorConverter
         TensorElementType.Bool => ServeTensorTypes.Bool,
         _ => null,
     };
+
+    private static OrtValue ToFloat16OrtValue(Half[] halves, long[] shape)
+    {
+        // OrtValue requires a Float16[] that stays alive for the tensor's lifetime;
+        // reinterpret the Half bits (identical 16-bit layout) with a single copy.
+        var float16 = new Float16[halves.Length];
+        MemoryMarshal.Cast<Half, Float16>(halves).CopyTo(float16);
+        return OrtValue.CreateTensorValueFromMemory(float16, shape);
+    }
 
     private static string FormatDimension(int dimension) => dimension < 0 ? "dynamic (>= 0)" : dimension.ToString();
 
