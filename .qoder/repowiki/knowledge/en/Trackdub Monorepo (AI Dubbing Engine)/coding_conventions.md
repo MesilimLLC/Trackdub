@@ -1,5 +1,0 @@
-- All projects target net10.0 with Nullable enabled, ImplicitUsings enabled, and TreatWarningsAsErrors enforced via Directory.Build.props.
-- Package versions are centralized in Directory.Packages.props and referenced by VersionOverride only when needed.
-- Projects follow a strict one-way dependency layer: Domain has no dependencies, Contracts depends only on Domain, higher layers depend downward, and Composition is the sole DI root.
-- Tests mirror the source layout under `tests/` with a parallel `*.Tests` project per `src/*` project, using xUnit and shared fakes from Trackdub.TestDoubles.
-- Solution filtering is used to split the monorepo into focused `.slnx` files (Inference, Sdk) for faster developer iteration.

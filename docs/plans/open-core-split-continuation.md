@@ -245,7 +245,7 @@ Gate: a clean clone of the fresh gated repository builds through the pinned core
 Step 5 (make `Trackdub` public, keep `Trackdub-gated` private) was already
 done independent of this checklist. Steps 1–3 (dependency direction,
 boundary scan, package metadata) were run this round — see
-`docs/plans/phase-3-validation-report.md` for the full detail; Step 1 is
+`docs/archive/phase-3-validation-report.md` for the full detail; Step 1 is
 partially verified (reverse dependency direction not independently rerun
 against fresh Trackdub-gated clone), Steps 2–3 passed with caveats noted
 there (package metadata is source-only, no `dotnet` SDK available to inspect
