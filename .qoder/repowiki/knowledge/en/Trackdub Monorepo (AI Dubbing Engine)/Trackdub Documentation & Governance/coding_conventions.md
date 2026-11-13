@@ -1,5 +1,0 @@
-- Architecture Decision Records follow a numbered naming scheme `ADR-NNNN-<title>.md` with sequential identifiers starting at ADR-0001.
-- Each subdirectory includes a `*.md` index file (e.g., `decisions.md`, `specs.md`, `audits.md`) that catalogs the directory's contents in a consistent table or list format.
-- Audit and pipeline review documents use a date-stamped filename pattern `<topic>-audit-YYYY-MM-DD.md` to version time-bound investigations.
-- Cross-references between documentation categories use relative Markdown links rather than absolute URLs, keeping the docs portable within the repository.
-- Governance and policy statements are duplicated across `docs.md` and `repository-policy.md` to ensure both the docs index and standalone policy reference remain self-contained.

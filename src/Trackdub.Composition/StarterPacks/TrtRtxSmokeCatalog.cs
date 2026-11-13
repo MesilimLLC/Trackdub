@@ -32,7 +32,7 @@ public static class TrtRtxSmokeCatalog
 
     /// <summary>
     /// Bundled ONNX GPU models not in <see cref="StarterPackTurboGpu"/>.
-    /// Includes Silero VAD. Omits Kokoro (no TRT-RTX route; CUDA or CPU only), python-musetalk, and
+    /// Includes Silero VAD. Omits Kokoro (no TRT-RTX route; CUDA or CPU only) and
     /// Phi-3.5 (CPU-only bundle: no GPU variant in the manifest).
     /// </summary>
     public static IReadOnlyList<Target> RemainingOnnxGpu { get; } =

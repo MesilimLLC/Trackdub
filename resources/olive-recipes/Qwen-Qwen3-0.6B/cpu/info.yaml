@@ -1,6 +1,0 @@
-arch: qwen3
-recipes:
-  - name: Qwen-Qwen3-0.6B_cpu_int4
-    file: Qwen-Qwen3-0.6B_cpu_int4.json
-    devices: cpu
-    eps: CPUExecutionProvider

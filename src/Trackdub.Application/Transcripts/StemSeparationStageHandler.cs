@@ -154,16 +154,14 @@ public sealed class StemSeparationStageHandler(
                 ArtifactKind.Vocals,
                 vocalsRelativePath,
                 vocalsFingerprint,
-                result,
-                ResolveBaseProvenance(result, "vocals"));
+                result);
             ProjectArtifact ambianceArtifact = CreateArtifact(
                 request,
                 stageRun,
                 ArtifactKind.Ambiance,
                 ambianceRelativePath,
                 ambianceFingerprint,
-                result,
-                ResolveBaseProvenance(result, "ambiance"));
+                result);
             ProjectArtifact? musicArtifact = musicFingerprint is null
                 ? null
                 : CreateArtifact(
@@ -172,8 +170,7 @@ public sealed class StemSeparationStageHandler(
                     ArtifactKind.Music,
                     musicRelativePath,
                     musicFingerprint,
-                    result,
-                    ResolveBaseProvenance(result, "music"));
+                    result);
             ProjectArtifact? soundEffectsArtifact = soundEffectsFingerprint is null
                 ? null
                 : CreateArtifact(
@@ -182,8 +179,7 @@ public sealed class StemSeparationStageHandler(
                     ArtifactKind.SoundEffects,
                     soundEffectsRelativePath,
                     soundEffectsFingerprint,
-                    result,
-                    ResolveBaseProvenance(result, "sfx"));
+                    result);
 
             await mediaAssetRepository.SaveArtifactAsync(vocalsArtifact, cancellationToken).ConfigureAwait(false);
             registeredStemArtifactIds.Add(vocalsArtifact.Id);
@@ -333,13 +329,6 @@ public sealed class StemSeparationStageHandler(
 
         if (TryGetMetadataValue(result, "model", out string? model))
         {
-            if (model.Equals("demucs-v4", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("htdemucs", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("demucs", StringComparison.OrdinalIgnoreCase))
-            {
-                return "demucs-v4";
-            }
-
             if (model.Equals("hush-dialogue", StringComparison.OrdinalIgnoreCase))
             {
                 return "hush-dialogue";
@@ -413,8 +402,7 @@ public sealed class StemSeparationStageHandler(
         ArtifactKind kind,
         string relativePath,
         FileFingerprint fingerprint,
-        StemSeparationResult result,
-        string provenance)
+        StemSeparationResult result)
     {
         // Never overwrite an accepted producer's metadata while publishing a new run.
         return new ProjectArtifact(
@@ -430,7 +418,7 @@ public sealed class StemSeparationStageHandler(
             result.ChannelCount,
             DateTimeOffset.UtcNow,
             StageRunId: stageRun.Id,
-            Provenance: BuildStemProvenance(provenance, result.Metadata));
+            Provenance: BuildStemProvenance(ResolveBaseProvenance(result, kind), result.Metadata));
     }
 
     private static string BuildStemProvenance(
@@ -449,47 +437,25 @@ public sealed class StemSeparationStageHandler(
         return $"{baseProvenance};{string.Join(';', entries)}";
     }
 
-    private static string ResolveBaseProvenance(
-        StemSeparationResult result,
-        string stemName)
+    // Stems from any engine other than Hush are labelled Spleeter, the current separator.
+    private static string ResolveBaseProvenance(StemSeparationResult result, ArtifactKind kind)
     {
-        if (IsDemucsV4Result(result))
-        {
-            return $"generated-demucs-v4-{stemName}";
-        }
-
-        if (result.Metadata is not null &&
-            result.Metadata.TryGetValue("model", out string? model) &&
-            model.Equals("hush-dialogue", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"generated-hush-dialogue-{stemName}";
-        }
-
-        if (IsSpleeterResult(result))
-        {
-            return $"generated-spleeter-{stemName}";
-        }
-
-        return $"generated-spleeter-{stemName}";
+        string engine = TryGetMetadataValue(result, "model", out string? model) &&
+                        model.Equals("hush-dialogue", StringComparison.OrdinalIgnoreCase)
+            ? "hush-dialogue"
+            : "spleeter";
+        return $"generated-{engine}-{StemProvenanceName(kind)}";
     }
 
-    private static bool IsSpleeterResult(StemSeparationResult result) =>
-        result.Metadata is not null &&
-        ((result.Metadata.TryGetValue("engine_family", out string? engineFamily) &&
-            engineFamily.Equals("spleeter", StringComparison.OrdinalIgnoreCase)) ||
-         (result.Metadata.TryGetValue("model", out string? model) &&
-            (model.Equals("spleeter", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("spleeter-2stems", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("spleeter-non-commercial", StringComparison.OrdinalIgnoreCase))));
-
-    private static bool IsDemucsV4Result(StemSeparationResult result) =>
-        result.Metadata is not null &&
-        ((result.Metadata.TryGetValue("engine_family", out string? engineFamily) &&
-            engineFamily.Equals("demucs-v4", StringComparison.OrdinalIgnoreCase)) ||
-         (result.Metadata.TryGetValue("model", out string? model) &&
-            (model.Equals("demucs-v4", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("htdemucs", StringComparison.OrdinalIgnoreCase) ||
-                model.Equals("demucs", StringComparison.OrdinalIgnoreCase))));
+    private static string StemProvenanceName(ArtifactKind kind) =>
+        kind switch
+        {
+            ArtifactKind.Vocals => "vocals",
+            ArtifactKind.Ambiance => "ambiance",
+            ArtifactKind.Music => "music",
+            ArtifactKind.SoundEffects => "sfx",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a stem artifact kind."),
+        };
 }
 
 public sealed record StemSeparationStageRequest(

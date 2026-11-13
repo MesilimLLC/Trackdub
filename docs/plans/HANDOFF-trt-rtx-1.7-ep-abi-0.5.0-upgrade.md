@@ -1,7 +1,7 @@
 # HANDOFF — TensorRT-RTX 1.7 / EP ABI 0.5.0 upgrade + adopting the new features
 
 Date: 2026-10-22
-Predecessor: `HANDOFF-trt-rtx-1.6-cu13.4-upgrade.md` (the 1.5 → 1.6 move; its Phase 3 "do not regress" list still applies verbatim)
+Predecessor: `docs/archive/HANDOFF-trt-rtx-1.6-cu13.4-upgrade.md` (the 1.5 → 1.6 move; its Phase 3 "do not regress" list still applies verbatim)
 Goal: move the ORT EP ABI plugin route from **EP ABI 0.4.2 (win) / 0.4.0 (linux), TRT-RTX 1.6.1, cu13** to **EP ABI 0.5.0, TRT-RTX 1.7.x, cu13** on both platforms, prove it with measurements, then adopt the 1.7 / 0.5.0 features that pay for Trackdub, each behind its own measured gate.
 
 Do the work as a **stack** (`gh stack`), one PR per part below. Part 1 is mandatory. Parts 2–6 are opt-in features, and each one ships only if its gate measures a win.
@@ -294,4 +294,4 @@ Same as the 1.6 handoff (`ProgramFiles` missing in the shell, stale `MSBuildSDKs
 - TRT-RTX 1.7 release notes: <https://docs.nvidia.com/deeplearning/tensorrt-rtx/latest/getting-started/release-notes-1/1.7.html>
 - EP ABI v0.5.0 release: <https://github.com/NVIDIA/TensorRT-RTX-EP-ABI/releases/tag/v0.5.0>
 - EP ABI @ v0.5.0: `README.md` (compat table), `docs/prerequisites.md` (driver floors), `docs/technical-notes.md` (sync allocator, weightless EPContext), `src/tensorrt_rtx_provider_options.h` (option keys)
-- In-repo: `docs/plans/HANDOFF-trt-rtx-1.6-cu13.4-upgrade.md`, `docs/reference/tensorrt-rtx-ep-abi-plugin.md`, `docs/decisions/ADR-0002-windows-ml-provider-strategy.md`, `tools/dev/Update-TrtRtxEpManifest.ps1`, `tools/dev/Fetch-TrtRtxEp.ps1`, `src/Trackdub.Inference.Onnx/WindowsMl/OrtEpDynamicOptions.cs`
+- In-repo: `docs/archive/HANDOFF-trt-rtx-1.6-cu13.4-upgrade.md`, `docs/reference/tensorrt-rtx-ep-abi-plugin.md`, `docs/decisions/ADR-0002-windows-ml-provider-strategy.md`, `tools/dev/Update-TrtRtxEpManifest.ps1`, `tools/dev/Fetch-TrtRtxEp.ps1`, `src/Trackdub.Inference.Onnx/WindowsMl/OrtEpDynamicOptions.cs`

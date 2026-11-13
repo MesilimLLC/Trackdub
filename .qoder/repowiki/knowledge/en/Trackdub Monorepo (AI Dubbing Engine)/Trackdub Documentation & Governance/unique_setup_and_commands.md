@@ -1,1 +1,0 @@
-No build or rendering step required; documents are consumed directly from the repo. Contributors must run `dotnet build Trackdub.slnx -m:1` and `dotnet test Trackdub.slnx -m:1` before submitting changes, per the contribution guidelines in `docs.md` and `repository-policy.md`.

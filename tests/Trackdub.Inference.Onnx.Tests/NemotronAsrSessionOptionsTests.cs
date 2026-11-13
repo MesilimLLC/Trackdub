@@ -32,7 +32,7 @@ public sealed class NemotronAsrSessionOptionsTests
         Assert.Equal(
             "0",
             OnnxExecutionSessionFactory.BuildTensorRtRtxOptionsWithOverride(
-                Qwen3Asr.Qwen3AsrOnnxAudioTranscriptionEngine.TrtEncoderOptions,
+                Qwen3Asr.Qwen3AsrTrtProfiles.Encoder,
                 OnnxExecutionSessionFactory.DefaultEnableCudaGraph,
                 cudaGraphOverride: null)["enable_cuda_graph"]);
 }

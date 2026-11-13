@@ -1,1 +1,0 @@
-.NET 10 SDK (10.0.300+), MSBuild with Directory.Build.props for cross-project conventions, NuGet Central Package Management via Directory.Packages.props, .NET solution filters (.slnx), mise for toolchain pinning, xUnit for testing, ONNX Runtime with DNNL native provider, FFmpeg for media, libmpv/LibVLC for playback.
