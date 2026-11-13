@@ -43,26 +43,9 @@ Trackdub should be:
 
 ---
 
-## 2. Non-goals
+## 2. Recommended framework and runtime stack
 
-Trackdub is not trying to be:
-
-- a general-purpose nonlinear video editor
-- a full DAW
-- a one-click magic dubbing service
-- a web-first SaaS product (the opt-in cloud render tier in section 3.6 runs the same pipeline on a rented GPU; the desktop app stays local-first)
-- a voice-cloning toy
-- a Python environment manager for end users
-- a perfect lip-sync engine
-- a guarantee that all open models are commercially safe
-
-Voice cloning, if supported, must be opt-in, consent-gated, and license-aware.
-
----
-
-## 3. Recommended framework and runtime stack
-
-### 3.1 Application framework
+### 2.1 Application framework
 
 Recommended desktop framework:
 
@@ -81,7 +64,7 @@ Why:
 - Lets platform-specific runtime and native dependency differences stay behind explicit service seams.
 - Keeps UI behavior, layout, keyboard shortcuts, and tests aligned across supported platforms.
 
-### 3.2 Inference runtime
+### 2.2 Inference runtime
 
 Recommended inference stack for the desktop app:
 
@@ -125,7 +108,7 @@ CPU, always available fallback
 
 Do not make unsupported acceleration a hard blocker. If the app cannot use a GPU path, it should tell the user why and continue with a slower path where practical.
 
-#### 3.2.1 Engine Caching & Invalidation (TensorRT)
+#### 2.2.1 Engine Caching & Invalidation (TensorRT)
 
 Trackdub caches compiled inference engines to reduce startup latency. The default desktop cache location for TensorRT is:
 `%LOCALAPPDATA%\Trackdub\EngineCache`
@@ -135,7 +118,7 @@ Trackdub caches compiled inference engines to reduce startup latency. The defaul
 - **Automatic Invalidation**: TensorRT verifies environment metadata embedded in the cached `.engine` files. It automatically invalidates the cache and triggers recompilation if it detects a mismatch in GPU architecture, NVIDIA Display Driver version, or specific ONNX model shapes/profiles.
 - **Manual Cache Clearing Rules**: If persistent inference crashes occur (especially following unexpected shutdowns or driver updates), or if the hardware is changed, users should manually delete all files in `%LOCALAPPDATA%\Trackdub\EngineCache`. The engines will automatically rebuild on their next use.
 
-### 3.3 Media stack
+### 2.3 Media stack
 
 Recommended media stack:
 
@@ -157,7 +140,7 @@ Readiness checks must report whether `ffmpeg` and `ffprobe` are already availabl
 
 Playback behavior must be validated through the Avalonia shell. For `.mkv` or other unsupported preview formats, prefer an explicit conversion/import-staging workflow unless the current libmpv/LibVLC path supports the format with overlays and fullscreen behavior intact.
 
-### 3.4 Persistence stack
+### 2.4 Persistence stack
 
 Recommended persistence stack:
 
@@ -174,7 +157,7 @@ SQLite owns structured project state. The filesystem owns large artifacts.
 
 Do not put generated audio, video, model weights, or source media blobs directly into SQLite.
 
-### 3.5 Packaging
+### 2.5 Packaging
 
 Recommended packaging direction:
 
@@ -196,7 +179,7 @@ End users should not need:
 
 This applies to the desktop app. The Linux GPU worker is an operator artifact, not an end-user install: it ships as a container image built from the `Dockerfile` `server` target.
 
-### 3.6 Headless and cloud render execution
+### 2.6 Headless and cloud render execution
 
 The `trackdub` CLI (`src/Trackdub.Cli`) runs the full pipeline without the desktop UI:
 
@@ -219,7 +202,7 @@ The repository also contains an earlier AWS-only job stack (`Trackdub.Api`, `Tra
 
 ---
 
-## 4. Architectural boundaries
+## 3. Architectural boundaries
 
 The solution is organized around product boundaries.
 
@@ -252,7 +235,7 @@ The domain model must not reference:
 
 ---
 
-## 5. Recommended project dependency flow
+## 4. Recommended project dependency flow
 
 `Trackdub.App.Avalonia` (the desktop shell) lives in the private Trackdub-gated repository, which consumes this repository as a submodule. The other projects below are in this repository.
 
@@ -299,7 +282,7 @@ When Infrastructure or Media reference `Trackdub.Application`, that dependency s
 
 ---
 
-## 6. Pipeline overview
+## 5. Pipeline overview
 
 The long-term pipeline is staged.
 
@@ -337,9 +320,9 @@ error classification
 
 ---
 
-## 7. Pipeline stages
+## 6. Pipeline stages
 
-### 7.1 Stage 0: Preflight and runtime planning
+### 6.1 Stage 0: Preflight and runtime planning
 
 Purpose:
 
@@ -367,7 +350,7 @@ Rules:
 
 ---
 
-### 7.2 Stage 1: Ingest and project creation
+### 6.2 Stage 1: Ingest and project creation
 
 Purpose:
 
@@ -397,7 +380,7 @@ Rules:
 
 ---
 
-### 7.3 Stage 2: Audio preparation
+### 6.3 Stage 2: Audio preparation
 
 Purpose:
 
@@ -422,7 +405,7 @@ Rules:
 
 ---
 
-### 7.4 Stage 3: Optional stem separation
+### 6.4 Stage 3: Optional stem separation
 
 Purpose:
 
@@ -447,7 +430,7 @@ Rules:
 
 ---
 
-### 7.5 Stage 4: Voice activity detection
+### 6.5 Stage 4: Voice activity detection
 
 Purpose:
 
@@ -470,7 +453,7 @@ Rules:
 
 ---
 
-### 7.6 Stage 5: Speaker diarization
+### 6.6 Stage 5: Speaker diarization
 
 Purpose:
 
@@ -496,7 +479,7 @@ Rules:
 
 ---
 
-### 7.7 Stage 6: Transcription
+### 6.7 Stage 6: Transcription
 
 Purpose:
 
@@ -521,7 +504,7 @@ Rules:
 
 ---
 
-### 7.8 Stage 7: Translation
+### 6.8 Stage 7: Translation
 
 Purpose:
 
@@ -546,7 +529,7 @@ Rules:
 
 ---
 
-### 7.9 Stage 8: Speaker / voice assignment
+### 6.9 Stage 8: Speaker / voice assignment
 
 Purpose:
 
@@ -571,7 +554,7 @@ Rules:
 
 ---
 
-### 7.10 Stage 9: TTS generation
+### 6.10 Stage 9: TTS generation
 
 Purpose:
 
@@ -597,7 +580,7 @@ Rules:
 
 ---
 
-### 7.11 Stage 10: Preview and refinement
+### 6.11 Stage 10: Preview and refinement
 
 Purpose:
 
@@ -619,7 +602,7 @@ Rules:
 
 ---
 
-### 7.12 Stage 11: Mix and export
+### 6.12 Stage 11: Mix and export
 
 Purpose:
 
@@ -648,7 +631,7 @@ Rules:
 
 ---
 
-### 7.13 Stage 12: Diagnostics and benchmarks
+### 6.13 Stage 12: Diagnostics and benchmarks
 
 Purpose:
 
@@ -674,9 +657,9 @@ Rules:
 
 ---
 
-## 8. Persistence model
+## 7. Persistence model
 
-### 8.1 Project folder
+### 7.1 Project folder
 
 Recommended project layout:
 
@@ -700,7 +683,7 @@ ProjectName.trackdub/
 └── temp/
 ```
 
-### 8.2 Machine-local app data
+### 7.2 Machine-local app data
 
 Recommended machine-local layout:
 
@@ -717,7 +700,7 @@ Project artifacts and machine-local caches should remain separate. Model cache d
 
 ---
 
-## 9. Core project database tables
+## 8. Core project database tables
 
 Suggested initial SQLite tables for `trackdub.db`:
 
@@ -767,7 +750,7 @@ Use project-relative locations or storage keys in domain records. Infrastructure
 
 ---
 
-## 10. Model manifest and licensing
+## 9. Model manifest and licensing
 
 Every model must have a manifest.
 
@@ -802,9 +785,9 @@ Rules:
 
 ---
 
-## 11. Directory breakdown
+## 10. Directory breakdown
 
-### 11.1 Top-level layout
+### 10.1 Top-level layout
 
 ```text
 Trackdub/
@@ -839,9 +822,9 @@ Trackdub/
 
 ---
 
-## 12. Source projects
+## 11. Source projects
 
-### 12.1 `src/Trackdub.App.Avalonia` (Trackdub-gated repository)
+### 11.1 `src/Trackdub.App.Avalonia` (Trackdub-gated repository)
 
 Purpose:
 
@@ -868,7 +851,7 @@ What should not go here:
 
 ---
 
-### 12.2 `src/Trackdub.Domain`
+### 11.2 `src/Trackdub.Domain`
 
 Purpose:
 
@@ -900,7 +883,7 @@ What should not go here:
 
 ---
 
-### 12.3 `src/Trackdub.Application`
+### 11.3 `src/Trackdub.Application`
 
 Purpose:
 
@@ -925,7 +908,7 @@ What should not go here:
 
 ---
 
-### 12.4 `src/Trackdub.Infrastructure`
+### 11.4 `src/Trackdub.Infrastructure`
 
 Purpose:
 
@@ -950,7 +933,7 @@ What should not go here:
 
 ---
 
-### 12.5 `src/Trackdub.Media`
+### 11.5 `src/Trackdub.Media`
 
 Purpose:
 
@@ -977,7 +960,7 @@ What should not go here:
 
 ---
 
-### 12.6 `src/Trackdub.Inference`
+### 11.6 `src/Trackdub.Inference`
 
 Purpose:
 
@@ -1001,7 +984,7 @@ What should not go here:
 
 ---
 
-### 12.7 `src/Trackdub.Inference.Onnx`
+### 11.7 `src/Trackdub.Inference.Onnx`
 
 Purpose:
 
@@ -1029,7 +1012,7 @@ What should not go here:
 
 ---
 
-### 12.8 `src/Trackdub.Benchmarks`
+### 11.8 `src/Trackdub.Benchmarks`
 
 Purpose:
 
@@ -1052,7 +1035,7 @@ What should not go here:
 
 ---
 
-### 12.9 `src/Trackdub.Tools`
+### 11.9 `src/Trackdub.Tools`
 
 Purpose:
 
@@ -1074,7 +1057,7 @@ What should not go here:
 
 ---
 
-### 12.10 `src/Trackdub.Contracts`
+### 11.10 `src/Trackdub.Contracts`
 
 Purpose:
 
@@ -1093,7 +1076,7 @@ What should not go here:
 - concrete persistence code
 - UI classes
 
-### 12.11 Headless and cloud projects
+### 11.11 Headless and cloud projects
 
 | Project | Purpose |
 |---|---|
@@ -1109,7 +1092,7 @@ What should not go here:
 
 ---
 
-## 13. Tests
+## 12. Tests
 
 Recommended test layout:
 
@@ -1139,7 +1122,7 @@ Testing strategy:
 
 ---
 
-## 14. Agent workflow
+## 13. Agent workflow
 
 Agents should be used for bounded tasks.
 
@@ -1177,7 +1160,7 @@ Agent-generated code should be rejected if it:
 
 ---
 
-## 15. Early implementation order
+## 14. Early implementation order
 
 Recommended order:
 
@@ -1198,7 +1181,7 @@ Do not start with the full DAW UI.
 
 ---
 
-## 16. Architecture review checklist
+## 15. Architecture review checklist
 
 Before merging a significant change, ask:
 
@@ -1215,7 +1198,7 @@ Before merging a significant change, ask:
 
 ---
 
-## 17. Summary
+## 16. Summary
 
 Trackdub should behave less like a magic AI demo and more like a reliable workstation.
 
@@ -1234,7 +1217,7 @@ The guiding principle:
 
 ---
 
-## 18. Pipeline audits
+## 17. Pipeline audits
 
 Dated audits of the pipeline live in their own files. They record what was true when written; check findings against current source before acting on them.
 
