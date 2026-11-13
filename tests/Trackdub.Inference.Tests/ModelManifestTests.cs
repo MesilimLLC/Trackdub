@@ -1710,10 +1710,6 @@ public sealed class ModelManifestLoaderTests
         Assert.DoesNotContain(catalog.Models, manifest =>
             manifest.ModelId.Equals("tonythethompson/mrx-cocktail-fork-onnx", StringComparison.Ordinal));
         Assert.Contains(catalog.Models, manifest =>
-            manifest.ModelId.Equals("musetalk-v1-5", StringComparison.Ordinal) &&
-            manifest.Task is ModelTask.LipSynthesis &&
-            manifest.Lane is ModelLane.Experimental);
-        Assert.Contains(catalog.Models, manifest =>
             manifest.ModelId.Equals("ByteDance/LatentSync-1.6", StringComparison.Ordinal) &&
             manifest.Task is ModelTask.LipSynthesis &&
             manifest.License is ModelLicenseKind.OpenRailPlusPlus &&

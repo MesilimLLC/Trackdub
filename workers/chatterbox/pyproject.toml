@@ -15,7 +15,7 @@ model = [
     "chatterbox-tts==0.1.7",
     # resemble-perth 1.0.1 imports pkg_resources, deprecated and removed in
     # setuptools 81+; cap below 81 so ChatterboxTTS model load keeps working
-    # (verified live run: tools/sidecar-evidence/live-run.txt).
+    # (verified in the 2026-10-08 live run; see workers/README.md "Evidence").
     "setuptools>=80,<81",
 ]
 

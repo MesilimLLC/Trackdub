@@ -18,7 +18,6 @@
         "group": "Architecture",
         "pages": [
           "architecture/ARCHITECTURE",
-          "architecture/ARCHITECTURE-source",
           "architecture/P0-pipeline-audit-2026-06-01",
           "architecture/local-pipeline-audit-unified-2026-07-08",
           "architecture/pipeline-principles-review-grok-2026-07-08"
@@ -106,7 +105,6 @@
           "audits/audit-summary",
           "audits/Code_Quality_Security_Scan_Audit",
           "audits/inference-pipeline-cold-start-audit-2026-10-25",
-          "audits/pipeline-full-walk-audit-2026-07-08",
           "audits/Trackdub-dead-code-audit-review",
           "audits/Trackdub-dead-code-audit-verification",
           "audits/Trackdub-simplification-audit-kiro",
@@ -119,10 +117,23 @@
           "plans/AI Search config tune-up",
           "plans/open-core-split-continuation",
           "plans/open-core-split-handoff",
-          "plans/phase-3-validation-report",
           "strategy/strategy",
           "strategy/LONGTERM-ROADMAP",
           "strategy/V22-V26_Visual_Dubbing"
+        ]
+      },
+      {
+        "group": "Archive",
+        "pages": [
+          "archive/HANDOFF-trt-rtx-1.6-cu13.4-upgrade",
+          "archive/handoff-cold-start-core",
+          "archive/phase-3-validation-report",
+          "archive/rust-inference-sidecar-pitch",
+          "archive/rust-sidecar-spike-plan",
+          "archive/pipeline-full-walk-audit-2026-07-08",
+          "archive/next-steps-handoff-2026-10-10",
+          "archive/c13-trt-rtx-shape-triage-2026-10-05",
+          "archive/resource-telemetry-validation-audit-2026-10-05"
         ]
       },
       {

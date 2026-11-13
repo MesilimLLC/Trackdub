@@ -1,6 +1,0 @@
-- Each Python script exposes a `main()` function invoked via `if __name__ == "__main__": raise SystemExit(main())` and uses `argparse` for CLI arguments.
-- Repository-relative paths are resolved at runtime from `Path(__file__).resolve().parents[2]` (Python) or `$MyInvocation.MyCommand.Path` (PowerShell) rather than hard-coded absolute paths.
-- CI scripts use strict error handling: Bash scripts set `set -euo pipefail`; PowerShell scripts set `Set-StrictMode -Version Latest` and `$ErrorActionPreference = 'Stop'`.
-- Agent-loop scripts communicate completion through a structured signal token (`<promise>DONE</promise>` or `<promise>ALL_DONE</promise>`) parsed from stdout/stderr rather than exit codes alone.
-- Spec status is encoded as a markdown heading pattern `^(#{1,3} )?(\*\*)?Status(\*\*)?:\s+COMPLETE` checked identically in both `SpecQueue.ps1` and `spec_queue.sh`.
-- External tool invocations capture stderr alongside stdout via `2>&1 | Tee-Object` (PowerShell) or shell redirection, and log each iteration to timestamped files under a `logs/` directory.

@@ -1,7 +1,0 @@
-keywords:
-  - whisper
-recipes:
-  - name: openai-whisper-large-cuda-int8
-    file: whisper-large_cuda_int8.json
-    devices: gpu
-    eps: CUDAExecutionProvider

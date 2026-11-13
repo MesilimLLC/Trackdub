@@ -1,6 +1,0 @@
-arch: llama
-recipes:
-  - name: Llama-3.2-1B-Instruct_Model_Builder_FP16
-    file: Llama-3.2-1B-Instruct_model_builder_fp16.json
-    devices: gpu
-    eps: NvTensorRTRTXExecutionProvider
