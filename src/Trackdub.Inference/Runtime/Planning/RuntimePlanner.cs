@@ -104,6 +104,10 @@ public sealed partial class RuntimePlanner : IRuntimePlanner
         StageRuntimePlan? resolvedPlan = await TryResolvePlanFromEntriesAsync(context, cancellationToken).ConfigureAwait(false);
         if (resolvedPlan is not null)
         {
+            // A blocked preferred-variant plan is replaced by a base-variant fallback, which
+            // ResolveWithoutPreferredVariantAsync caches under its own key; the preferred-variant
+            // key must keep resolving freshly once that variant becomes available.
+            bool preferredVariantResolved = resolvedPlan.Status != StageRuntimePlanStatus.Blocked;
             resolvedPlan = await RuntimePlannerPreferredVariantFallback.ResolveAsync(
                 new PreferredVariantFallbackRequest
                 {
@@ -114,7 +118,11 @@ public sealed partial class RuntimePlanner : IRuntimePlanner
                         context, snapshot.CacheKey, alias, token)
                 },
                 cancellationToken).ConfigureAwait(false);
-            TryCachePlan(snapshot.CacheKey, resolvedPlan);
+            if (preferredVariantResolved)
+            {
+                TryCachePlan(snapshot.CacheKey, resolvedPlan);
+            }
+
             return resolvedPlan;
         }
 

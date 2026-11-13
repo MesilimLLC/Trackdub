@@ -103,7 +103,7 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
         WorkerPlan workerPlan = WorkerPlan.From(plan);
         var segments = new List<TranslatedTextSegment>(request.Segments.Count);
         StageRuntimeExecutionSummary? executionSummary = null;
-        foreach (IReadOnlyList<TranslationInputSegment> chunk in ChunkSegments(request.Segments))
+        foreach (IReadOnlyList<TranslationInputSegment> chunk in ChunkSegments(request.Segments.OrderBy(static segment => segment.Index).ToList()))
         {
             WorkerTranslationResult partial = await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
                 InferenceWorkerProtocol.Translation,

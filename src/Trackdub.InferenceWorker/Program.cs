@@ -24,7 +24,7 @@ try
 {
     GenAiNativeRuntimeSelection.EnsureOrtLoaded(requireVerified: false);
 }
-catch (InvalidOperationException ex) when (ex.Message.Contains("ORT path is missing", StringComparison.Ordinal))
+catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
 {
     ortUnavailableDetail = ex.Message;
 }

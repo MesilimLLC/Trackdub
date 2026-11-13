@@ -117,7 +117,7 @@ public sealed class TranslationLanguageRouter(
             IsPivotTranslationEntry(entry))
             .ToArray();
 
-        IReadOnlyDictionary<string, bool> planAvailabilityByModelId = await BuildPlanAvailabilityAsync(
+        IReadOnlyDictionary<string, PlanAvailability> planAvailabilityByModelId = await BuildPlanAvailabilityAsync(
             directEntriesByPair.Values.SelectMany(static entries => entries).Concat(pivotEntries),
             cancellationToken).ConfigureAwait(false);
 
@@ -138,16 +138,16 @@ public sealed class TranslationLanguageRouter(
     /// When no planner is configured (legacy test wiring) the router falls back to the
     /// inline cache+file checks below.
     /// </summary>
-    private async Task<IReadOnlyDictionary<string, bool>> BuildPlanAvailabilityAsync(
+    private async Task<IReadOnlyDictionary<string, PlanAvailability>> BuildPlanAvailabilityAsync(
         IEnumerable<BundledModelManifestEntry> entries,
         CancellationToken cancellationToken)
     {
         if (runtimePlanner is null)
         {
-            return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, PlanAvailability>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var availability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var availability = new Dictionary<string, PlanAvailability>(StringComparer.OrdinalIgnoreCase);
         foreach (BundledModelManifestEntry entry in entries.DistinctBy(e => e.ModelId, StringComparer.OrdinalIgnoreCase))
         {
             string? primaryAlias = entry.Aliases.FirstOrDefault();
@@ -160,7 +160,7 @@ public sealed class TranslationLanguageRouter(
                         PreferredEngineFamily: entry.EngineFamily,
                         RequirePreferredModelAlias: !string.IsNullOrWhiteSpace(primaryAlias)),
                     cancellationToken).ConfigureAwait(false);
-                availability[entry.ModelId] = plan.IsRunnable();
+                availability[entry.ModelId] = new PlanAvailability(plan.IsRunnable(), plan.ModelEntryPath);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -170,7 +170,7 @@ public sealed class TranslationLanguageRouter(
             {
                 // Planner failure is treated as "not runnable" — a strictly more conservative
                 // outcome than silently masking an underlying problem with the planner stack.
-                availability[entry.ModelId] = false;
+                availability[entry.ModelId] = new PlanAvailability(false, null);
             }
         }
 
@@ -187,7 +187,7 @@ public sealed class TranslationLanguageRouter(
             return true;
         }
 
-        return context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out bool isRunnable) && isRunnable;
+        return context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out PlanAvailability? planAvailability) && planAvailability.IsRunnable;
     }
 
     private TranslationRouteSelection ResolveRoute(
@@ -570,7 +570,12 @@ public sealed class TranslationLanguageRouter(
             return false;
         }
 
-        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry, includeVariants: true))
+        string? plannedEntryPath = context.PlanAvailabilityByModelId.TryGetValue(entry.ModelId, out PlanAvailability? planned)
+            ? planned.PlannedEntryPath
+            : null;
+        // The planner's chosen variant goes first so route provenance describes the variant that will run.
+        foreach (string entryPath in EnumerateResolvedEntryPaths(context.CacheIndex, entry, includeVariants: true)
+            .OrderBy(path => IsPlannedEntryPath(path, plannedEntryPath) ? 0 : 1))
         {
             string? modelRootPath = Path.GetDirectoryName(entryPath);
             if (modelRootPath is null || !HasGenAiSupportingFiles(modelRootPath))
@@ -601,6 +606,12 @@ public sealed class TranslationLanguageRouter(
 
         return false;
     }
+
+    private static bool IsPlannedEntryPath(string path, string? plannedEntryPath) =>
+        !string.IsNullOrWhiteSpace(plannedEntryPath) &&
+        Path.GetFullPath(path).Equals(
+            Path.GetFullPath(plannedEntryPath),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static bool HasGenAiSupportingFiles(string modelRootPath) =>
         File.Exists(Path.Join(modelRootPath, "genai_config.json"));
@@ -874,6 +885,8 @@ public sealed class TranslationLanguageRouter(
         IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> CacheIndex,
         IReadOnlyDictionary<(string SourceLanguage, string TargetLanguage), IReadOnlyList<BundledModelManifestEntry>> DirectEntriesByPair,
         IReadOnlyList<BundledModelManifestEntry> PivotEntries,
-        IReadOnlyDictionary<string, bool> PlanAvailabilityByModelId,
+        IReadOnlyDictionary<string, PlanAvailability> PlanAvailabilityByModelId,
         bool CanDownload);
+
+    private sealed record PlanAvailability(bool IsRunnable, string? PlannedEntryPath);
 }

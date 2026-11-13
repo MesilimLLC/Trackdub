@@ -20,7 +20,7 @@ public sealed class PhiGenAiPromptSafetyTests
     {
         Assert.Equal(
             testCase.Expected,
-            PhiGenAiTranslationEngine.CleanDecodedTranslation(testCase.Decoded, testCase.PromptFormat));
+            PhiGenAiTranslationEngine.CleanDecodedTranslation(testCase.Decoded));
     }
 
     [Theory]
@@ -73,14 +73,14 @@ public sealed class PhiGenAiPromptSafetyTests
         new()
         {
             PromptFormat = GenAiTranslationPromptFormat.Qwen3,
-            Decoded = "unfinished reasoning</think>Bonjour",
+            Decoded = "Bonjour",
             Expected = "Bonjour"
         },
         new()
         {
             PromptFormat = GenAiTranslationPromptFormat.Qwen3,
-            Decoded = "unfinished reasoning",
-            Expected = string.Empty
+            Decoded = "Bonjour</think>",
+            Expected = "Bonjour"
         },
         new()
         {

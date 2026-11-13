@@ -285,20 +285,17 @@ public sealed class PhiGenAiTranslationEngine(
         TranslationStreamContext streamContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        // One worker call (chunked by the client) pays engine construction and model-key hashing once.
+        WorkerTranslationResult result = await workerClient!.TranslateAsync(
+            request, plan, cancellationToken, nonEvictingWarmup: NonEvictingWarmup).ConfigureAwait(false);
+        LastExecutionSummary = result.ExecutionSummary;
+        SetExecutionMetadata(request, plan);
         long sequence = 0;
-        foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
+        foreach (TranslatedTextSegment translated in result.Segments)
         {
-            WorkerTranslationResult result = await workerClient!.TranslateAsync(
-                request with { Segments = [segment] }, plan, cancellationToken,
-                nonEvictingWarmup: NonEvictingWarmup).ConfigureAwait(false);
-            LastExecutionSummary = result.ExecutionSummary;
-            SetExecutionMetadata(request, plan);
-            foreach (TranslatedTextSegment translated in result.Segments)
-            {
-                yield return PipelineStreamItemFactory.CreateTranslation(
-                    translated, streamContext.RunId, streamContext.SnapshotId,
-                    streamContext.SourceRevisionId, sequence++);
-            }
+            yield return PipelineStreamItemFactory.CreateTranslation(
+                translated, streamContext.RunId, streamContext.SnapshotId,
+                streamContext.SourceRevisionId, sequence++);
         }
     }
 
@@ -409,19 +406,17 @@ public sealed class PhiGenAiTranslationEngine(
 
         ReadOnlySpan<int> fullSequence = generator.GetSequence(0);
         string decoded = tokenizer.Decode(fullSequence[promptLength..]);
-        return CleanDecodedTranslation(decoded, promptContext.PromptFormat);
+        return CleanDecodedTranslation(decoded);
     }
 
-    internal static string CleanDecodedTranslation(
-        string decoded,
-        GenAiTranslationPromptFormat promptFormat = GenAiTranslationPromptFormat.Phi)
+    internal static string CleanDecodedTranslation(string decoded)
     {
         if (string.IsNullOrWhiteSpace(decoded))
         {
             return string.Empty;
         }
 
-        string result = StripThinkingBlocks(decoded, promptFormat);
+        string result = StripThinkingBlocks(decoded);
         foreach (string suffix in EosTokenSuffixes)
         {
             int suffixIndex = result.IndexOf(suffix, StringComparison.Ordinal);
@@ -434,23 +429,18 @@ public sealed class PhiGenAiTranslationEngine(
         return result.Trim();
     }
 
-    private static string StripThinkingBlocks(string text, GenAiTranslationPromptFormat promptFormat)
+    private static string StripThinkingBlocks(string text)
     {
         string result = text;
-        bool hasPrefilledThinkOpener = promptFormat == GenAiTranslationPromptFormat.Qwen3;
         foreach ((string openTag, string closeTag) in ThinkingBlockTags)
         {
-            result = StripThinkingBlock(result, openTag, closeTag, ref hasPrefilledThinkOpener);
+            result = StripThinkingBlock(result, openTag, closeTag);
         }
 
         return result;
     }
 
-    private static string StripThinkingBlock(
-        string text,
-        string openTag,
-        string closeTag,
-        ref bool hasPrefilledThinkOpener)
+    private static string StripThinkingBlock(string text, string openTag, string closeTag)
     {
         while (true)
         {
@@ -458,26 +448,13 @@ public sealed class PhiGenAiTranslationEngine(
             if (closeIndex < 0)
             {
                 int openIndex = text.IndexOf(openTag, StringComparison.Ordinal);
-                if (openIndex >= 0)
-                {
-                    return text[..openIndex];
-                }
-
-                return hasPrefilledThinkOpener ? string.Empty : text;
+                return openIndex >= 0 ? text[..openIndex] : text;
             }
 
             int matchingOpenIndex = text.LastIndexOf(openTag, closeIndex, StringComparison.Ordinal);
-            if (matchingOpenIndex >= 0)
-            {
-                text = string.Concat(text.AsSpan(0, matchingOpenIndex), text.AsSpan(closeIndex + closeTag.Length));
-                hasPrefilledThinkOpener = false;
-                continue;
-            }
-
-            text = hasPrefilledThinkOpener
-                ? text[(closeIndex + closeTag.Length)..]
+            text = matchingOpenIndex >= 0
+                ? string.Concat(text.AsSpan(0, matchingOpenIndex), text.AsSpan(closeIndex + closeTag.Length))
                 : string.Concat(text.AsSpan(0, closeIndex), text.AsSpan(closeIndex + closeTag.Length));
-            hasPrefilledThinkOpener = false;
         }
     }
 

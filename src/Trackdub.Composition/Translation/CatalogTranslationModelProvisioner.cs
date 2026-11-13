@@ -14,7 +14,9 @@ public sealed class CatalogTranslationModelProvisioner(
     IStudioSettingsService settingsService,
     IModelDownloadOrchestrator downloader,
     TrackdubStoragePaths storagePaths,
-    IModelCacheInventory? cacheInventory = null) : ITranslationModelProvisioner
+    IModelCacheInventory? cacheInventory = null,
+    IHardwareProfileProvider? hardwareProfileProvider = null,
+    IExecutionProviderDiscovery? providerDiscovery = null) : ITranslationModelProvisioner
 {
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private DateTimeOffset lastRefresh;
@@ -96,19 +98,47 @@ public sealed class CatalogTranslationModelProvisioner(
             return preferredModelAlias;
         preparationProgress?.Report($"Preparing {selected.ModelId}");
         // Without an explicit variant, the default CPU variant would be downloaded even for a CUDA plan.
-        string? variantAlias = string.IsNullOrWhiteSpace(preferredModelVariantAlias)
-            ? ResolveVariantForProvider(selected, preferredExecutionProvider)
-            : preferredModelVariantAlias;
-        var result = await downloader.DownloadAsync(selected.ModelId, variantAlias,
-            preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
-            cancellationToken).ConfigureAwait(false);
-        if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
+        foreach (string? variantAlias in await ResolveVariantAliasesAsync(selected, preferredModelVariantAlias, preferredExecutionProvider, cancellationToken).ConfigureAwait(false))
+        {
+            var result = await downloader.DownloadAsync(selected.ModelId, variantAlias,
+                preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
+                cancellationToken).ConfigureAwait(false);
+            if (!result.Success) throw new InvalidOperationException(result.FailureReason ?? $"Translation model '{selected.ModelId}' could not be installed.");
+        }
         return selected.Aliases.FirstOrDefault() ?? selected.ModelId;
     }
 
     private static bool CanProvisionSelectedModel(BundledModelManifestEntry selected, bool explicitSelection) =>
         selected.EngineFamily == "opus-mt" ||
         (explicitSelection && selected.EngineFamily == "qwen-genai");
+
+    private async Task<IReadOnlyList<string?>> ResolveVariantAliasesAsync(
+        BundledModelManifestEntry selected, string? variantAlias, string? executionProvider, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(variantAlias)) return [variantAlias];
+        if (!string.IsNullOrWhiteSpace(executionProvider)) return [ResolveVariantForProvider(selected, executionProvider)];
+        // Auto provider mode: provision every variant this host can run so the planner can pick the accelerated one.
+        HashSet<string>? available = await DiscoverAvailableProvidersAsync(cancellationToken).ConfigureAwait(false);
+        if (available is null) return [null];
+        string?[] aliases = selected.Variants
+            .Where(variant => variant.SupportedProviders?.Any(available.Contains) == true)
+            .Select(variant => variant.Alias).ToArray();
+        return aliases.Length > 0 ? aliases : [null];
+    }
+
+    private async Task<HashSet<string>?> DiscoverAvailableProvidersAsync(CancellationToken cancellationToken)
+    {
+        if (hardwareProfileProvider is null || providerDiscovery is null) return null;
+        try
+        {
+            var profile = await hardwareProfileProvider.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+            var providers = await providerDiscovery.DiscoverAsync(profile, cancellationToken).ConfigureAwait(false);
+            var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu" };
+            foreach (var provider in providers.Where(provider => provider.IsAvailable)) available.Add(provider.Provider.ToString());
+            return available;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+    }
 
     private static string? ResolveVariantForProvider(BundledModelManifestEntry selected, string? executionProvider) =>
         string.IsNullOrWhiteSpace(executionProvider) ? null
