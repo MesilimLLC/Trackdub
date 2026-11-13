@@ -10,6 +10,25 @@ namespace Trackdub.Composition.Tests;
 
 public sealed class CatalogTranslationModelProvisionerTests
 {
+    public enum QwenProviderSelection
+    {
+        Cuda,
+        Cpu
+    }
+
+    public enum ExplicitSelectionScenario
+    {
+        Registered,
+        Unregistered
+    }
+
+    public enum NoDownloadScenario
+    {
+        Offline,
+        AutomaticDownloadDisabled,
+        UnknownSource
+    }
+
     [Fact]
     public async Task ExplicitQwenSelectionDownloadsTheRegisteredModel()
     {
@@ -29,9 +48,10 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Theory]
-    [InlineData("Cuda", "cuda-int4")]
-    [InlineData("Cpu", "cpu-int4")]
-    public async Task Qwen_selection_without_a_variant_provisions_the_variant_for_the_requested_provider(string provider, string expectedVariant)
+    [InlineData(QwenProviderSelection.Cuda)]
+    [InlineData(QwenProviderSelection.Cpu)]
+    public async Task Qwen_selection_without_a_variant_provisions_the_variant_for_the_requested_provider(
+        QwenProviderSelection selection)
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
         var settings = new FakeStudioSettingsService();
@@ -40,6 +60,8 @@ public sealed class CatalogTranslationModelProvisionerTests
         var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader,
             new TrackdubStoragePaths(Path.GetTempPath()));
 
+        string provider = selection is QwenProviderSelection.Cuda ? "Cuda" : "Cpu";
+        string expectedVariant = selection is QwenProviderSelection.Cuda ? "cuda-int4" : "cpu-int4";
         await service.EnsureAsync("en", "fr", "qwen3-4b-translation", CancellationToken.None, preferredExecutionProvider: provider);
 
         Assert.Equal("Qwen/Qwen3-4B", downloader.Selected);
@@ -47,12 +69,12 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExplicitSelectionsDoNotWaitForUnrelatedCatalogRefresh(bool registered)
+    [InlineData(ExplicitSelectionScenario.Registered)]
+    [InlineData(ExplicitSelectionScenario.Unregistered)]
+    public async Task ExplicitSelectionsDoNotWaitForUnrelatedCatalogRefresh(ExplicitSelectionScenario scenario)
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
-        string alias = registered
+        string alias = scenario is ExplicitSelectionScenario.Registered
             ? registry!.Entries.First(entry => entry.Task == "translation" && entry.EngineFamily != "opus-mt").Aliases.First()
             : "deepl";
         var catalog = new Catalog { Snapshot = TranslationModelCatalogSnapshot.Empty, FailRefresh = true };
@@ -85,12 +107,19 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Theory]
-    [InlineData(true, true, "xx")]
-    [InlineData(false, false, "xx")]
-    [InlineData(false, true, "auto")]
-    public async Task Offline_disabled_and_unknown_source_do_not_download(bool offline, bool automatic, string source)
+    [InlineData(NoDownloadScenario.Offline)]
+    [InlineData(NoDownloadScenario.AutomaticDownloadDisabled)]
+    [InlineData(NoDownloadScenario.UnknownSource)]
+    public async Task Offline_disabled_and_unknown_source_do_not_download(NoDownloadScenario scenario)
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        (bool offline, bool automatic, string source) = scenario switch
+        {
+            NoDownloadScenario.Offline => (true, true, "xx"),
+            NoDownloadScenario.AutomaticDownloadDisabled => (false, false, "xx"),
+            NoDownloadScenario.UnknownSource => (false, true, "auto"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null)
+        };
         var settings = new FakeStudioSettingsService();
         await settings.SaveAsync(StudioSettings.Default with { OfflineMode = offline, AutoDownloadTranslationModels = automatic }, CancellationToken.None);
         var downloader = new Downloader();
@@ -98,5 +127,4 @@ public sealed class CatalogTranslationModelProvisionerTests
         await service.EnsureAsync(source, "yy", null, CancellationToken.None);
         Assert.Null(downloader.Selected);
     }
-
 }

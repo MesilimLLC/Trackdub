@@ -7,7 +7,7 @@ using System.Collections.Concurrent;
 
 namespace Trackdub.Inference.Runtime.Planning;
 
-public sealed class RuntimePlanner : IRuntimePlanner
+public sealed partial class RuntimePlanner : IRuntimePlanner
 {
     private readonly IHardwareProfileProvider hardwareProfileProvider;
     private readonly IExecutionProviderDiscovery executionProviderDiscovery;
@@ -104,7 +104,16 @@ public sealed class RuntimePlanner : IRuntimePlanner
         StageRuntimePlan? resolvedPlan = await TryResolvePlanFromEntriesAsync(context, cancellationToken).ConfigureAwait(false);
         if (resolvedPlan is not null)
         {
-            resolvedPlan = StampRequirePreferred(resolvedPlan, request.RequirePreferredExecutionProvider);
+            resolvedPlan = await RuntimePlannerPreferredVariantFallback.ResolveAsync(
+                new PreferredVariantFallbackRequest
+                {
+                    ResolvedPlan = resolvedPlan,
+                    PreferredVariantAlias = context.Request.NormalizedPreferredModelVariantAlias,
+                    RequirePreferredExecutionProvider = request.RequirePreferredExecutionProvider,
+                    ResolveFallbackAsync = (alias, token) => ResolveWithoutPreferredVariantAsync(
+                        context, snapshot.CacheKey, alias, token)
+                },
+                cancellationToken).ConfigureAwait(false);
             TryCachePlan(snapshot.CacheKey, resolvedPlan);
             return resolvedPlan;
         }
@@ -158,6 +167,7 @@ public sealed class RuntimePlanner : IRuntimePlanner
             SourceLanguage: request.SourceLanguage,
             TargetLanguage: request.TargetLanguage,
             ModelTier: request.PreferredModelTier,
+            PreferredEngineFamily: request.PreferredEngineFamily,
             ExclusionSetSnapshot: exclusionSnapshot,
             NvidiaGpuArchitecture: hardwareProfile.NvidiaGpuArchitecture,
             SkipProviderSmokeTest: request.SkipProviderSmokeTest);
@@ -248,7 +258,7 @@ public sealed class RuntimePlanner : IRuntimePlanner
                 new RuntimePlanFallback(RuntimePlanFallbackCode.NoCompatibleVariant, message)),
             request.RequirePreferredExecutionProvider);
 
-    private static StageRuntimePlan StampRequirePreferred(StageRuntimePlan plan, bool requirePreferredExecutionProvider) =>
+    internal static StageRuntimePlan StampRequirePreferred(StageRuntimePlan plan, bool requirePreferredExecutionProvider) =>
         plan.RequirePreferredExecutionProvider == requirePreferredExecutionProvider
             ? plan
             : plan with { RequirePreferredExecutionProvider = requirePreferredExecutionProvider };
@@ -553,6 +563,7 @@ internal sealed record PlanCacheKey(
     string? SourceLanguage,
     string? TargetLanguage,
     string? ModelTier,
+    string? PreferredEngineFamily,
     string ExclusionSetSnapshot,
     NvidiaGpuArchitectureBucket NvidiaGpuArchitecture,
     bool SkipProviderSmokeTest);

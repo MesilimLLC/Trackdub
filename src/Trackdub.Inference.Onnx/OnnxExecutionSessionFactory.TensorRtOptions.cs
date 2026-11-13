@@ -52,6 +52,17 @@ internal static partial class OnnxExecutionSessionFactory
     /// </summary>
     internal const bool DefaultEnableCudaGraph = true;
 
+    // Classic TensorRT EP uses trt_profile_*. NvTensorRTRTX rejects those keys.
+    // Same shape grammar: "input:dim1xdim2x...,input2:..."
+    // https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html
+    private static readonly IReadOnlyDictionary<string, string> ClassicTrtProfileKeysToNvRtx =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["trt_profile_min_shapes"] = "nv_profile_min_shapes",
+            ["trt_profile_max_shapes"] = "nv_profile_max_shapes",
+            ["trt_profile_opt_shapes"] = "nv_profile_opt_shapes",
+        };
+
     /// <summary>
     /// Builds TensorRT-RTX provider options.
     /// </summary>

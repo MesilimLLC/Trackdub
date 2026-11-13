@@ -30,8 +30,9 @@ public sealed class PhiGenAiTranslationEngine(
     IRuntimePlanningPreferences? runtimePlanningPreferences = null,
     IApplicationLogger? applicationLogger = null,
     string engineFamily = PhiGenAiTranslationEngine.EngineFamilyName,
-    IInferenceWorkerClient? workerClient = null)
-    : IStreamingTranslationEngineAdapter, IStageRuntimeExecutionReporter
+    IInferenceWorkerClient? workerClient = null,
+    bool inferenceWorkerProcess = false)
+    : IStreamingTranslationEngineAdapter, IStageRuntimeExecutionReporter, ITranslationExecutionMetadataReporter
 {
     public const string EngineFamilyName = "phi-genai";
     public const string QwenEngineFamilyName = "qwen-genai";
@@ -44,6 +45,7 @@ public sealed class PhiGenAiTranslationEngine(
     private const string HfConfigFileName = "config.json";
     private const int MaxNewTokens = 512;
     private const double RepetitionPenalty = 1.1;
+    private const string PromptDefangingCharacter = "\u200B";
 
     private static readonly (string OpenTag, string CloseTag)[] ThinkingBlockTags =
     [
@@ -62,6 +64,16 @@ public sealed class PhiGenAiTranslationEngine(
         "<turn|>",
         "<eos>"
     ];
+
+    private static readonly IReadOnlyDictionary<GenAiTranslationPromptFormat, string[]> PromptControlTokens =
+        new Dictionary<GenAiTranslationPromptFormat, string[]>
+        {
+            [GenAiTranslationPromptFormat.Qwen3] = ["<|im_start|>", "<|im_end|>", "<|im_sep|>"],
+            [GenAiTranslationPromptFormat.QwenChatMl] = ["<|im_start|>", "<|im_end|>", "<|im_sep|>"],
+            [GenAiTranslationPromptFormat.Gemma3] = ["<start_of_turn>", "<end_of_turn>", "<bos>", "<eos>"],
+            [GenAiTranslationPromptFormat.Gemma4] = ["<|turn>", "<turn|>", "<bos>", "<eos>"],
+            [GenAiTranslationPromptFormat.Phi] = ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>", "<|endoftext|>"]
+        };
 
     private static readonly IReadOnlyDictionary<string, string> TargetLanguageNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -89,16 +101,19 @@ public sealed class PhiGenAiTranslationEngine(
             ["sw"] = "Swahili",
             ["tr"] = "Turkish",
             ["zh"] = "Chinese",
-            ["zh-hans"] = "Chinese",
-            ["zh-hant"] = "Chinese"
+            ["zh-hans"] = "Simplified Chinese",
+            ["zh-hant"] = "Traditional Chinese"
         };
 
     private readonly IRuntimePlanner runtimePlanner = runtimePlanner ?? throw new ArgumentNullException(nameof(runtimePlanner));
     private readonly BenchmarkModelPathResolver modelPathResolver = modelPathResolver ?? throw new ArgumentNullException(nameof(modelPathResolver));
     private readonly IApplicationLogger? applicationLogger = applicationLogger;
     private readonly string engineFamily = string.IsNullOrWhiteSpace(engineFamily) ? EngineFamilyName : engineFamily.Trim();
+    private readonly bool inferenceWorkerProcess = inferenceWorkerProcess;
 
     public StageRuntimeExecutionSummary? LastExecutionSummary { get; private set; }
+
+    public TranslationExecutionMetadata? LastExecutionMetadata { get; private set; }
 
     public string EngineFamily => engineFamily;
 
@@ -117,17 +132,22 @@ public sealed class PhiGenAiTranslationEngine(
 
         StageRuntimePlan plan = await PlanTranslationAsync(request, cancellationToken).ConfigureAwait(false);
         EnsurePlanReady(plan);
+        LastExecutionSummary = null;
+        SetExecutionMetadata(request, plan);
 
         if (request.Segments.Count == 0)
         {
             LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.", ran: false);
+            SetExecutionMetadata(request, plan);
             return [];
         }
 
         if (UseCudaWorker(plan))
         {
-            WorkerTranslationResult result = await workerClient!.TranslateAsync(request, plan, cancellationToken).ConfigureAwait(false);
+            WorkerTranslationResult result = await workerClient!.TranslateAsync(
+                request, plan, cancellationToken, nonEvictingWarmup: NonEvictingWarmup).ConfigureAwait(false);
             LastExecutionSummary = result.ExecutionSummary;
+            SetExecutionMetadata(request, plan);
             return result.Segments;
         }
 
@@ -164,6 +184,7 @@ public sealed class PhiGenAiTranslationEngine(
         }
 
         LastExecutionSummary = CreateExecutionSummary(plan, $"ONNX Runtime GenAI {engineFamily} text generation.");
+        SetExecutionMetadata(request, plan);
         return translatedSegments;
     }
 
@@ -184,27 +205,22 @@ public sealed class PhiGenAiTranslationEngine(
 
         StageRuntimePlan plan = await PlanTranslationAsync(request, cancellationToken).ConfigureAwait(false);
         EnsurePlanReady(plan);
+        LastExecutionSummary = null;
+        SetExecutionMetadata(request, plan);
 
         if (request.Segments.Count == 0)
         {
             LastExecutionSummary = CreateExecutionSummary(plan, "Translation skipped: no segments.", ran: false);
+            SetExecutionMetadata(request, plan);
             yield break;
         }
 
         if (UseCudaWorker(plan))
         {
-            long workerSequence = 0;
-            foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
-            {
-                WorkerTranslationResult result = await workerClient!.TranslateAsync(
-                    request with { Segments = [segment] }, plan, cancellationToken).ConfigureAwait(false);
-                LastExecutionSummary = result.ExecutionSummary;
-                foreach (TranslatedTextSegment translated in result.Segments)
-                {
-                    yield return PipelineStreamItemFactory.CreateTranslation(
-                        translated, runId, snapshotId, sourceRevisionId, workerSequence++);
-                }
-            }
+            var streamContext = new TranslationStreamContext(runId, snapshotId, sourceRevisionId);
+            await foreach (PipelineStreamItem<TranslatedTextSegment> item in TranslateOnWorkerAsync(
+                request, plan, streamContext, cancellationToken))
+                yield return item;
             yield break;
         }
 
@@ -244,6 +260,7 @@ public sealed class PhiGenAiTranslationEngine(
             }
 
             LastExecutionSummary = CreateExecutionSummary(plan, $"ONNX Runtime GenAI {engineFamily} text generation.");
+            SetExecutionMetadata(request, plan);
             yield return PipelineStreamItemFactory.CreateTranslation(
                 translated, runId, snapshotId, sourceRevisionId, sequence++);
         }
@@ -262,11 +279,62 @@ public sealed class PhiGenAiTranslationEngine(
                 "(GenAI pool at capacity or admission budget full). The stage will load it inline.");
     }
 
-    private bool UseCudaWorker(StageRuntimePlan plan) =>
-        OperatingSystem.IsWindows() &&
-        plan.ExecutionProvider == ExecutionProviderKind.Cuda &&
-        string.Equals(engineFamily, QwenEngineFamilyName, StringComparison.OrdinalIgnoreCase) &&
-        workerClient is not null;
+    private async IAsyncEnumerable<PipelineStreamItem<TranslatedTextSegment>> TranslateOnWorkerAsync(
+        TranslationRequest request,
+        StageRuntimePlan plan,
+        TranslationStreamContext streamContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        long sequence = 0;
+        foreach (TranslationInputSegment segment in request.Segments.OrderBy(static s => s.Index))
+        {
+            WorkerTranslationResult result = await workerClient!.TranslateAsync(
+                request with { Segments = [segment] }, plan, cancellationToken,
+                nonEvictingWarmup: NonEvictingWarmup).ConfigureAwait(false);
+            LastExecutionSummary = result.ExecutionSummary;
+            SetExecutionMetadata(request, plan);
+            foreach (TranslatedTextSegment translated in result.Segments)
+            {
+                yield return PipelineStreamItemFactory.CreateTranslation(
+                    translated, streamContext.RunId, streamContext.SnapshotId,
+                    streamContext.SourceRevisionId, sequence++);
+            }
+        }
+    }
+
+    private readonly record struct TranslationStreamContext(
+        Guid RunId,
+        string SnapshotId,
+        Guid SourceRevisionId);
+
+    private bool UseCudaWorker(StageRuntimePlan plan)
+    {
+        bool isWindowsCudaQwenHostPlan = OperatingSystem.IsWindows() &&
+            plan.ExecutionProvider == ExecutionProviderKind.Cuda &&
+            string.Equals(engineFamily, QwenEngineFamilyName, StringComparison.OrdinalIgnoreCase) &&
+            !inferenceWorkerProcess;
+        if (!isWindowsCudaQwenHostPlan)
+        {
+            return false;
+        }
+
+        if (workerClient is { IsInstalled: true })
+        {
+            return true;
+        }
+
+        throw new InvalidOperationException(
+            "CUDA translation requires the inference worker, which is not installed.");
+    }
+
+    private void SetExecutionMetadata(TranslationRequest request, StageRuntimePlan plan) =>
+        LastExecutionMetadata = new TranslationExecutionMetadata(
+            engineFamily,
+            LastExecutionSummary?.ModelId ?? plan.ModelId,
+            LastExecutionSummary?.ModelAlias ?? plan.ModelAlias,
+            LastExecutionSummary?.SelectedProvider ?? plan.ExecutionProvider?.ToString(),
+            TranslationRoutingKind.Pivot,
+            request.ModelProvenance);
 
     private async Task<StageRuntimePlan> PlanTranslationAsync(
         TranslationRequest request,
@@ -341,17 +409,19 @@ public sealed class PhiGenAiTranslationEngine(
 
         ReadOnlySpan<int> fullSequence = generator.GetSequence(0);
         string decoded = tokenizer.Decode(fullSequence[promptLength..]);
-        return CleanDecodedTranslation(decoded);
+        return CleanDecodedTranslation(decoded, promptContext.PromptFormat);
     }
 
-    internal static string CleanDecodedTranslation(string decoded)
+    internal static string CleanDecodedTranslation(
+        string decoded,
+        GenAiTranslationPromptFormat promptFormat = GenAiTranslationPromptFormat.Phi)
     {
         if (string.IsNullOrWhiteSpace(decoded))
         {
             return string.Empty;
         }
 
-        string result = StripThinkingBlocks(decoded);
+        string result = StripThinkingBlocks(decoded, promptFormat);
         foreach (string suffix in EosTokenSuffixes)
         {
             int suffixIndex = result.IndexOf(suffix, StringComparison.Ordinal);
@@ -364,27 +434,51 @@ public sealed class PhiGenAiTranslationEngine(
         return result.Trim();
     }
 
-    private static string StripThinkingBlocks(string text)
+    private static string StripThinkingBlocks(string text, GenAiTranslationPromptFormat promptFormat)
     {
         string result = text;
+        bool hasPrefilledThinkOpener = promptFormat == GenAiTranslationPromptFormat.Qwen3;
         foreach ((string openTag, string closeTag) in ThinkingBlockTags)
         {
-            while (true)
-            {
-                int closeIndex = result.IndexOf(closeTag, StringComparison.Ordinal);
-                if (closeIndex < 0)
-                {
-                    break;
-                }
-
-                int openIndex = result.LastIndexOf(openTag, closeIndex, StringComparison.Ordinal);
-                result = openIndex >= 0
-                    ? string.Concat(result.AsSpan(0, openIndex), result.AsSpan(closeIndex + closeTag.Length))
-                    : result[(closeIndex + closeTag.Length)..];
-            }
+            result = StripThinkingBlock(result, openTag, closeTag, ref hasPrefilledThinkOpener);
         }
 
         return result;
+    }
+
+    private static string StripThinkingBlock(
+        string text,
+        string openTag,
+        string closeTag,
+        ref bool hasPrefilledThinkOpener)
+    {
+        while (true)
+        {
+            int closeIndex = text.IndexOf(closeTag, StringComparison.Ordinal);
+            if (closeIndex < 0)
+            {
+                int openIndex = text.IndexOf(openTag, StringComparison.Ordinal);
+                if (openIndex >= 0)
+                {
+                    return text[..openIndex];
+                }
+
+                return hasPrefilledThinkOpener ? string.Empty : text;
+            }
+
+            int matchingOpenIndex = text.LastIndexOf(openTag, closeIndex, StringComparison.Ordinal);
+            if (matchingOpenIndex >= 0)
+            {
+                text = string.Concat(text.AsSpan(0, matchingOpenIndex), text.AsSpan(closeIndex + closeTag.Length));
+                hasPrefilledThinkOpener = false;
+                continue;
+            }
+
+            text = hasPrefilledThinkOpener
+                ? text[(closeIndex + closeTag.Length)..]
+                : string.Concat(text.AsSpan(0, closeIndex), text.AsSpan(closeIndex + closeTag.Length));
+            hasPrefilledThinkOpener = false;
+        }
     }
 
     internal static GenAiTranslationPromptFormat ResolvePromptFormat(
@@ -464,10 +558,11 @@ public sealed class PhiGenAiTranslationEngine(
 
     internal static string BuildSystemInstruction(
         string targetLanguageName,
-        IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null)
+        IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null,
+        GenAiTranslationPromptFormat promptFormat = GenAiTranslationPromptFormat.Phi)
     {
         var builder = new StringBuilder();
-        builder.Append($"Translate the input to {targetLanguageName}. Output only the translation, no explanation.");
+        builder.Append($"Translate the input to {DefangPromptControlTokens(targetLanguageName, promptFormat)}. Output only the translation, no explanation.");
 
         if (glossaryHints is { Count: > 0 })
         {
@@ -476,19 +571,20 @@ public sealed class PhiGenAiTranslationEngine(
                 ", ",
                 glossaryHints
                     .Take(MaxGlossaryHintsInInstruction)
-                    .Select(static g => $"{BoundGlossaryTerm(g.SourceTerm)} -> {BoundGlossaryTerm(g.TargetTerm)}")));
+                    .Select(g => $"{BoundGlossaryTerm(g.SourceTerm, promptFormat)} -> {BoundGlossaryTerm(g.TargetTerm, promptFormat)}")));
             builder.Append('.');
         }
 
         return builder.ToString();
     }
 
-    private static string BoundGlossaryTerm(string term)
+    private static string BoundGlossaryTerm(string term, GenAiTranslationPromptFormat promptFormat)
     {
         string flattened = term.Trim().ReplaceLineEndings(" ");
-        return flattened.Length <= MaxGlossaryTermLength
+        string bounded = flattened.Length <= MaxGlossaryTermLength
             ? flattened
             : flattened[..MaxGlossaryTermLength];
+        return DefangPromptControlTokens(bounded, promptFormat);
     }
 
     internal static string BuildTranslationPrompt(
@@ -497,33 +593,51 @@ public sealed class PhiGenAiTranslationEngine(
         GenAiTranslationPromptFormat promptFormat = GenAiTranslationPromptFormat.Phi,
         IReadOnlyList<TranslationGlossaryHint>? glossaryHints = null)
     {
-        string systemInstruction = BuildSystemInstruction(targetLanguageName, glossaryHints);
+        string systemInstruction = BuildSystemInstruction(targetLanguageName, glossaryHints, promptFormat);
+        string safeSourceText = DefangPromptControlTokens(sourceText, promptFormat);
 
         return promptFormat switch
         {
             GenAiTranslationPromptFormat.Qwen3 =>
                 $"<|im_start|>system\n{systemInstruction}<|im_end|>\n" +
-                $"<|im_start|>user\n{sourceText}<|im_end|>\n" +
+                $"<|im_start|>user\n{safeSourceText}<|im_end|>\n" +
                 "<|im_start|>assistant\n<think>\n\n</think>\n\n",
             GenAiTranslationPromptFormat.QwenChatMl =>
                 $"<|im_start|>system\n{systemInstruction}<|im_end|>\n" +
-                $"<|im_start|>user\n{sourceText}<|im_end|>\n" +
+                $"<|im_start|>user\n{safeSourceText}<|im_end|>\n" +
                 "<|im_start|>assistant\n",
             GenAiTranslationPromptFormat.Gemma4 =>
                 $"<bos><|turn>system\n{systemInstruction}<turn|>\n" +
-                $"<|turn>user\n{sourceText}<turn|>\n" +
+                $"<|turn>user\n{safeSourceText}<turn|>\n" +
                 "<|turn>model\n",
             GenAiTranslationPromptFormat.Gemma3 =>
-                $"<start_of_turn>user\n{systemInstruction}\n\n{sourceText}<end_of_turn>\n" +
+                $"<start_of_turn>user\n{systemInstruction}\n\n{safeSourceText}<end_of_turn>\n" +
                 "<start_of_turn>model\n",
             _ =>
                 $"<|system|>\n{systemInstruction}<|end|>\n" +
-                $"<|user|>\n{sourceText}<|end|>\n" +
+                $"<|user|>\n{safeSourceText}<|end|>\n" +
                 "<|assistant|>\n"
         };
     }
 
-    private static string ResolveTargetLanguageName(string targetLanguageCode)
+    private static string DefangPromptControlTokens(
+        string text,
+        GenAiTranslationPromptFormat promptFormat)
+    {
+        if (!PromptControlTokens.TryGetValue(promptFormat, out string[]? controlTokens))
+        {
+            controlTokens = PromptControlTokens[GenAiTranslationPromptFormat.Phi];
+        }
+
+        foreach (string token in controlTokens)
+        {
+            text = text.Replace(token, token.Insert(1, PromptDefangingCharacter), StringComparison.Ordinal);
+        }
+
+        return text;
+    }
+
+    internal static string ResolveTargetLanguageName(string targetLanguageCode)
     {
         string code = targetLanguageCode.Trim();
         return TargetLanguageNames.TryGetValue(code, out string? name) ? name : code;

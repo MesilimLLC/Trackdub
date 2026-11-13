@@ -22,7 +22,6 @@ public sealed class GenAiTensorRtExclusionTests
             yield return [RuntimeStage.Translation, "phi-genai"];
             yield return [RuntimeStage.Translation, "qwen-genai"];
             yield return [RuntimeStage.Translation, "gemma-genai"];
-            yield return [RuntimeStage.Translation, "qwen-instruct"];
             yield return [RuntimeStage.TextRefinement, "qwen-instruct"];
             yield return [RuntimeStage.TextRefinement, "phi-genai"];
         }
@@ -47,6 +46,16 @@ public sealed class GenAiTensorRtExclusionTests
         // The bundled GenAI exports are not DirectML exports (Whisper crashes the host on DirectML).
         Assert.DoesNotContain(ExecutionProviderKind.DirectMl, allowed);
         Assert.Contains(ExecutionProviderKind.Cpu, allowed);
+    }
+
+    [Fact]
+    public void QwenInstructRemainsTextRefinementOnly()
+    {
+        StageRuntimeRequirements translation = StageRuntimeRequirementsCatalog.All[RuntimeStage.Translation];
+        StageRuntimeRequirements textRefinement = StageRuntimeRequirementsCatalog.All[RuntimeStage.TextRefinement];
+
+        Assert.DoesNotContain("qwen-instruct", translation.AllowedProvidersByEngineFamily!.Keys);
+        Assert.Contains("qwen-instruct", textRefinement.AllowedProvidersByEngineFamily!.Keys);
     }
 
     [Theory]

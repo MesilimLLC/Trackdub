@@ -15,9 +15,19 @@ using Trackdub.Inference.Runtime.Planning;
 Stream input = Console.OpenStandardInput();
 Stream output = Console.OpenStandardOutput();
 
-// Bind the worker's pinned stock ORT before the first managed ORT call. The dependency
-// graph also contains Windows ML assets, so default native probing can select those.
-GenAiNativeRuntimeSelection.EnsureOrtLoaded(requireVerified: true);
+// Bind stock ORT before the first managed ORT call. The dependency graph also contains
+// Windows ML assets, so default native probing can select those. The worker can still
+// answer Hello when the loaded ORT has no GenAI provenance; the GenAI path verifies its
+// native pair immediately before loading GenAI.
+string? ortUnavailableDetail = null;
+try
+{
+    GenAiNativeRuntimeSelection.EnsureOrtLoaded(requireVerified: false);
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("ORT path is missing", StringComparison.Ordinal))
+{
+    ortUnavailableDetail = ex.Message;
+}
 
 // Opt-in EcoQoS (MS efficiency guidance, CPU workloads): the worker is a background helper
 // process, so operators may prefer efficiency-oriented CPU scheduling for it. The variable is
@@ -109,7 +119,8 @@ static async Task<WorkerTranslationResult> TranslateAsync(WorkerTranslationReque
     var engine = new PhiGenAiTranslationEngine(
         new SuppliedTranslationPlan(request.Plan.ToStageRuntimePlan()),
         BenchmarkModelPathResolver.CreateDefault(),
-        engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName)
+        engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName,
+        inferenceWorkerProcess: true)
     {
         NonEvictingWarmup = request.NonEvictingWarmup,
     };
@@ -129,8 +140,18 @@ static bool SupportsTranslationRequest(WorkerTranslationRequest request) =>
     && request.Plan.Stage == Trackdub.Domain.RuntimeStage.Translation
     && request.Plan.ExecutionProvider == Trackdub.Domain.ExecutionProviderKind.Cuda;
 
-static WorkerHelloResult DescribeWorker()
+WorkerHelloResult DescribeWorker()
 {
+    if (ortUnavailableDetail is string unavailableDetail)
+    {
+        return new WorkerHelloResult(
+            InferenceWorkerProtocol.Version,
+            InferenceWorkerProtocol.BuildStamp,
+            "unavailable",
+            CudaAvailable: false,
+            CudaDetail: $"Native ONNX Runtime is unavailable: {unavailableDetail}");
+    }
+
     bool cudaListed = CudaOrtProbe.IsCudaProviderListed();
     bool cuDnn = CudaOrtProbe.IsCuDnn9Available();
     string detail = (cudaListed, cuDnn) switch

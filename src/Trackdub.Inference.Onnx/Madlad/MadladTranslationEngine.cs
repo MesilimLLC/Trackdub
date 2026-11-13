@@ -287,7 +287,11 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
         CancellationToken cancellationToken)
     {
         using OnnxExecutionSessionFactory.OpusSessionLease lease = await AcquireLeaseAsync(
-            new StageRuntimePlan { ExecutionProvider = request.ExecutionProvider },
+            new StageRuntimePlan
+            {
+                ExecutionProvider = request.ExecutionProvider,
+                HasExplicitProviderPreference = request.HasExplicitProviderPreference
+            },
             encoderPath, decoderPath, cancellationToken).ConfigureAwait(false);
         if (lease.SelectedProviderKind != request.ExecutionProvider)
         {

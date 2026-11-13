@@ -41,13 +41,13 @@ public sealed partial class TranslationLanguageRouterTests
     [InlineData("phi-genai")]
     [InlineData("qwen-genai")]
     [InlineData("gemma-genai")]
-    [InlineData("qwen-instruct")]
     public void IsGenAiPivotEngineFamily_AcceptsSupportedFamilies(string engineFamily) =>
         Assert.True(TranslationLanguageRouter.IsGenAiPivotEngineFamily(engineFamily));
 
     [Theory]
     [InlineData("madlad")]
     [InlineData("gemma-4-translation")]
+    [InlineData("qwen-instruct")]
     [InlineData(null)]
     public void IsGenAiPivotEngineFamily_RejectsOtherFamilies(string? engineFamily) =>
         Assert.False(TranslationLanguageRouter.IsGenAiPivotEngineFamily(engineFamily));
@@ -88,4 +88,105 @@ public sealed partial class TranslationLanguageRouterTests
         Assert.Equal("microsoft/Phi-3.5-mini-instruct-onnx", route.ModelId);
         Assert.Equal("phi-genai-pivot", route.PreferredModelAlias);
     }
+
+    [Fact]
+    public async Task ResolveRouteAsync_WhenGenAiPivotSelectsVariant_UsesVariantProvenance()
+    {
+        const string modelId = "microsoft/Phi-3.5-mini-instruct-onnx";
+        const string repositoryRevision = "0123456789abcdef0123456789abcdef01234567";
+        const string defaultEntryHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string variantEntryHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        const string variantWeightsHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        var fixture = new VariantProvenanceFixture(
+            repositoryRevision,
+            defaultEntryHash,
+            variantEntryHash,
+            variantWeightsHash);
+        using var workspace = new TranslationRouterTestWorkspace();
+        string modelRoot = workspace.CreateCacheRoot(modelId);
+        workspace.WriteCacheFile(modelRoot, "cuda-int4/genai_config.json", "{}");
+        workspace.WriteCacheFile(modelRoot, "cuda-int4/model.onnx", "weights");
+        BundledModelManifestRegistry registry = WriteVariantProvenanceManifest(
+            workspace.RootPath,
+            modelId,
+            fixture);
+        var router = new TranslationLanguageRouter(
+            registry,
+            new InMemoryModelCacheInventory(
+                [new LocalModelCacheRecord(modelId, modelRoot, repositoryRevision, defaultEntryHash, DateTimeOffset.UtcNow)]));
+
+        TranslationRouteSelection route = await router.ResolveRouteAsync("en", "fr", CancellationToken.None);
+
+        Assert.True(route.IsAvailable);
+        Assert.EndsWith(
+            Path.Join("cuda-int4", "genai_config.json"),
+            route.ResolvedModelEntryPath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(route.ModelProvenance);
+        Assert.Equal(repositoryRevision, route.ModelProvenance.Revision);
+        Assert.Equal(variantEntryHash, route.ModelProvenance.Sha256);
+        Assert.Equal(
+            new[] { "cuda-int4/genai_config.json", "cuda-int4/model.onnx" },
+            route.ModelProvenance.FileHashes.Keys.OrderBy(static path => path, StringComparer.Ordinal).ToArray());
+    }
+
+    private static BundledModelManifestRegistry WriteVariantProvenanceManifest(
+        string workspaceRoot,
+        string modelId,
+        VariantProvenanceFixture fixture)
+    {
+        string manifestPath = Path.Join(workspaceRoot, "bundled-models.manifest.json");
+        string manifestJson = $$"""
+            {
+              "models": [
+                {
+                  "model_id": "{{modelId}}",
+                  "task": "translation",
+                  "engine_family": "phi-genai",
+                  "capabilities": ["translation", "pivot-translation"],
+                  "language_coverage": {
+                    "source_languages": ["multi"],
+                    "target_languages": ["multi"],
+                    "language_pairs": []
+                  },
+                  "tier": "quality",
+                  "license": "MIT",
+                  "commercial_allowed": true,
+                  "redistribution_allowed": true,
+                  "requires_attribution": true,
+                  "requires_user_consent": false,
+                  "voice_cloning": false,
+                  "commercial_use_verified": true,
+                  "source_url": "https://huggingface.co/{{modelId}}",
+                  "revision": "{{fixture.Revision}}",
+                  "sha256": "{{fixture.DefaultEntryHash}}",
+                  "download_files": ["default/genai_config.json", "cuda-int4/genai_config.json", "cuda-int4/model.onnx"],
+                  "download_file_hashes": {
+                    "default/genai_config.json": "{{fixture.DefaultEntryHash}}",
+                    "cuda-int4/genai_config.json": "{{fixture.VariantEntryHash}}",
+                    "cuda-int4/model.onnx": "{{fixture.VariantWeightsHash}}"
+                  },
+                  "aliases": ["phi-genai-pivot"],
+                  "root_path": "./manifest-models/phi-genai",
+                  "benchmark_entry": "default/genai_config.json",
+                  "variants": [
+                    {
+                      "alias": "cuda-int4",
+                      "entry_path": "cuda-int4/genai_config.json",
+                      "download_files": ["cuda-int4/genai_config.json", "cuda-int4/model.onnx"]
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+        File.WriteAllText(manifestPath, manifestJson);
+        return BundledModelManifestRegistry.Load(manifestPath);
+    }
+
+    private sealed record VariantProvenanceFixture(
+        string Revision,
+        string DefaultEntryHash,
+        string VariantEntryHash,
+        string VariantWeightsHash);
 }

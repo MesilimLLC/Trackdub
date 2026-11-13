@@ -23,6 +23,7 @@ namespace Trackdub.Inference.Onnx.Runtime.Planning;
 
 public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProviderSmokeTester
 {
+    private static readonly AsyncLocal<HashSet<string>?> SelectedProvidersForSmoke = new();
     private readonly GenAiModelPool genAiModelPool;
 
     public OnnxExecutionProviderSmokeTester()
@@ -234,8 +235,20 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
                 $"Smoke testing is not implemented for runtime stage '{request.Stage}'.");
         }
 
-        await handler(cancellationToken).ConfigureAwait(false);
-        return new ExecutionProviderSmokeTestResult(true);
+        var selectedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        SelectedProvidersForSmoke.Value = selectedProviders;
+        try
+        {
+            await handler(cancellationToken).ConfigureAwait(false);
+            string detail = selectedProviders.Count == 0
+                ? "Smoke test completed."
+                : $"Smoke test completed with effective provider(s): {string.Join(", ", selectedProviders.OrderBy(static provider => provider, StringComparer.OrdinalIgnoreCase))}.";
+            return new ExecutionProviderSmokeTestResult(true, detail);
+        }
+        finally
+        {
+            SelectedProvidersForSmoke.Value = null;
+        }
     }
 
     private Func<CancellationToken, Task>? ResolveStageHandler(ExecutionProviderSmokeTestRequest request)
@@ -451,8 +464,18 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         bool allowPolicyProviderSelection = false)
     {
         string requestedProviderLabel = FormatProviderLabel(requestedProvider);
-        if (allowPolicyProviderSelection || string.Equals(selectedProvider, requestedProviderLabel, StringComparison.OrdinalIgnoreCase))
+        bool matchesRequestedProvider = string.Equals(
+            selectedProvider,
+            requestedProviderLabel,
+            StringComparison.OrdinalIgnoreCase);
+        bool isAllowedPolicySelection = allowPolicyProviderSelection &&
+            !string.Equals(
+                selectedProvider,
+                FormatProviderLabel(ExecutionProviderKind.Cpu),
+                StringComparison.OrdinalIgnoreCase);
+        if (matchesRequestedProvider || isAllowedPolicySelection)
         {
+            SelectedProvidersForSmoke.Value?.Add(selectedProvider);
             return;
         }
 

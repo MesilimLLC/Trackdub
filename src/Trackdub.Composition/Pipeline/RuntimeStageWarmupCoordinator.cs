@@ -269,11 +269,7 @@ public sealed class RuntimeStageWarmupCoordinator(
             return true;
         }
 
-        return provider is not (
-            ExecutionProviderKind.Qnn or
-            ExecutionProviderKind.VitisAi or
-            ExecutionProviderKind.OpenVinoCatalog or
-            ExecutionProviderKind.Migraphx);
+        return !SmokeVerdictPolicy.IsWindowsMlPolicyDependent(provider);
     }
     private Task<ExecutionProviderSmokeTestResult> SmokeAsync(
         StageRuntimePlan plan,

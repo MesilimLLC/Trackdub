@@ -1016,7 +1016,7 @@ internal sealed class RuntimePlanFactory
         // The persisted key does not yet include the Windows ML device policy. A verdict
         // from a different policy cannot establish this session's actual placement.
         string.IsNullOrWhiteSpace(modelSha256) ||
-        (OperatingSystem.IsWindows() && provider is ExecutionProviderKind.Qnn or ExecutionProviderKind.VitisAi or ExecutionProviderKind.OpenVinoCatalog or ExecutionProviderKind.Migraphx)
+        (OperatingSystem.IsWindows() && SmokeVerdictPolicy.IsWindowsMlPolicyDependent(provider))
             ? null
             : new SmokeVerdictKey(
                 modelSha256,

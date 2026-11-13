@@ -27,6 +27,200 @@ namespace Trackdub.Inference.Onnx;
 
 internal static partial class OnnxExecutionSessionFactory
 {
+    private sealed class SessionOptionsDisposeHolder : IDisposable
+    {
+        public SessionOptionsDisposeHolder(SessionOptions current)
+        {
+            Current = current;
+        }
+
+        public SessionOptions Current { get; set; }
+
+        public void Dispose()
+        {
+            Current.Dispose();
+        }
+    }
+
+    internal sealed record SessionOptionsFactoryBundle(
+        Func<SessionOptions> CreateOptions,
+        ExecutionProviderKind RequestedProvider,
+        ExecutionProviderKind SelectedProvider,
+        string BootstrapDetail);
+
+    internal static async Task<SessionOptionsFactoryBundle> CreateSessionOptionsFactoryAsync(
+        ExecutionProviderKind requestedProvider,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions = null,
+        bool hasExplicitProviderPreference = false)
+    {
+        var bootstrapResult = await BootstrapTrackedAsync(requestedProvider, allowDownloads: true, cancellationToken)
+            .ConfigureAwait(false);
+        WindowsMlExecutionDevicePolicy devicePolicy = await ResolveDevicePolicyAsync(cancellationToken, hasExplicitProviderPreference)
+            .ConfigureAwait(false);
+        ExecutionProviderKind sessionProvider = ResolveSessionOptionsProvider(
+            requestedProvider,
+            bootstrapResult.SelectedProvider);
+        SessionOptionsSelection probeSelection = CreateSessionOptions(new SessionOptionsRequest(
+            sessionProvider,
+            devicePolicy,
+            additionalTrtOptions));
+        ExecutionProviderKind selectedProvider = probeSelection.SelectedProvider;
+        probeSelection.Options.Dispose();
+
+        return new SessionOptionsFactoryBundle(
+            () => CreateSessionOptions(new SessionOptionsRequest(sessionProvider, devicePolicy, additionalTrtOptions)).Options,
+            requestedProvider,
+            selectedProvider,
+            FormatBootstrapDetail(bootstrapResult.Detail, probeSelection.FallbackReason) ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Packaged DirectML is included with Windows ML. Catalog RegisterCertifiedAsync is not a
+    /// prerequisite for GetEpDevices/append, so a bootstrap CPU select must not skip the DML path.
+    /// Native CUDA on Windows still wins when bootstrap selected CUDA.
+    /// </summary>
+    internal static ExecutionProviderKind ResolveSessionOptionsProvider(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind bootstrapSelectedProvider)
+    {
+        if (requestedProvider is ExecutionProviderKind.DirectMl)
+        {
+            return OperatingSystem.IsWindows()
+                ? ExecutionProviderKind.DirectMl
+                : bootstrapSelectedProvider;
+        }
+
+        if (requestedProvider is ExecutionProviderKind.Cuda)
+        {
+            return bootstrapSelectedProvider is ExecutionProviderKind.Cpu && OperatingSystem.IsWindows()
+                ? ExecutionProviderKind.DirectMl
+                : bootstrapSelectedProvider;
+        }
+
+        return bootstrapSelectedProvider;
+    }
+
+    private static SessionPoolKey WithOpenVinoResidency(SessionPoolKey key) =>
+        key.Provider is ExecutionProviderKind.OpenVino
+            ? key with { UseOpenVinoCpuProxy = _openVinoAvailability.UseOpenVinoCpuProxy }
+            : key;
+
+    private static ExecutionProviderKind ResolveSharedSelectedProvider(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind firstSessionProvider,
+        ExecutionProviderKind secondSessionProvider)
+    {
+        if (firstSessionProvider == secondSessionProvider)
+        {
+            return firstSessionProvider;
+        }
+
+        return requestedProvider is ExecutionProviderKind.TensorRTRtx
+            ? ExecutionProviderKind.Cpu
+            : requestedProvider;
+    }
+
+    internal sealed record SessionOptionsSelection(
+        SessionOptions Options,
+        ExecutionProviderKind SelectedProvider,
+        string? FallbackReason = null);
+
+    private static string BuildSessionOptionsFingerprint(
+        ExecutionProviderKind selectedProviderKind,
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        IReadOnlyDictionary<string, string>? additionalTrtOptions,
+        bool enableCudaGraph = DefaultEnableCudaGraph)
+    {
+        if (selectedProviderKind is ExecutionProviderKind.TensorRTRtx)
+        {
+            var combinedOptions = new Dictionary<string, string>(
+                BuildTensorRtRtxOptions(additionalTrtOptions, enableCudaGraph), StringComparer.Ordinal);
+            return SessionPoolKey.HashOptions(combinedOptions);
+        }
+
+        if (selectedProviderKind is ExecutionProviderKind.TensorRt)
+        {
+            var combinedOptions = new Dictionary<string, string>(
+                BuildTensorRtOptions(additionalTrtOptions), StringComparer.Ordinal);
+            return SessionPoolKey.HashOptions(combinedOptions);
+        }
+
+        if (ShouldIncludePolicyInFingerprint(devicePolicy, selectedProviderKind))
+        {
+            return SessionPoolKey.HashOptions(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["windows_ml_device_policy"] = WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)
+            });
+        }
+
+        return SessionPoolKey.HashOptions(null);
+    }
+
+    private static bool ShouldIncludePolicyInFingerprint(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        ExecutionProviderKind selectedProviderKind) =>
+        ProviderNames.ShouldUseCatalogDevicePolicy(devicePolicy, selectedProviderKind);
+
+    private static string? MergeFallbackReasons(string? encoder, string? decoder) =>
+        (encoder, decoder) switch
+        {
+            (null, null) => null,
+            ({ } e, null) => e,
+            (null, { } d) => d,
+            ({ } e, { } d) when e == d => e,
+            ({ } e, { } d) => $"Encoder: {e} Decoder: {d}"
+        };
+
+    private static string? FormatBootstrapDetail(
+        string? bootstrapDetail,
+        string? sessionOptionsFallbackReason)
+    {
+        if (string.IsNullOrWhiteSpace(sessionOptionsFallbackReason))
+        {
+            return bootstrapDetail;
+        }
+
+        return string.IsNullOrWhiteSpace(bootstrapDetail)
+            ? $"Session options fallback reason: {sessionOptionsFallbackReason}"
+            : $"{bootstrapDetail} Session options fallback reason: {sessionOptionsFallbackReason}";
+    }
+
+    private static SessionOptions CreateBaseSessionOptions(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        out bool devicePolicyApplied,
+        bool tensorRtRtx = false,
+        string? logId = null)
+    {
+        SessionOptions options = new()
+        {
+            GraphOptimizationLevel = tensorRtRtx
+                ? GraphOptimizationLevel.ORT_ENABLE_BASIC
+                : GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            LogId = logId ?? string.Empty,
+            EnableCpuMemArena = !Common.SessionEfficiencyEnvironment.DisableCpuMemArena
+        };
+
+        devicePolicyApplied = false;
+#if WINDOWS
+        devicePolicyApplied = WindowsMlExecutionDevicePolicyMapper.ApplyIfNeeded(options, devicePolicy);
+#endif
+        return options;
+    }
+
+    /// <summary>
+    /// Reports when the runtime did not apply a requested Windows ML device policy, so
+    /// diagnostics and fingerprints do not claim behavior that never took effect.
+    /// </summary>
+    private static string? BuildDevicePolicyFallbackReason(
+        WindowsMlExecutionDevicePolicy devicePolicy,
+        bool devicePolicyApplied) =>
+        !devicePolicyApplied && devicePolicy != WindowsMlExecutionDevicePolicy.Explicit
+            ? $"Requested Windows ML device policy '{WindowsMlExecutionDevicePolicySettings.ToKey(devicePolicy)}' " +
+              "was not applied by the loaded runtime; the session falls back to explicit provider selection."
+            : null;
+
     internal sealed record SessionOptionsRequest(
         ExecutionProviderKind Provider,
         WindowsMlExecutionDevicePolicy DevicePolicy,

@@ -157,7 +157,6 @@ internal static class StageRuntimeRequirementsCatalog
                     ["phi-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
                     ["qwen-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
                     ["gemma-genai"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
-                    ["qwen-instruct"] = GenAiProviders(DefaultOnnxStageAllowedProviders),
                 }),
             [RuntimeStage.Diarization] = new(
                 RuntimeStage.Diarization,

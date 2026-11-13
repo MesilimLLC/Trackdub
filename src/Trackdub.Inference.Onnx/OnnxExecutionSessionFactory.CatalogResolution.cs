@@ -65,6 +65,118 @@ internal static partial class OnnxExecutionSessionFactory
     internal static ExecutionProviderKind ResolveCatalogEffectiveProviderFromSession(InferenceSession session) =>
         ResolveBestCatalogProvider(GetEpDevicesForInputs(session));
 
+    /// <summary>Where ORT placed this graph; a catalog EP that placed no mapped nodes reports CPU.</summary>
+    private static ExecutionProviderKind ResolveEffectiveProvider(
+        InferenceSession session,
+        SessionOptionsSelection selection,
+        WindowsMlExecutionDevicePolicy devicePolicy) =>
+        ResolveEffectiveProviderKindFromSession(
+            session,
+            selection.SelectedProvider,
+            ProviderNames.ShouldUseCatalogDevicePolicy(devicePolicy, selection.SelectedProvider));
+
+    internal static ExecutionProviderKind ResolveEffectiveProviderKindFromSession(
+        InferenceSession session,
+        ExecutionProviderKind optionsSelectedProvider,
+        bool usedCatalogDevicePolicy) =>
+        ResolveEffectiveProviderSelectionFromSession(session, optionsSelectedProvider, usedCatalogDevicePolicy).Provider;
+
+    internal static EffectiveProviderResolution ResolveEffectiveProviderSelectionFromSession(
+        InferenceSession session,
+        ExecutionProviderKind optionsSelectedProvider,
+        bool usedCatalogDevicePolicy)
+    {
+        // DNNL can append successfully while ORT places unsupported graph nodes on CPU.
+        if (optionsSelectedProvider is ExecutionProviderKind.Dnnl)
+        {
+            return new EffectiveProviderResolution(ResolveDnnlEffectiveProviderFromSession(session), null);
+        }
+
+        // Native ORT CUDA / classic TensorRT are not WinML catalog EP names.
+        if (optionsSelectedProvider is ExecutionProviderKind.Cuda or ExecutionProviderKind.TensorRt)
+        {
+            return new EffectiveProviderResolution(optionsSelectedProvider, null);
+        }
+
+        // Linux OpenVINO uses the same EP name as the Windows ML catalog registration.
+        if (optionsSelectedProvider is ExecutionProviderKind.OpenVino)
+        {
+            EffectiveProviderResolution openVinoResolution = ResolveCatalogEffectiveProviderSelection(GetEpDevicesForInputs(session));
+            return openVinoResolution.Provider is ExecutionProviderKind.OpenVinoCatalog
+                ? openVinoResolution with { Provider = ExecutionProviderKind.OpenVino }
+                : openVinoResolution with { Provider = ExecutionProviderKind.Cpu };
+        }
+
+        // Probe catalog placement so CPU-only and unreported placement are labeled conservatively.
+        if (usedCatalogDevicePolicy)
+        {
+            return ResolveCatalogEffectiveProviderSelection(GetEpDevicesForInputs(session));
+        }
+
+        if (ShouldProbeEffectiveEpDevices(optionsSelectedProvider))
+        {
+            return new EffectiveProviderResolution(ResolveCatalogEffectiveProviderFromSession(session), null);
+        }
+
+        return new EffectiveProviderResolution(optionsSelectedProvider, null);
+    }
+
+    internal static EffectiveProviderResolution ResolveCatalogEffectiveProviderSelection(
+        IReadOnlyList<OrtEpDevice> devices)
+    {
+        if (!devices.Any(device => TryMapCatalogEpNameToExecutionProviderKind(device.EpName, out _)))
+        {
+            return new EffectiveProviderResolution(
+                ExecutionProviderKind.Cpu,
+                "Session placement could not be established; reporting CPU conservatively.");
+        }
+
+        return new EffectiveProviderResolution(ResolveBestCatalogProvider(devices), null);
+    }
+
+    internal readonly record struct EffectiveProviderResolution(
+        ExecutionProviderKind Provider,
+        string? FallbackReason);
+
+    private static bool ShouldProbeEffectiveEpDevices(ExecutionProviderKind optionsSelectedProvider) =>
+        optionsSelectedProvider is ExecutionProviderKind.TensorRTRtx
+            or ExecutionProviderKind.DirectMl
+            or ExecutionProviderKind.Migraphx
+            or ExecutionProviderKind.Qnn
+            or ExecutionProviderKind.OpenVinoCatalog
+            or ExecutionProviderKind.VitisAi;
+
+    private static ExecutionProviderKind ResolveDnnlEffectiveProviderFromSession(InferenceSession session)
+    {
+        try
+        {
+            IReadOnlyList<OrtEpDevice> devices = session.GetEpDeviceForInputs();
+            return devices.Any(device => DnnlOrtProbe.IsDnnlExecutionProviderName(device.EpName))
+                ? ExecutionProviderKind.Dnnl
+                : ExecutionProviderKind.Cpu;
+        }
+        catch (OnnxRuntimeException)
+        {
+            return ExecutionProviderKind.Cpu;
+        }
+    }
+
+    private static string? BuildEpFallbackReason(ExecutionProviderKind requestedProvider, ExecutionProviderKind effectiveProvider) =>
+        effectiveProvider != requestedProvider
+            ? $"Requested {ProviderNames.FormatProviderLabel(requestedProvider)} but effective {ProviderNames.FormatProviderLabel(effectiveProvider)}."
+            : null;
+
+    private static string? BuildSessionOptionsFallbackReason(
+        ExecutionProviderKind requestedProvider,
+        ExecutionProviderKind effectiveProvider,
+        SessionOptionsSelection sessionOptionsSelection,
+        string? providerResolutionFallbackReason = null) =>
+        MergeFallbackReasons(
+            MergeFallbackReasons(
+                sessionOptionsSelection.FallbackReason,
+                BuildEpFallbackReason(requestedProvider, effectiveProvider)),
+            providerResolutionFallbackReason);
+
     private static IReadOnlyList<OrtEpDevice> GetEpDevicesForInputs(InferenceSession session)
     {
         try

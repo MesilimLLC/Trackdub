@@ -9,7 +9,7 @@ using System.Reflection;
 
 namespace Trackdub.Inference.Tests;
 
-public sealed class OnnxExecutionProviderSmokeTesterTests
+public sealed partial class OnnxExecutionProviderSmokeTesterTests
 {
     [Fact]
     public void ResolveWhisperEncoderSmokeDimensions_uses_valid_mel_window_for_symbolic_inputs()

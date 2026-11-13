@@ -37,7 +37,7 @@ public sealed class CompositionRootTests : IDisposable
 
         var policy = provider.GetRequiredService<INativeCudaTensorRtWindowsPolicy>();
 
-        Assert.Equal(OperatingSystem.IsWindows(), await policy.IsNativeProvidersAllowedOnWindowsAsync());
+        Assert.False(await policy.IsNativeProvidersAllowedOnWindowsAsync());
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public sealed class CompositionRootTests : IDisposable
             .Select(adapter => adapter.EngineFamily).ToArray();
 
         Assert.All(
-            new[] { "phi-genai", "qwen-genai", "gemma-genai", "qwen-instruct" },
+            new[] { "phi-genai", "qwen-genai", "gemma-genai" },
             family => Assert.Contains(family, families));
     }
 

@@ -20,18 +20,75 @@ public sealed class PhiGenAiTranslationEngineTests
     [Fact]
     public async Task EmptyTranslationDoesNotClaimAProviderRan()
     {
+        var provenance = new Trackdub.Domain.Translation.TranslationModelProvenance(
+            "mesilim/qwen3", "revision", "sha256", new Dictionary<string, string>(), null, null);
         var plan = new StageRuntimePlan
         {
             Stage = RuntimeStage.Translation,
             Status = StageRuntimePlanStatus.Ready,
+            ModelId = "Qwen/Qwen3-4B",
             ModelAlias = "qwen3-4b-translation",
             EngineFamily = "qwen-genai",
             ExecutionProvider = ExecutionProviderKind.Cuda,
         };
         var engine = new PhiGenAiTranslationEngine(new StubRuntimePlanner(plan),
             BenchmarkModelPathResolver.CreateDefault(), engineFamily: "qwen-genai");
-        Assert.Empty(await engine.TranslateAsync(new TranslationRequest("en", "fr", []), CancellationToken.None));
+        Assert.Empty(await engine.TranslateAsync(new TranslationRequest("en", "fr", [], ModelProvenance: provenance), CancellationToken.None));
         Assert.Equal("not-run", engine.LastExecutionSummary?.SelectedProvider);
+        Assert.Same(provenance, engine.LastExecutionMetadata?.ModelProvenance);
+    }
+
+    [Fact]
+    public async Task WindowsQwenCudaPlanWithoutWorkerFailsWithActionableMessage()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var plan = CreateQwenCudaPlan();
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(plan), BenchmarkModelPathResolver.CreateDefault(),
+            engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName);
+        var request = new TranslationRequest(
+            "en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]);
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => engine.TranslateAsync(request, CancellationToken.None));
+
+        Assert.Contains("requires the inference worker", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task QwenCudaWorkerForwardsNonEvictingWarmupFlag()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var worker = new RecordingWorkerClient();
+        var engine = new PhiGenAiTranslationEngine(
+            new StubRuntimePlanner(CreateQwenCudaPlan()), BenchmarkModelPathResolver.CreateDefault(),
+            engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            workerClient: worker)
+        {
+            NonEvictingWarmup = true
+        };
+
+        await engine.TranslateAsync(
+            new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]),
+            CancellationToken.None);
+
+        Assert.Equal([true], worker.NonEvictingWarmupValues);
+
+        await foreach (PipelineStreamItem<TranslatedTextSegment> _ in engine.TranslateStreamAsync(
+            new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello")]),
+            Guid.NewGuid(), "qwen-snapshot", Guid.NewGuid(), CancellationToken.None))
+        {
+        }
+
+        Assert.Equal([true, true], worker.NonEvictingWarmupValues);
     }
 
     [WorkerExecutableFact]
@@ -201,6 +258,18 @@ public sealed class PhiGenAiTranslationEngineTests
         Assert.Contains("<|im_start|>assistant", qwenPrompt, StringComparison.Ordinal);
         Assert.Contains("<|turn>model", gemmaPrompt, StringComparison.Ordinal);
     }
+
+    private static StageRuntimePlan CreateQwenCudaPlan() =>
+        new()
+        {
+            Stage = RuntimeStage.Translation,
+            Status = StageRuntimePlanStatus.Ready,
+            ModelId = "Qwen/Qwen3-4B",
+            ModelAlias = "qwen3-4b-translation",
+            EngineFamily = PhiGenAiTranslationEngine.QwenEngineFamilyName,
+            ExecutionProvider = ExecutionProviderKind.Cuda,
+            Variant = "cuda-int4"
+        };
 
     /// <summary>Model root the bundled manifest declares for the Phi-3.5 CPU int4 variant.</summary>
     private const string BundledModelRootRelativePath =
@@ -465,6 +534,7 @@ public sealed class PhiGenAiTranslationEngineTests
                 Stage = request.Stage
             });
     }
+
 }
 
 public sealed class QwenTranslationModelFactAttribute : FactAttribute

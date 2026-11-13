@@ -19,8 +19,7 @@ public sealed class TranslationLanguageRouter(
     {
         "phi-genai",
         "qwen-genai",
-        "gemma-genai",
-        "qwen-instruct"
+        "gemma-genai"
     };
 
     private readonly BundledModelManifestRegistry manifestRegistry = manifestRegistry ?? throw new ArgumentNullException(nameof(manifestRegistry));
@@ -590,10 +589,13 @@ public sealed class TranslationLanguageRouter(
                 PreferredModelAlias: entry.Aliases.FirstOrDefault(),
                 ResolvedModelEntryPath: entryPath,
                 EngineFamily: entry.EngineFamily,
-                ModelProvenance: new Trackdub.Domain.Translation.TranslationModelProvenance(
-                    ResolveProvenanceRepository(entry), entry.Revision, entry.Sha256,
-                    new Dictionary<string, string>(entry.DownloadFileHashes),
-                    entry.TargetPrefixes?.GetValueOrDefault(targetLanguage), entry.CatalogPolicyVersion));
+                ModelProvenance: GenAiPivotProvenanceResolver.Resolve(new GenAiPivotProvenanceRequest
+                {
+                    CacheIndex = context.CacheIndex,
+                    Entry = entry,
+                    ResolvedEntryPath = entryPath,
+                    TargetLanguage = targetLanguage
+                }));
             return true;
         }
 

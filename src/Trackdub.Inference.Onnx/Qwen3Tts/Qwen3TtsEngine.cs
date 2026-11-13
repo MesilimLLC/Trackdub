@@ -221,9 +221,7 @@ public sealed class Qwen3TtsEngine(
         StageRuntimePlan plan,
         CancellationToken cancellationToken)
     {
-        var providerRequest = new PooledProviderRequest(
-            plan.ExecutionProvider!.Value,
-            HasExplicitProviderPreference: plan.HasExplicitProviderPreference);
+        PooledProviderRequest providerRequest = PooledProviderRequest.ForPlan(plan);
         if (pinnedPipeline is not null && pinnedPipeline.Matches(modelFiles, providerRequest))
         {
             return pinnedPipeline;

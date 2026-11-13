@@ -36,6 +36,7 @@ public sealed partial class RuntimePlannerTests
         Assert.True(selected.HasExplicitProviderPreference);
         Assert.True(cached.HasExplicitProviderPreference);
     }
+
     [Fact]
     public async Task PlanAsync_NoVerdict_ReturnsReadyDirectMlWithoutSmoke()
     {
