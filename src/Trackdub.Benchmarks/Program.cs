@@ -365,7 +365,7 @@ public static class Program
     {
         if (args.Length == 0 || args.Any(a => a is "--help" or "-h" or "/?"))
         {
-            output.WriteLine("matrix <fixture> --output <directory> [--providers <comma-separated>] [--baseline <provider>] [--scenario <name>] [--runs <count>] [--language <code>] [--source-language <code>] [--mock] [--dry-run] [--format <console|json|both>] [--report-dir <directory>]");
+            output.WriteLine("matrix <fixture> --output <directory> [--providers <comma-separated>] [--baseline <provider>] [--scenario <name>] [--runs <count>] [--language <code>] [--target-language <code>] [--source-language <code>] [--mock] [--dry-run] [--format <console|json|both>] [--report-dir <directory>]");
             output.WriteLine("Evaluates comparative execution provider performance (speedup, latency deltas, throughput, memory) across configured providers.");
             return args.Length == 0 ? 1 : 0;
         }
