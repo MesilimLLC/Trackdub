@@ -8,14 +8,13 @@ internal static class TranslationRouterManifestSpecs
         string modelId,
         IReadOnlyList<string> aliases,
         string rootFolder,
-        string sourceLanguage = "en",
-        string targetLanguage = "es") =>
+        ManifestLanguagePairSpec? languagePair = null) =>
         new(
             ModelId: modelId,
             Task: "translation",
             EngineFamily: "opus-mt",
             Capabilities: ["translation", "direct-translation"],
-            LanguagePairs: [new ManifestLanguagePairSpec(sourceLanguage, targetLanguage)],
+            LanguagePairs: [languagePair ?? new ManifestLanguagePairSpec("en", "es")],
             SourceLanguages: [],
             TargetLanguages: [],
             Tier: "fast",
