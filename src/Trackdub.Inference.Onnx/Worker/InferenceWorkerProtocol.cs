@@ -209,11 +209,21 @@ public sealed record WorkerTtsResult(
     string Provider,
     StageRuntimeExecutionSummary? ExecutionSummary);
 
-public sealed record WorkerTranslationRequest(TranslationRequest Request, WorkerPlan Plan);
+/// <param name="NonEvictingWarmup">
+/// Set for optimization-only warmups: the worker must lease the model without evicting a resident
+/// one, and answer with <see cref="WorkerTranslationResult.NotAttempted"/> when it cannot.
+/// </param>
+public sealed record WorkerTranslationRequest(TranslationRequest Request, WorkerPlan Plan, bool NonEvictingWarmup = false);
 
+/// <param name="NotAttempted">
+/// True when a non-evicting warmup was declined because loading the model would have evicted a
+/// resident one. <paramref name="Segments"/> is then empty and nothing was proven about the model.
+/// </param>
 public sealed record WorkerTranslationResult(
     IReadOnlyList<TranslatedTextSegment> Segments,
-    StageRuntimeExecutionSummary? ExecutionSummary);
+    StageRuntimeExecutionSummary? ExecutionSummary,
+    bool NotAttempted = false,
+    string? Detail = null);
 
 /// <summary>
 /// Warm request: construct the worker's Kokoro engine and create its real pooled session

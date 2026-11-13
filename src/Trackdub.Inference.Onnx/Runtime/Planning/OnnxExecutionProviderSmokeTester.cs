@@ -81,17 +81,29 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
         CancellationToken cancellationToken) =>
         request.Stage == RuntimeStage.Translation &&
         string.Equals(request.EngineFamily, "qwen-genai", StringComparison.OrdinalIgnoreCase)
-            ? SmokeTestQwenTranslationWorkerAsync(plan, cancellationToken)
+            ? SmokeTestQwenTranslationWorkerAsync(plan, request.NonEvictingWarmup, cancellationToken)
             : SmokeTestTtsWorkerAsync(request, plan, cancellationToken);
 
     private async Task<ExecutionProviderSmokeTestResult> SmokeTestQwenTranslationWorkerAsync(
         StageRuntimePlan plan,
+        bool nonEvictingWarmup,
         CancellationToken cancellationToken)
     {
         WorkerTranslationResult translated = await workerClient!.TranslateAsync(
             new TranslationRequest("en", "fr", [new TranslationInputSegment(0, 0, 1, "Hello.")]),
             plan,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            nonEvictingWarmup).ConfigureAwait(false);
+        if (translated.NotAttempted)
+        {
+            return new ExecutionProviderSmokeTestResult(
+                false,
+                translated.Detail ?? "Inference worker skipped the warmup because loading would evict a resident model.")
+            {
+                NotAttempted = true,
+            };
+        }
+
         bool onCuda = string.Equals(translated.ExecutionSummary?.SelectedProvider, "cuda", StringComparison.OrdinalIgnoreCase);
         bool producedText = translated.Segments.Count == 1 && !string.IsNullOrWhiteSpace(translated.Segments[0].Text);
         bool succeeded = onCuda && producedText;

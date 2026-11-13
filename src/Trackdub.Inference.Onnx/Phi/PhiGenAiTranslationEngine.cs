@@ -102,6 +102,12 @@ public sealed class PhiGenAiTranslationEngine(
 
     public string EngineFamily => engineFamily;
 
+    /// <summary>
+    /// Set by the inference worker for an optimization-only warmup: the model lease must not evict a
+    /// resident model, and the request is skipped with <see cref="GenAiWarmupSkippedException"/> when it would.
+    /// </summary>
+    internal bool NonEvictingWarmup { get; init; }
+
     public async Task<IReadOnlyList<TranslatedTextSegment>> TranslateAsync(
         TranslationRequest request,
         CancellationToken cancellationToken)
@@ -132,8 +138,7 @@ public sealed class PhiGenAiTranslationEngine(
         GenAiModelKey modelKey = await GenAiModelKey.CreateAsync(
             modelRootPath, plan.ExecutionProvider!.Value, plan.ModelId, plan.Variant, plan.DeviceIndex,
             plan.ModelRevisionHash, cancellationToken).ConfigureAwait(false);
-        using GenAiModelLease modelLease = await GenAiModelPool.Shared
-            .GetLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
+        using GenAiModelLease modelLease = await AcquireModelLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
         using IDisposable? executionAdmission = await CpuExecutionAdmission.Shared
             .AcquireAsync(modelKey.Provider, cancellationToken).ConfigureAwait(false);
         Model model = modelLease.Model;
@@ -242,6 +247,19 @@ public sealed class PhiGenAiTranslationEngine(
             yield return PipelineStreamItemFactory.CreateTranslation(
                 translated, runId, snapshotId, sourceRevisionId, sequence++);
         }
+    }
+
+    private async Task<GenAiModelLease> AcquireModelLeaseAsync(GenAiModelKey modelKey, CancellationToken cancellationToken)
+    {
+        if (!NonEvictingWarmup)
+        {
+            return await GenAiModelPool.Shared.GetLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await GenAiModelPool.Shared.TryGetWarmupLeaseAsync(modelKey, cancellationToken).ConfigureAwait(false)
+            ?? throw new GenAiWarmupSkippedException(
+                $"GenAI warmup skipped for '{modelKey}': loading it would evict a resident model " +
+                "(GenAI pool at capacity or admission budget full). The stage will load it inline.");
     }
 
     private bool UseCudaWorker(StageRuntimePlan plan) =>

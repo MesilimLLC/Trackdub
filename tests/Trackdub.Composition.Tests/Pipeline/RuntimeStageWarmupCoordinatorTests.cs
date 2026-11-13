@@ -549,7 +549,8 @@ public class RuntimeStageWarmupCoordinatorTests
             Task.FromResult<WorkerHelloResult?>(null);
 
         public Task<WorkerTranslationResult> TranslateAsync(
-            TranslationRequest request, StageRuntimePlan plan, CancellationToken cancellationToken) =>
+            TranslationRequest request, StageRuntimePlan plan, CancellationToken cancellationToken,
+            bool nonEvictingWarmup = false) =>
             throw new NotSupportedException("Coordinator tests do not translate through the worker.");
 
         public Task<TtsSynthesisResult> SynthesizeTtsAsync(

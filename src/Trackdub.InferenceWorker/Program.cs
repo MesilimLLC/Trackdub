@@ -4,6 +4,7 @@ using Trackdub.Contracts.Pipeline;
 using Trackdub.Inference.Onnx;
 using Trackdub.Inference.Onnx.Kokoro;
 using Trackdub.Inference.Onnx.Phi;
+using Trackdub.Inference.Onnx.Pool;
 using Trackdub.Inference.Onnx.Runtime.Planning;
 using Trackdub.Inference.Onnx.Runtime;
 using Trackdub.Inference.Onnx.Worker;
@@ -108,9 +109,19 @@ static async Task<WorkerTranslationResult> TranslateAsync(WorkerTranslationReque
     var engine = new PhiGenAiTranslationEngine(
         new SuppliedTranslationPlan(request.Plan.ToStageRuntimePlan()),
         BenchmarkModelPathResolver.CreateDefault(),
-        engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName);
-    var segments = await engine.TranslateAsync(request.Request, cancellationToken).ConfigureAwait(false);
-    return new WorkerTranslationResult(segments, engine.LastExecutionSummary);
+        engineFamily: PhiGenAiTranslationEngine.QwenEngineFamilyName)
+    {
+        NonEvictingWarmup = request.NonEvictingWarmup,
+    };
+    try
+    {
+        var segments = await engine.TranslateAsync(request.Request, cancellationToken).ConfigureAwait(false);
+        return new WorkerTranslationResult(segments, engine.LastExecutionSummary);
+    }
+    catch (GenAiWarmupSkippedException ex)
+    {
+        return new WorkerTranslationResult([], null, NotAttempted: true, Detail: ex.Message);
+    }
 }
 
 static bool SupportsTranslationRequest(WorkerTranslationRequest request) =>

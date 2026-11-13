@@ -17,10 +17,15 @@ public interface IInferenceWorkerClient
     /// <summary>Starts the worker if needed and returns its handshake, or null when it is unusable.</summary>
     Task<WorkerHelloResult?> TryGetHelloAsync(CancellationToken cancellationToken);
 
+    /// <param name="nonEvictingWarmup">
+    /// Optimization-only warmups pass true: the worker then declines to evict a resident model and
+    /// returns a result with <see cref="WorkerTranslationResult.NotAttempted"/> set instead.
+    /// </param>
     Task<WorkerTranslationResult> TranslateAsync(
         TranslationRequest request,
         StageRuntimePlan plan,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool nonEvictingWarmup = false);
 
     /// <remarks>
     /// Cancelling a call while its request is still being written kills the worker, because its
@@ -90,7 +95,8 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
     public async Task<WorkerTranslationResult> TranslateAsync(
         TranslationRequest request,
         StageRuntimePlan plan,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool nonEvictingWarmup = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(plan);
@@ -101,8 +107,13 @@ public sealed class InferenceWorkerClient : IInferenceWorkerClient, IAsyncDispos
         {
             WorkerTranslationResult partial = await SendRequestAsync<WorkerTranslationRequest, WorkerTranslationResult>(
                 InferenceWorkerProtocol.Translation,
-                new WorkerTranslationRequest(request with { Segments = chunk }, workerPlan),
+                new WorkerTranslationRequest(request with { Segments = chunk }, workerPlan, nonEvictingWarmup),
                 cancellationToken).ConfigureAwait(false);
+            if (partial.NotAttempted)
+            {
+                return new WorkerTranslationResult([], partial.ExecutionSummary, NotAttempted: true, Detail: partial.Detail);
+            }
+
             segments.AddRange(partial.Segments);
             executionSummary = partial.ExecutionSummary ?? executionSummary;
         }
