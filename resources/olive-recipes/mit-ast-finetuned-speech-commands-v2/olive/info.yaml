@@ -1,9 +1,0 @@
-keywords:
-    olive
-ep:
-    CPUExecutionProvider
-    CUDAExecutionProvider
-device:
-    cpu
-    gpu
-name: mit-ast-finetuned-speech-commands-v2
