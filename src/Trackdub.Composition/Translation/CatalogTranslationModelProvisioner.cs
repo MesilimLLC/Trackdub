@@ -98,7 +98,7 @@ public sealed class CatalogTranslationModelProvisioner(
             return preferredModelAlias;
         preparationProgress?.Report($"Preparing {selected.ModelId}");
         // Without an explicit variant, the default CPU variant would be downloaded even for a CUDA plan.
-        foreach (string? variantAlias in await ResolveVariantAliasesAsync(selected, preferredModelVariantAlias, preferredExecutionProvider, cancellationToken).ConfigureAwait(false))
+        foreach (string? variantAlias in await ResolveVariantAliasesAsync(selected, new VariantSelection(preferredModelVariantAlias, preferredExecutionProvider), cancellationToken).ConfigureAwait(false))
         {
             var result = await downloader.DownloadAsync(selected.ModelId, variantAlias,
                 preparationProgress is null ? null : new PreparationDownloadProgress(preparationProgress, selected.ModelId),
@@ -112,11 +112,13 @@ public sealed class CatalogTranslationModelProvisioner(
         selected.EngineFamily == "opus-mt" ||
         (explicitSelection && selected.EngineFamily == "qwen-genai");
 
+    private sealed record VariantSelection(string? VariantAlias, string? ExecutionProvider);
+
     private async Task<IReadOnlyList<string?>> ResolveVariantAliasesAsync(
-        BundledModelManifestEntry selected, string? variantAlias, string? executionProvider, CancellationToken cancellationToken)
+        BundledModelManifestEntry selected, VariantSelection selection, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(variantAlias)) return [variantAlias];
-        if (!string.IsNullOrWhiteSpace(executionProvider)) return [ResolveVariantForProvider(selected, executionProvider)];
+        if (!string.IsNullOrWhiteSpace(selection.VariantAlias)) return [selection.VariantAlias];
+        if (!string.IsNullOrWhiteSpace(selection.ExecutionProvider)) return [ResolveVariantForProvider(selected, selection)];
         // Auto provider mode: provision every variant this host can run so the planner can pick the accelerated one.
         HashSet<string>? available = await DiscoverAvailableProvidersAsync(cancellationToken).ConfigureAwait(false);
         if (available is null) return [null];
@@ -140,10 +142,10 @@ public sealed class CatalogTranslationModelProvisioner(
         catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
 
-    private static string? ResolveVariantForProvider(BundledModelManifestEntry selected, string? executionProvider) =>
-        string.IsNullOrWhiteSpace(executionProvider) ? null
+    private static string? ResolveVariantForProvider(BundledModelManifestEntry selected, VariantSelection selection) =>
+        string.IsNullOrWhiteSpace(selection.ExecutionProvider) ? null
         : selected.Variants.FirstOrDefault(variant =>
-            variant.SupportedProviders?.Contains(executionProvider.Trim(), StringComparer.OrdinalIgnoreCase) == true)?.Alias;
+            variant.SupportedProviders?.Contains(selection.ExecutionProvider.Trim(), StringComparer.OrdinalIgnoreCase) == true)?.Alias;
 
     private static bool Covers(IReadOnlyList<string> languages, string language) =>
         languages.Any(candidate => candidate.Equals(language, StringComparison.OrdinalIgnoreCase) || candidate is "multi" or "any" or "*");
