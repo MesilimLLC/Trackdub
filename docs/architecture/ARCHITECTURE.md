@@ -4,7 +4,7 @@
 
 Trackdub is a cross-platform, local-first AI dubbing workstation for Windows, macOS, and Linux.
 
-The same pipeline also runs headless through the `trackdub` CLI and the SDK, including on Linux GPU servers in a container. That headless path is the basis of the opt-in cloud render tier (section 3.6).
+The same pipeline also runs headless through the `trackdub` CLI and the SDK, including on Linux GPU servers in a container. That headless path is the basis of the opt-in cloud render tier (section 2.6).
 
 The product is designed around a staged editorial workflow:
 
@@ -151,7 +151,7 @@ project-local artifact store
 global model cache
 ```
 
-See [ADR-0002](docs/adr/ADR-0002-sqlite-project-persistence.md) for the project-versus-machine persistence split.
+See [ADR-0002](../decisions/ADR-0002-sqlite-project-persistence.md) for the project-versus-machine persistence split.
 
 SQLite owns structured project state. The filesystem owns large artifacts.
 
@@ -188,17 +188,25 @@ trackdub run pipeline --media in.mp4 --output ./project --preset <preset> \
   --result-file result.json --progress-file progress.jsonl
 ```
 
-It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` (with `--provider tensorrt` on the server profile, see 3.2.1) cover health checks, hash-verified model provisioning and engine builds.
+It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` (with `--provider tensorrt` on the server profile, see 2.2.1) cover health checks, hash-verified model provisioning and engine builds.
 
 Cloud presets fix the models, variants and per-stage providers for server runs (`src/Trackdub.Cli/PocServerPreset.cs`, `src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1` (English to Spanish) and `poc-server-zh-v1` (English to Chinese). Clients pick a preset name; they never supply commands, model IDs or paths.
 
-The cloud render tier is opt-in per project and requires explicit user consent before source media leaves the device (see the Stage 0 rule "Do not silently switch to cloud"). The proof of concept with SnapSoft targets this job path:
+The cloud render tier is opt-in per project and requires explicit user consent before source media leaves the device (see the Stage 0 rule "Do not silently switch to cloud"). Its purpose is to give users without a capable local GPU the same models and output quality as a local RTX run. The proof of concept with SnapSoft (statement of work signed 2026-10-30) targets this job path:
 
 ```text
 Cloudflare API (auth, job record) -> SQS -> EC2 GPU worker (trackdub run pipeline) -> S3 (KMS encryption, presigned URLs, 7-day lifecycle)
 ```
 
-The repository also contains an earlier AWS-only job stack (`Trackdub.Api`, `Trackdub.Cloud.Aws`, `Trackdub.CloudJobAdapter`, plus the `IJobScheduler` interface in `Trackdub.Cloud`) that uses Cognito, DynamoDB and a scheduler interface instead of Cloudflare and SQS. It is outside the POC scope. See [docs/handoff/snapsoft-onboarding.md](../handoff/snapsoft-onboarding.md) for the POC mapping.
+- The existing Cloudflare API stays the authentication and job-recording front door. It enqueues to SQS and polls S3 for artifacts; status wiring back into the Cloudflare job API comes later.
+- The worker is the `server` container image, unchanged engine code, running the CLI. It reads the SQS message, fetches source media from S3, runs `trackdub run pipeline`, parses the result and progress files, and writes per-stage artifacts back to S3. `trackdub doctor` is its health check.
+- Instance candidates are G6 (NVIDIA L4) and G6e (NVIDIA L40S), selected from Mesilim's own benchmarks. The orchestrator (AWS Batch or Amazon ECS) is decided in the Design phase.
+- TensorRT engines are built once per instance type with `trackdub cache warm` and baked into the image or an EBS snapshot, to keep cold start under two minutes.
+- The POC is a single US region. All transcription, translation and synthesis use Trackdub's own models; no stage is replaced by an AWS-managed AI service.
+- Deferred to a follow-on phase: status wiring into the Cloudflare job API, Spot capacity, autoscaling, billing, and production cutover.
+- The POC infrastructure-as-code and the worker job loop are SnapSoft deliverables; they are not in this repository yet.
+
+The repository also contains an earlier AWS-only job stack (`Trackdub.Api`, `Trackdub.Cloud.Aws`, `Trackdub.CloudJobAdapter`, plus the `IJobScheduler` interface in `Trackdub.Cloud`) that uses Cognito, DynamoDB and a scheduler interface instead of Cloudflare and SQS. It is outside the POC scope. See [docs/handoff/snapsoft-onboarding.md](../handoff/snapsoft-onboarding.md) for the POC mapping, success criteria and open design decisions, and [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) for building, seeding and warming the worker image.
 
 ---
 
@@ -269,12 +277,43 @@ Trackdub.Inference.Onnx
   -> Trackdub.Domain
   -> Trackdub.Contracts
 
+Trackdub.InferenceWorker (Windows only)
+  -> Trackdub.Inference.Onnx
+
+Trackdub.Composition
+  -> Trackdub.Application
+  -> Trackdub.Infrastructure
+  -> Trackdub.Media, Trackdub.Media.Playback
+  -> Trackdub.Inference, Trackdub.Inference.Onnx, Trackdub.InferenceWorker
+  -> Trackdub.Licensing
+
+Trackdub.Sdk
+  -> Trackdub.Application
+  -> Trackdub.Composition
+  -> Trackdub.Licensing
+
+Trackdub.Cli
+  -> Trackdub.Sdk
+
+Trackdub.Cloud
+  -> Trackdub.Contracts
+
+Trackdub.Cloud.Aws
+  -> Trackdub.Cloud
+
+Trackdub.Api, Trackdub.CloudJobAdapter
+  -> Trackdub.Cloud.Aws
+
 Trackdub.Benchmarks
+  -> Trackdub.Application
+  -> Trackdub.Composition
   -> Trackdub.Inference
   -> Trackdub.Inference.Onnx
   -> Trackdub.Infrastructure
   -> Trackdub.Domain
 ```
+
+The cloud projects never reference Composition, the SDK or any inference project. The CPU API and the worker wrapper reach the pipeline only by launching the CLI as a separate process.
 
 The application layer coordinates work. Concrete implementation layers do not mutate project state directly.
 
@@ -524,7 +563,7 @@ Rules:
 
 - Direct language-pair models are preferred where available.
 - Pivot routing must be visible when used.
-- Translation uses only commercially licensed models: every translation model in the manifest has `commercial_allowed: true` and `commercial_use_verified: true` (see section 10).
+- Translation uses only commercially licensed models: every translation model in the manifest has `commercial_allowed: true` and `commercial_use_verified: true` (see section 9).
 - Translation output is draft material.
 
 ---
@@ -1087,14 +1126,15 @@ What should not go here:
 | `src/Trackdub.Cloud.Aws` | DynamoDB job store and S3 artifact store. |
 | `src/Trackdub.Api` | CPU ASP.NET job API (Cognito JWT). |
 | `src/Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (claim, lease heartbeat, artifact upload, outcome write); image `Dockerfile.cloud-worker`. |
+| `src/Trackdub.InferenceWorker` | Windows-only out-of-process ONNX Runtime worker, used when one process cannot load two ONNX Runtime builds ([ADR-0017](../decisions/ADR-0017-ort130-inference-worker.md)). |
 
-`Trackdub.Cloud.Aws`, `Trackdub.Api` and `Trackdub.CloudJobAdapter` form the earlier AWS-only job stack described in section 3.6. It is not part of the SnapSoft POC job path.
+`Trackdub.Cloud.Aws`, `Trackdub.Api` and `Trackdub.CloudJobAdapter` form the earlier AWS-only job stack described in section 2.6. It is not part of the SnapSoft POC job path.
 
 ---
 
 ## 12. Tests
 
-Recommended test layout:
+Test layout:
 
 ```text
 tests/
@@ -1103,13 +1143,24 @@ tests/
 ├── Trackdub.Infrastructure.Tests/
 ├── Trackdub.Media.Tests/
 ├── Trackdub.Inference.Tests/
+├── Trackdub.Inference.Onnx.Tests/
 ├── Trackdub.Benchmarks.Tests/
-├── Trackdub.App.Avalonia.Tests/       (Trackdub-gated repository)
-├── Trackdub.Architecture.Tests/
+├── Trackdub.Licensing.Tests/
+├── Trackdub.Analyzers.Tests/
+├── Trackdub.Architecture.Tests/       (dependency-direction and isolation rules)
 ├── Trackdub.Composition.Tests/
 ├── Trackdub.Sdk.Tests/
-└── Trackdub.TestDoubles/              (shared source, no csproj)
+├── Trackdub.Cloud.Tests/
+├── Trackdub.Cloud.Aws.Tests/          (S3 signing; DynamoDB tests skip unless TRACKDUB_DYNAMODB_LOCAL is set)
+├── Trackdub.Api.Tests/
+├── Trackdub.CloudJobAdapter.Tests/
+├── Trackdub.CloudJobFixture/          (fake CLI that speaks the result-file protocol, for adapter tests)
+├── Trackdub.App.Avalonia.Tests/       (Trackdub-gated repository)
+├── Trackdub.TestDoubles/              (shared source, no csproj)
+└── Fixtures/                          (media fixtures, e.g. cloud-poc/en-speech.mp4)
 ```
+
+The cloud test projects use fakes, subprocess fixtures, an optional DynamoDB Local endpoint and CPU-only containers. They do not establish real IAM, S3, SQS, scheduler or GPU behavior.
 
 Testing strategy:
 
