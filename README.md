@@ -140,7 +140,7 @@ product carries tiered features, activation, and support.
 | `Trackdub.Cli` | Headless CLI entry point; runs in the Linux GPU container |
 | `Trackdub.Cloud` | Cloud job contracts, cloud presets, media validation, `IJobScheduler` seam |
 | `Trackdub.Cloud.Aws` | DynamoDB job store and S3 artifact store |
-| `Trackdub.Api` | CPU ASP.NET job API (Cognito JWT); not part of the SnapSoft POC path |
+| CPU job API (`src/`, ASP.NET) | Cognito-authenticated job API for the earlier AWS-only stack; not part of the SnapSoft POC path. See [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) §11.11 |
 | `Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (`Dockerfile.cloud-worker`) |
 | `Trackdub.Licensing` | Neutral license validation mechanisms |
 | `Trackdub.Benchmarks` | Performance benchmarks |
