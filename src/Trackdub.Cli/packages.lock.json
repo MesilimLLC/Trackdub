@@ -340,7 +340,7 @@
           "Microsoft.ML.OnnxRuntime.Gpu": "[1.32.0, )",
           "Microsoft.ML.OnnxRuntimeGenAI": "[0.19.0, )",
           "Microsoft.ML.OnnxRuntimeGenAI.Cuda": "[0.19.0, )",
-          "Microsoft.ML.Tokenizers": "[3.0.0-preview.26502.1, )",
+          "Microsoft.ML.Tokenizers": "[3.0.0-preview.26561.3, )",
           "System.Numerics.Tensors": "[11.0.0, )",
           "Trackdub.Contracts": "[1.0.0, )",
           "Trackdub.Domain": "[1.0.0, )",
@@ -578,9 +578,9 @@
       },
       "Microsoft.ML.Tokenizers": {
         "type": "CentralTransitive",
-        "requested": "[3.0.0-preview.26502.1, )",
-        "resolved": "3.0.0-preview.26502.1",
-        "contentHash": "Z+ZFKkR3iRMpSWpuB42vNrR30TxpH24LmHibaKNe27F3qmIF2JO4dzA3RIO0jZsc9nW01r/vDyEZdWy4ET3AvA=="
+        "requested": "[3.0.0-preview.26561.3, )",
+        "resolved": "3.0.0-preview.26561.3",
+        "contentHash": "pwAI2+N0HaJcf/DJmoCHpzPtFc4W4D3hGeoW+1GGRklqO8C3olTCdXRx8QxzHfiUYlpQKr1/yYPA7MAk+W168w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "CentralTransitive",
@@ -925,7 +925,7 @@
         "dependencies": {
           "MathNet.Numerics": "[5.0.0, )",
           "Microsoft.ML.OnnxRuntimeGenAI.WinML": "[0.19.0, )",
-          "Microsoft.ML.Tokenizers": "[3.0.0-preview.26502.1, )",
+          "Microsoft.ML.Tokenizers": "[3.0.0-preview.26561.3, )",
           "Microsoft.Windows.AI.MachineLearning": "[2.4.89, )",
           "System.Numerics.Tensors": "[11.0.0, )",
           "Trackdub.Contracts": "[1.0.0, )",
@@ -1106,9 +1106,9 @@
       },
       "Microsoft.ML.Tokenizers": {
         "type": "CentralTransitive",
-        "requested": "[3.0.0-preview.26502.1, )",
-        "resolved": "3.0.0-preview.26502.1",
-        "contentHash": "Z+ZFKkR3iRMpSWpuB42vNrR30TxpH24LmHibaKNe27F3qmIF2JO4dzA3RIO0jZsc9nW01r/vDyEZdWy4ET3AvA=="
+        "requested": "[3.0.0-preview.26561.3, )",
+        "resolved": "3.0.0-preview.26561.3",
+        "contentHash": "pwAI2+N0HaJcf/DJmoCHpzPtFc4W4D3hGeoW+1GGRklqO8C3olTCdXRx8QxzHfiUYlpQKr1/yYPA7MAk+W168w=="
       },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "CentralTransitive",
