@@ -1,0 +1,35 @@
+version: 1.0
+
+# Amazon CodeGuru Reviewer configuration.
+# CodeGuru Reviewer analyzes only Java and Python. Trackdub has no Java, so this
+# scopes the Python review to the tooling under tools/, scripts/ and workers/.
+# The .NET solution under src/ is not analyzed by CodeGuru and needs no excludes.
+# https://docs.aws.amazon.com/codeguru/latest/reviewer-ug/recommendations.html#exclude-files
+
+excludeFiles:
+  # Test suites and fixtures
+  - 'tests/**'
+  - '**/tests/**'
+  - '**/test_*.py'
+  - '**/*_test.py'
+  - '**/conftest.py'
+  - '**/Fixtures/**'
+
+  # Build, benchmark and test output
+  - 'build/**'
+  - 'cache/**'
+  - 'TestResults/**'
+  - 'BenchmarkDotNet.Artifacts/**'
+  - '**/bin/**'
+  - '**/obj/**'
+
+  # Model weights, exported graphs and vendored recipes
+  - 'models/**'
+  - 'resources/olive-recipes/**'
+
+  # Local virtual environments and caches
+  - '3.11/**'
+  - '**/.venv/**'
+  - '**/venv/**'
+  - '**/__pycache__/**'
+  - '**/node_modules/**'
