@@ -105,8 +105,8 @@
          when the analyzer project references CSharp only and the test project includes CSharp directly.
          The Roslyn analyzer rules RS1038/RS1041 from Workspaces references are silenced via
          src/Trackdub.Analyzers/.editorconfig. See docs/adr/ADR-0012-wave-pcm16-loudness-policy.md. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0" />
     <!-- Repo-wide banned-API analyzer (RS0030): bans Path.Combine in favor of Path.Join.
          CodeQL/CodeFactor flag every Path.Combine call whose second-or-later argument isn't
          provably non-rooted (it silently drops earlier segments if it is); Path.Join has no
