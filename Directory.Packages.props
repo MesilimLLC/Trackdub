@@ -92,7 +92,7 @@
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <!-- Trackdub.Api -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
-    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.110.2" />
+    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.1.0" />
 
     <!-- Roslyn analyzer SDK for Trackdub.Analyzers + its in-tree test project. Analyzer tests use
          the in-box CSharpCompilation + GetAnalyzerDiagnosticsAsync path (no third-party test harness),
