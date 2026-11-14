@@ -4,19 +4,19 @@
     <!-- Single source of truth for OnnxRuntime version. Referenced by Trackdub.OnnxRuntime.Dnnl.Native.csproj and the DNNL build script.
          IMPORTANT: Keep this a literal version string. The build script (tools/onnxruntime-dnnl/Build-OnnxRuntimeDnnlNativePackage.ps1)
          reads it with a regex and will capture the raw text literally if this is set to another MSBuild property reference. -->
-    <OnnxRuntimeVersion>1.31.0</OnnxRuntimeVersion>
+    <OnnxRuntimeVersion>1.32.0</OnnxRuntimeVersion>
     <OnnxRuntimeGenAiCudaVersion>0.19.0</OnnxRuntimeGenAiCudaVersion>
     <!-- Native ORT version inside the Microsoft.Windows.AI.MachineLearning pin below. Bump the two together:
          EP-context artifact stamps record it, so a stale value would reuse artifacts across ORT runtimes. -->
     <WindowsMlOnnxRuntimeVersion>1.27.1</WindowsMlOnnxRuntimeVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.11" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.1.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
-    <PackageVersion Include="Avalonia" Version="12.1.5" />
-    <PackageVersion Include="Avalonia.Desktop" Version="12.1.5" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+    <PackageVersion Include="Avalonia" Version="12.1.6" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.6" />
     <PackageVersion Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
     <PackageVersion Include="Dapper" Version="2.1.89" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
@@ -105,8 +105,8 @@
          when the analyzer project references CSharp only and the test project includes CSharp directly.
          The Roslyn analyzer rules RS1038/RS1041 from Workspaces references are silenced via
          src/Trackdub.Analyzers/.editorconfig. See docs/adr/ADR-0012-wave-pcm16-loudness-policy.md. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0" />
     <!-- Repo-wide banned-API analyzer (RS0030): bans Path.Combine in favor of Path.Join.
          CodeQL/CodeFactor flag every Path.Combine call whose second-or-later argument isn't
          provably non-rooted (it silently drops earlier segments if it is); Path.Join has no
