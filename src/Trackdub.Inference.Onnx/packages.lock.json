@@ -66,9 +66,9 @@
       },
       "Microsoft.ML.Tokenizers": {
         "type": "Direct",
-        "requested": "[3.0.0-preview.26502.1, )",
-        "resolved": "3.0.0-preview.26502.1",
-        "contentHash": "Z+ZFKkR3iRMpSWpuB42vNrR30TxpH24LmHibaKNe27F3qmIF2JO4dzA3RIO0jZsc9nW01r/vDyEZdWy4ET3AvA=="
+        "requested": "[3.0.0-preview.26561.3, )",
+        "resolved": "3.0.0-preview.26561.3",
+        "contentHash": "pwAI2+N0HaJcf/DJmoCHpzPtFc4W4D3hGeoW+1GGRklqO8C3olTCdXRx8QxzHfiUYlpQKr1/yYPA7MAk+W168w=="
       },
       "System.Numerics.Tensors": {
         "type": "Direct",
@@ -479,9 +479,9 @@
       },
       "Microsoft.ML.Tokenizers": {
         "type": "Direct",
-        "requested": "[3.0.0-preview.26502.1, )",
-        "resolved": "3.0.0-preview.26502.1",
-        "contentHash": "Z+ZFKkR3iRMpSWpuB42vNrR30TxpH24LmHibaKNe27F3qmIF2JO4dzA3RIO0jZsc9nW01r/vDyEZdWy4ET3AvA=="
+        "requested": "[3.0.0-preview.26561.3, )",
+        "resolved": "3.0.0-preview.26561.3",
+        "contentHash": "pwAI2+N0HaJcf/DJmoCHpzPtFc4W4D3hGeoW+1GGRklqO8C3olTCdXRx8QxzHfiUYlpQKr1/yYPA7MAk+W168w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Direct",
