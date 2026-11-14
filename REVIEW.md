@@ -1,14 +1,14 @@
 # Review Guide
 
 Use this file when reviewing pull requests in the public Trackdub core
-(`Mesililm-LLC/Trackdub`).
+(`MesilimLLC/Trackdub`).
 
 This is a reviewer checklist, not an authoring guide. For contribution rules,
 see `CONTRIBUTING.md` and `docs/repository-policy.md`. For the required PR body
 shape, see `.github/pull_request_template.md`. For build, dependency direction,
 and model governance, see `AGENTS.md`.
 
-The private desktop product lives in `Mesililm-LLC/Trackdub-gated` and consumes
+The private desktop product lives in `MesilimLLC/Trackdub-gated` and consumes
 this repo as a pinned submodule. Avalonia shell and gated licensing trust-ring
 changes belong there, not here.
 

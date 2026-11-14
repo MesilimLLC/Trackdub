@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for contributors and agents working on the Trackdub public core (`Mesililm-LLC/Trackdub`).
+Guidance for contributors and agents working on the Trackdub public core (`MesilimLLC/Trackdub`).
 
 ## Core Principles
 1. Strict dependency direction: **Domain depends on nothing**. No inference leaking upward.
