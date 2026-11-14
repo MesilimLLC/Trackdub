@@ -27,8 +27,8 @@ internal static class GenAiNativeRuntimeSelection
         (pair.GenAiVersion is "0.17.1" or "0.18.0" or "0.19.0" &&
          ((pair.OrtFlavor == "WindowsML" && pair.OrtPackageVersion == "2.4.89" &&
            pair.OrtVersion == "1.27.1" && pair.GenAiFlavor == "WinML") ||
-          (pair.OrtFlavor == "Stock" && pair.OrtPackageVersion == "1.31.0" &&
-           pair.OrtVersion == "1.31.0" && pair.GenAiFlavor is "Cpu" or "Cuda")));
+          (pair.OrtFlavor == "Stock" && pair.OrtPackageVersion == "1.32.0" &&
+           pair.OrtVersion == "1.32.0" && pair.GenAiFlavor is "Cpu" or "Cuda")));
 
     /// <summary>
     /// ORT file identity for a Windows ML host or the stock CUDA worker.
@@ -37,7 +37,7 @@ internal static class GenAiNativeRuntimeSelection
     /// </summary>
     internal static bool IsKnownOrt(NativePairManifest pair) =>
         (pair.OrtFlavor == "WindowsML" && pair.OrtPackageVersion == "2.4.89" && pair.OrtVersion == "1.27.1") ||
-        (pair.OrtFlavor == "Stock" && pair.OrtPackageVersion == "1.31.0" && pair.OrtVersion == "1.31.0");
+        (pair.OrtFlavor == "Stock" && pair.OrtPackageVersion == "1.32.0" && pair.OrtVersion == "1.32.0");
 
     internal static string HashFile(string path)
     {

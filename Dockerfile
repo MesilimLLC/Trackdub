@@ -48,7 +48,7 @@ RUN \
 # Microsoft.ML.OnnxRuntime.Gpu.Linux package (version = OnnxRuntimeVersion in
 # Directory.Packages.props). Desktop/Windows publishes are unaffected.
 RUN \
-    GPU_CORE="$HOME/.nuget/packages/microsoft.ml.onnxruntime.gpu.linux/1.31.0/runtimes/linux-x64/native/libonnxruntime.so" \
+    GPU_CORE="$HOME/.nuget/packages/microsoft.ml.onnxruntime.gpu.linux/1.32.0/runtimes/linux-x64/native/libonnxruntime.so" \
     && test -f "$GPU_CORE" \
     && cp "$GPU_CORE" /app/publish/libonnxruntime.so
 
