@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-15T00:06:41Z",
+  "title": "Design System: DubBench",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "ThemeAccentBrush",
+        "canonical": "oklch(72.0% 0.132 178.3)",
+        "light": "#009688",
+        "wired": false,
+        "tonalRamp": ["#00120B", "#003325", "#005642", "#007862", "#009B83", "#02BFA5", "#88DCC9", "#DDF5EE"]
+      },
+      "accent-light": {
+        "role": "primary",
+        "displayName": "ThemeAccentBrush (light)",
+        "canonical": "oklch(60.5% 0.107 183.4)",
+        "tonalRamp": ["#00110D", "#003129", "#005348", "#007467", "#039789", "#44BBAC", "#94D9CE", "#E0F4F0"]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "ThemeBackgroundBrush",
+        "canonical": "oklch(21.8% 0.000 89.9)",
+        "light": "#F5F5F5",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "SidebarBackgroundBrush",
+        "canonical": "oklch(23.5% 0.000 89.9)",
+        "light": "#EEEEEE",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "content": {
+        "role": "neutral",
+        "displayName": "ContentBackgroundBrush",
+        "canonical": "oklch(26.4% 0.000 89.9)",
+        "light": "#FAFAFA",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "ThemeSurfaceBrush",
+        "canonical": "oklch(29.7% 0.000 89.9)",
+        "light": "#FFFFFF",
+        "wired": false,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "ThemeForegroundBrush",
+        "canonical": "oklch(93.1% 0.000 89.9)",
+        "light": "#212121",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "ThemeTextSecondaryBrush",
+        "canonical": "oklch(69.9% 0.000 89.9)",
+        "light": "#757575",
+        "wired": false,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "BorderBrush",
+        "canonical": "oklch(36.0% 0.000 89.9)",
+        "light": "#E0E0E0",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "tab-inactive": {
+        "role": "neutral",
+        "displayName": "TabInactiveBrush",
+        "canonical": "oklch(52.8% 0.000 89.9)",
+        "light": "#9E9E9E",
+        "wired": true,
+        "tonalRamp": ["#0B0B0B", "#252525", "#424242", "#616161", "#828282", "#A5A5A5", "#C9C9C9", "#EEEEEE"]
+      },
+      "error": {
+        "role": "error",
+        "displayName": "ThemeErrorBrush",
+        "canonical": "oklch(67.9% 0.209 24.7)",
+        "light": "#D32F2F",
+        "wired": false,
+        "tonalRamp": ["#260000", "#5C0000", "#920000", "#BB0018", "#E5373C", "#FF615F", "#FFA49C", "#FFE4E1"]
+      },
+      "success": {
+        "role": "success",
+        "displayName": "SuccessGreenBrush",
+        "canonical": "oklch(67.3% 0.162 144.2)",
+        "light": "#388E3C",
+        "wired": false,
+        "tonalRamp": ["#001200", "#003200", "#005500", "#007713", "#359A3B", "#5CBF5F", "#9EDC9D", "#E2F5E1"]
+      },
+      "warning": {
+        "role": "warning",
+        "displayName": "WarningOrangeBrush",
+        "canonical": "oklch(77.0% 0.174 64.1)",
+        "light": "#F57C00",
+        "wired": false,
+        "tonalRamp": ["#1E0100", "#4C0600", "#7B1B00", "#A14100", "#C76400", "#EE8800", "#FDB977", "#FFEAD7"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "FontSizeTitle", "purpose": "Defined at 20. Not referenced by a view." },
+      "heading": { "displayName": "HeadingFontSize", "purpose": "Defined at 18. Page titles hardcode 18 and SemiBold instead of binding the key." },
+      "body": { "displayName": "BodyFontSize", "purpose": "Defined at 14. Not referenced." },
+      "caption": { "displayName": "CaptionFontSize", "purpose": "Defined at 12. Not referenced. One view hardcodes 11, which is off the scale." },
+      "mono": { "displayName": "MonospaceFontSize", "purpose": "Defined at 13. No monospace family is set." },
+      "micro": { "displayName": "FontSizeMicro", "purpose": "Defined at 10. Not referenced." }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      { "name": "window", "value": "960px" },
+      { "name": "window-min", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Rail button",
+      "kind": "nav",
+      "refersTo": "nav-button",
+      "description": "Icon-rail button as implemented. Transparent, inactive brush, emoji content. Views do not swap in the active brush.",
+      "html": "<button class=\"ds-nav-btn\" aria-label=\"ONNX Model\">🔬</button>",
+      "css": ".ds-nav-btn { width: 36px; height: 36px; padding: 0; border: none; background: transparent; color: #6B6B6B; font-size: 18px; line-height: 36px; }"
+    },
+    {
+      "name": "Run button",
+      "kind": "button",
+      "refersTo": "run-button",
+      "description": "Default Fluent button at the size the views set. ButtonPrimaryBackground is defined and not applied, so this specimen does not paint the accent.",
+      "html": "<button class=\"ds-run-btn\">Run Benchmark</button>",
+      "css": ".ds-run-btn { width: 200px; height: 36px; }"
+    },
+    {
+      "name": "Result panel",
+      "kind": "card",
+      "refersTo": "result-panel",
+      "description": "Bordered result region. No fill and no shadow.",
+      "html": "<div class=\"ds-result-panel\">Stage result</div>",
+      "css": ".ds-result-panel { border: 1px solid #3D3D3D; border-radius: 6px; padding: 12px; color: #E8E8E8; }"
+    },
+    {
+      "name": "Leaderboard row",
+      "kind": "card",
+      "refersTo": "leaderboard-row",
+      "description": "Local-runs row. Sidebar fill, 4px corners, no border.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-row-title\">Scenario</span><span>00:12</span></div>",
+      "css": ".ds-row { display: flex; justify-content: space-between; background: #1E1E1E; color: #E8E8E8; border-radius: 4px; padding: 10px; } .ds-row-title { font-weight: 600; }"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "Stock text field. DubBench sets no stroke, fill, or radius. The border here is the theme BorderBrush so the specimen is visible, not a view style.",
+      "html": "<input class=\"ds-field\" placeholder=\"Path to .onnx model file...\">",
+      "css": ".ds-field { width: 100%; box-sizing: border-box; background: #252525; color: #E8E8E8; border: 1px solid #3D3D3D; padding: 8px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Not chosen",
+    "overview": "This file records the only visual system in the Trackdub public core: DubBench, the Avalonia benchmark harness under src/DubBench. It is not the commercial workstation shell. DubBench requests the dark theme and loads FluentTheme for control chrome. Color and type size live in two resource dictionaries with the same keys. The frontmatter uses the dark values. The implemented shell is a 50px icon rail plus a content pane. Depth is a stack of grays. Several brushes are defined and never referenced by a view or by C#.",
+    "keyCharacteristics": [
+      "Dark is the default. Light is a paired dictionary, not a separate product.",
+      "FluentTheme supplies font, hover, and focus. DubBench sets none of those.",
+      "Depth is tonal. No shadow is defined.",
+      "The accent, status, and primary-button brushes are defined and unwired.",
+      "Corners in views are 4px or 6px, as literals, not as theme resources."
+    ],
+    "rules": [
+      {
+        "name": "The Unwired Brush Rule",
+        "body": "A brush in the theme dictionary is not a component style until a view or code-behind references it. Accent, tab-active, primary-button, success, warning, and error are defined and unused in the views and C# scanned for this file.",
+        "section": "colors"
+      },
+      {
+        "name": "The Alias Rule",
+        "body": "Do not add a new pigment for TabActiveBrush, ThemeBorderBrush, or dark ButtonPrimaryText. They repeat an existing hex.",
+        "section": "colors"
+      },
+      {
+        "name": "The Hardcoded Size Rule",
+        "body": "Do not treat the typography keys as live. Views hardcode 18, and one view uses 11, which the dictionary does not define.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tone Stack Rule",
+        "body": "Do not add a shadow to separate rail, content, and panels. The dictionaries already separate them by tone, and the views use a 1px border where a region needs an edge.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do treat dark as the default, because App.axaml sets RequestedThemeVariant=\"Dark\".",
+      "Do keep the light dictionary as the same keys with different hex values.",
+      "Do separate regions with the tone stack and a 1px border, because that is the implemented depth model.",
+      "Do keep rail buttons at 36px inside the 50px column, with a tooltip and an accessible name."
+    ],
+    "donts": [
+      "Don't claim the accent or the status brushes are on screen. They are defined and unreferenced.",
+      "Don't add a shadow token. None exists.",
+      "Don't set a font family in new DubBench views unless the theme dictionary gains one. None is set today.",
+      "Don't document the commercial Avalonia shell from this file. It is not in this repo.",
+      "Don't invent a creative north star, a poetic color name, or a component mood. That round was unanswered."
+    ]
+  }
+}
