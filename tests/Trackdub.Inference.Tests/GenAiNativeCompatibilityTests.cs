@@ -79,6 +79,15 @@ public sealed class GenAiNativeCompatibilityTests
         Assert.Equal(supported, GenAiNativeRuntimeSelection.IsSupported(pair));
     }
 
+    [Theory]
+    [InlineData("0.20.0", true)]
+    [InlineData("0.21.0", false)]
+    public void WindowsMlOrtSupportsGenAiPairsOnlyOnTheAllowList(string genAiVersion, bool supported)
+    {
+        var pair = new NativePairManifest("WindowsML", "2.4.89", "1.27.1", "WinML", genAiVersion, "win-x64", "ort", "genai");
+        Assert.Equal(supported, GenAiNativeRuntimeSelection.IsSupported(pair));
+    }
+
     [Fact]
     public void ReplacedNativeFileInvalidatesProvenance()
     {
