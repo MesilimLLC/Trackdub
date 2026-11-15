@@ -79,6 +79,15 @@ public sealed class GenAiNativeCompatibilityTests
         Assert.Equal(supported, GenAiNativeRuntimeSelection.IsSupported(pair));
     }
 
+    [Theory]
+    [InlineData("0.20.0", true)]
+    [InlineData("0.21.0", false)]
+    public void WindowsMlOrtSupportsGenAiPairsOnlyOnTheAllowList(string genAiVersion, bool supported)
+    {
+        var pair = new NativePairManifest("WindowsML", "2.4.89", "1.27.1", "WinML", genAiVersion, "win-x64", "ort", "genai");
+        Assert.Equal(supported, GenAiNativeRuntimeSelection.IsSupported(pair));
+    }
+
     [Fact]
     public void ReplacedNativeFileInvalidatesProvenance()
     {
@@ -140,14 +149,9 @@ public sealed class GenAiNativeCompatibilityTests
 
         string genAiVersion = ResolveVersion(packageVersions.Descendants("PackageVersion")
             .Single(element => (string?)element.Attribute("Include") == genAiPackageId));
-        if (!winMl)
-        {
-            Assert.All(packageVersions.Descendants("PackageVersion")
-                    .Where(element => ((string?)element.Attribute("Include")) is { } include
-                        && include.StartsWith("Microsoft.ML.OnnxRuntimeGenAI", StringComparison.Ordinal)
-                        && include != "Microsoft.ML.OnnxRuntimeGenAI.WinML"),
-                element => Assert.Equal(genAiVersion, ResolveVersion(element)));
-        }
+        Assert.All(packageVersions.Descendants("PackageVersion")
+                .Where(element => ((string?)element.Attribute("Include"))?.StartsWith("Microsoft.ML.OnnxRuntimeGenAI", StringComparison.Ordinal) == true),
+            element => Assert.Equal(genAiVersion, ResolveVersion(element)));
         var pair = new NativePairManifest(winMl ? "WindowsML" : "Stock", ortPackageVersion, ortVersion,
             genAiFlavor, genAiVersion, "win-x64", "ort", "genai");
 
