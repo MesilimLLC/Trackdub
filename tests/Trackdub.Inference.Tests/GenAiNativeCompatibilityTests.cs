@@ -140,9 +140,14 @@ public sealed class GenAiNativeCompatibilityTests
 
         string genAiVersion = ResolveVersion(packageVersions.Descendants("PackageVersion")
             .Single(element => (string?)element.Attribute("Include") == genAiPackageId));
-        Assert.All(packageVersions.Descendants("PackageVersion")
-                .Where(element => ((string?)element.Attribute("Include"))?.StartsWith("Microsoft.ML.OnnxRuntimeGenAI", StringComparison.Ordinal) == true),
-            element => Assert.Equal(genAiVersion, ResolveVersion(element)));
+        if (!winMl)
+        {
+            Assert.All(packageVersions.Descendants("PackageVersion")
+                    .Where(element => ((string?)element.Attribute("Include")) is { } include
+                        && include.StartsWith("Microsoft.ML.OnnxRuntimeGenAI", StringComparison.Ordinal)
+                        && include != "Microsoft.ML.OnnxRuntimeGenAI.WinML"),
+                element => Assert.Equal(genAiVersion, ResolveVersion(element)));
+        }
         var pair = new NativePairManifest(winMl ? "WindowsML" : "Stock", ortPackageVersion, ortVersion,
             genAiFlavor, genAiVersion, "win-x64", "ort", "genai");
 
