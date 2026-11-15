@@ -4,13 +4,13 @@
 
 ## Platform
 
-undecided
+desktop
 
-Inferred, not confirmed. The interview timed out. README.md and docs/strategy/investor-deck-brief.md describe a cross-platform Avalonia desktop workstation for Windows, macOS, and Linux. That is not `web`, `ios`, `android`, or `adaptive`, so this field is left undecided rather than mapped onto a schema value the product does not match.
+Confirmed. Avalonia on Windows, macOS, and Linux. This is not `web`, `ios`, `android`, or `adaptive`. The schema list does not have a desktop value. Record `desktop` anyway, because mapping it onto one of those four would be false.
 
 ## Users
 
-Inferred, not confirmed. docs/strategy/investor-deck-brief.md marks target customers as missing input. README.md describes the intended job as an editorial dubbing workflow: ingest media, run staged pipeline work, inspect and correct intermediate artifacts, and export. A second audience, also inferred, is a developer using the public SDK or CLI. Which audience is primary was not confirmed.
+Confirmed. The primary user is an editor dubbing media on their own machine: run the pipeline, inspect each stage, correct the result, and export. A second audience is a developer integrating the public SDK or CLI. The editor is primary. Target industries, pricing, and market size remain unconfirmed. The investor brief still marks those as missing.
 
 ## Product Purpose
 
@@ -25,7 +25,7 @@ Inferred from README.md, not confirmed. The claimed gap is between black-box clo
 Inferred from this repository, not confirmed.
 
 - This checkout is the public core (README links to MesilimLLC/Trackdub, Apache-2.0): engine, SDK, CLI, pipeline, inference, media, licensing mechanisms, and tests.
-- The proprietary Avalonia desktop product (shell, branding, installer, signing, activation, and tier gating) is described as living in private Trackdub-gated. That repository is not this checkout.
+- Confirmed. The proprietary Avalonia desktop product (shell, branding, installer, signing, activation, and tier gating) lives in private Trackdub-gated. The design record for that shell belongs in that repo, not in this public core, and it is not the DubBench theme.
 - api.trackdub, portal.trackdub, and trackdub.com are named as separate private repositories. No pricing, activation secrets, or customer data live here.
 - The only visual implementation in this checkout is DubBench, an Avalonia benchmark harness under src/DubBench. It requests the dark theme by default and also ships a light theme dictionary. It is not the commercial workstation shell.
 - The documented pipeline runs from media ingest through export, with optional separation, lip alignment, and visual-dubbing branches. Advanced lanes (managed glossary analyzers, some tokenization, visual dubbing, generated portraits) are tracked and are not claimed as shipped.
@@ -42,22 +42,24 @@ Inferred from README.md, AGENTS.md, and the docs tree, not confirmed.
 - Completed stages are not recomputed. A skipped or failed stage keeps prior artifacts and records an explicit reason.
 - Honest readiness: registered, downloaded, ran, and succeeded stay separate states.
 - Legal entity is Mesilim LLC. Trackdub is the product name. The docs tree sometimes writes the GitHub org as Mesililm-LLC; the README link uses MesilimLLC. The live org name was not re-checked in this pass.
-- Undecided, and must not be invented: primary user, target customer segments, pricing, traction, market size, any accessibility standard, and whether future design work in this repo should follow DubBench or the private desktop shell.
+- Confirmed scope: future design work follows the commercial desktop shell in Trackdub-gated, not DubBench.
+- Still undecided, and must not be invented: target customer segments beyond the two audiences above, pricing, traction, market size, and any accessibility standard.
 
 ## Brand Commitments
 
-Inferred, not confirmed. No binding visual direction was collected.
+Confirmed in the naming round. Not a palette. Values live in Trackdub-gated `DESIGN.md`.
 
 - Name: Trackdub. Legal entity: Mesilim LLC.
-- Mark on disk: assets/trackdubicon.png, referenced by README.md. It was not inspected as a design system.
+- Visual system name: The Editorial Bench.
+- Mark on disk in this repo: assets/trackdubicon.png. It was not inspected as the shell system.
 
 ## Evidence on Hand
 
 - README.md: product statement, pipeline, open-core split, and status.
 - docs/strategy/investor-deck-brief.md: the same narrative, plus explicit missing input for customers, pricing, traction, and market size.
-- assets/trackdubicon.png: icon referenced by the README.
-- src/DubBench/Resources/DubBenchTheme.axaml and DubBenchThemeLight.axaml: the only token dictionaries in this checkout.
-- Absences future work must not fabricate: customer quotes, pricing, revenue, user counts, market size, testimonials, and a visual system for the commercial desktop shell. That shell is not in this repo.
+- The commercial shell theme is in Trackdub-gated, `src/Trackdub.App.Avalonia/Resources/ThemeResources.axaml`. The design record belongs there.
+- src/DubBench is a benchmark harness. It is not the shell.
+- Absences future work must not fabricate: customer quotes, pricing, revenue, user counts, market size, testimonials.
 
 ## Product Principles
 
