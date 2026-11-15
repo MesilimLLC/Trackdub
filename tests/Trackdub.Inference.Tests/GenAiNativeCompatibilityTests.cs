@@ -68,6 +68,17 @@ public sealed class GenAiNativeCompatibilityTests
         });
     }
 
+    [Theory]
+    [InlineData("Cpu", "0.20.0", true)]
+    [InlineData("Cuda", "0.20.0", true)]
+    [InlineData("Cpu", "0.21.0", false)]
+    [InlineData("WinML", "0.20.0", false)]
+    public void StockOrtSupportsGenAiPairsOnlyOnTheAllowList(string genAiFlavor, string genAiVersion, bool supported)
+    {
+        var pair = new NativePairManifest("Stock", "1.32.0", "1.32.0", genAiFlavor, genAiVersion, "win-x64", "ort", "genai");
+        Assert.Equal(supported, GenAiNativeRuntimeSelection.IsSupported(pair));
+    }
+
     [Fact]
     public void ReplacedNativeFileInvalidatesProvenance()
     {
