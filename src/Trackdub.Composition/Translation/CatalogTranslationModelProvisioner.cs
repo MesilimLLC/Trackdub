@@ -62,11 +62,15 @@ public sealed class CatalogTranslationModelProvisioner(
     {
         if (string.IsNullOrWhiteSpace(sourceLanguage) || sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase) ||
             sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)) return preferredModelAlias;
-        bool explicitSelection = !string.IsNullOrWhiteSpace(preferredModelAlias);
-        bool registeredSelection = explicitSelection && registry.TryResolve(preferredModelAlias!, out _);
-        bool catalogReference = preferredModelAlias?.StartsWith("hf:", StringComparison.Ordinal) == true ||
-            preferredModelAlias?.StartsWith("onnx-community/opus-mt-", StringComparison.Ordinal) == true ||
-            preferredModelAlias?.StartsWith("Xenova/opus-mt-", StringComparison.Ordinal) == true;
+        // The Opus auto sentinel behaves like no explicit pick for provisioning (auto-pick the
+        // covering Opus model below), but the original alias is preserved on every early return
+        // so the router can still emit its Opus-specific message instead of pivoting.
+        string? effectiveAlias = ResolveEffectiveAlias(preferredModelAlias);
+        bool explicitSelection = !string.IsNullOrWhiteSpace(effectiveAlias);
+        bool registeredSelection = explicitSelection && registry.TryResolve(effectiveAlias!, out _);
+        bool catalogReference = effectiveAlias?.StartsWith("hf:", StringComparison.Ordinal) == true ||
+            effectiveAlias?.StartsWith("onnx-community/opus-mt-", StringComparison.Ordinal) == true ||
+            effectiveAlias?.StartsWith("Xenova/opus-mt-", StringComparison.Ordinal) == true;
         if (explicitSelection && !registeredSelection && !catalogReference) return preferredModelAlias;
         if (!registeredSelection) await RefreshAsync(cancellationToken).ConfigureAwait(false);
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
@@ -79,13 +83,13 @@ public sealed class CatalogTranslationModelProvisioner(
         var installed = cacheInventory is null ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) :
             (await cacheInventory.LoadAsync(cancellationToken).ConfigureAwait(false)).Select(record => record.ModelId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var candidates = registry.Entries.Where(entry => entry.Task == "translation" && entry.CommercialAllowed && entry.CommercialUseVerified)
-            .OrderBy(entry => entry.LanguageCoverage.LanguagePairs.Count == 1 ? 0 : 1)
-            .ThenBy(entry => installed.Contains(entry.ModelId) ? 0 : 1)
+            .OrderBy(entry => installed.Contains(entry.ModelId) ? 0 : 1)
+            .ThenBy(entry => entry.LanguageCoverage.LanguagePairs.Count == 1 ? 0 : 1)
             .ThenBy(entry => entry.SourceUrl.Contains("/onnx-community/", StringComparison.Ordinal) ? 0 : 1)
             .ThenBy(entry => entry.ModelId, StringComparer.Ordinal);
-        BundledModelManifestEntry? selected = !string.IsNullOrWhiteSpace(preferredModelAlias)
-            ? candidates.FirstOrDefault(entry => entry.ModelId.Equals(preferredModelAlias, StringComparison.OrdinalIgnoreCase) ||
-                entry.Aliases.Contains(preferredModelAlias, StringComparer.OrdinalIgnoreCase))
+        BundledModelManifestEntry? selected = !string.IsNullOrWhiteSpace(effectiveAlias)
+            ? candidates.FirstOrDefault(entry => entry.ModelId.Equals(effectiveAlias, StringComparison.OrdinalIgnoreCase) ||
+                entry.Aliases.Contains(effectiveAlias, StringComparer.OrdinalIgnoreCase))
             : candidates.FirstOrDefault(entry => entry.EngineFamily == "opus-mt" && entry.LanguageCoverage.LanguagePairs.Any(pair =>
                 pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) && pair.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)));
         if (selected is null) return preferredModelAlias;
@@ -107,6 +111,9 @@ public sealed class CatalogTranslationModelProvisioner(
         }
         return selected.Aliases.FirstOrDefault() ?? selected.ModelId;
     }
+
+    private static string? ResolveEffectiveAlias(string? preferredModelAlias) =>
+        OpusMtAutoModel.IsAutoAlias(preferredModelAlias) ? null : preferredModelAlias;
 
     private static bool CanProvisionSelectedModel(BundledModelManifestEntry selected, bool explicitSelection) =>
         selected.EngineFamily == "opus-mt" ||

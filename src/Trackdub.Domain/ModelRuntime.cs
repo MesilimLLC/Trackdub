@@ -1,5 +1,7 @@
 namespace Trackdub.Domain;
 
+public sealed record ModelLanguagePair(string SourceLanguage, string TargetLanguage);
+
 public sealed record LocalModelCacheRecord
 {
     public LocalModelCacheRecord(
@@ -197,9 +199,12 @@ public sealed record ModelInventoryEntry(
     bool IsOliveOptimizable = false,
     ModelOptimizationAvailability? OptimizationAvailability = null,
     IReadOnlyList<ModelOptimizedVariantInfo>? OptimizedVariants = null,
-    IReadOnlyList<string>? Aliases = null)
+    IReadOnlyList<string>? Aliases = null,
+    IReadOnlyList<ModelLanguagePair>? LanguagePairs = null)
 {
     public IReadOnlyList<ModelOptimizedVariantInfo> OptimizedVariants { get; init; } = OptimizedVariants ?? [];
 
     public IReadOnlyList<string> Aliases { get; init; } = Aliases ?? [];
+
+    public IReadOnlyList<ModelLanguagePair> LanguagePairs { get; init; } = LanguagePairs ?? [];
 }

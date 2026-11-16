@@ -639,6 +639,29 @@ public sealed class ModelInventoryServiceTests : IDisposable
         return (BundledModelManifestRegistry.Load(manifestPath), storagePaths);
     }
 
+    [Fact]
+    public async Task GetByModelIdAsync_populates_structured_language_pairs()
+    {
+        (BundledModelManifestRegistry registry, TrackdubStoragePaths storagePaths) = CreateRegistry(
+            """
+            "language_coverage": {
+              "language_pairs": [
+                { "source": "en", "target": "pt" },
+                { "source": "en", "target": "es" }
+              ]
+            },
+            """);
+        var service = new ModelInventoryService(registry, new LocalModelCacheRecordStore(storagePaths), storagePaths);
+
+        ModelInventoryEntry? entry = await service.GetByModelIdAsync(
+            "example/translation-model",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(entry);
+        Assert.Contains(entry!.LanguagePairs, pair => pair.SourceLanguage == "en" && pair.TargetLanguage == "pt");
+        Assert.Contains(entry.LanguagePairs, pair => pair.SourceLanguage == "en" && pair.TargetLanguage == "es");
+    }
+
     private async Task<LocalModelCacheRecordStore> InstallModelAsync(
         TrackdubStoragePaths storagePaths,
         params string[] relativeFiles)

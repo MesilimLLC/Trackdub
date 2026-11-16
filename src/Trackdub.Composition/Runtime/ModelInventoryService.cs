@@ -108,7 +108,50 @@ public sealed class ModelInventoryService(
             IsOliveOptimizable: optimizationAvailability.CanOptimize,
             OptimizationAvailability: optimizationAvailability,
             OptimizedVariants: BuildOptimizedVariants(cacheRecord),
-            Aliases: manifest.Aliases);
+            Aliases: manifest.Aliases,
+            LanguagePairs: BuildLanguagePairs(manifest));
+    }
+
+    private static IReadOnlyList<Trackdub.Domain.ModelLanguagePair> BuildLanguagePairs(BundledModelManifestEntry manifest)
+    {
+        var pairs = new HashSet<(string Source, string Target)>(ValueTupleComparer.Instance);
+        foreach (Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair pair in manifest.LanguageCoverage.LanguagePairs)
+        {
+            pairs.Add((pair.SourceLanguage, pair.TargetLanguage));
+        }
+
+        pairs.UnionWith(ExpandTargetPrefixes(manifest));
+        return pairs
+            .Select(pair => new Trackdub.Domain.ModelLanguagePair(pair.Source, pair.Target))
+            .ToArray();
+    }
+
+    private static IEnumerable<(string Source, string Target)> ExpandTargetPrefixes(BundledModelManifestEntry manifest)
+    {
+        if (manifest.TargetPrefixes is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return manifest.LanguageCoverage.SourceLanguages
+            .SelectMany(
+                source => manifest.TargetPrefixes.Keys,
+                (source, target) => (Source: source, Target: target))
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Source) && !string.IsNullOrWhiteSpace(pair.Target));
+    }
+
+    private sealed class ValueTupleComparer : IEqualityComparer<(string Source, string Target)>
+    {
+        public static readonly ValueTupleComparer Instance = new();
+
+        public bool Equals((string Source, string Target) x, (string Source, string Target) y) =>
+            string.Equals(x.Source, y.Source, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.Target, y.Target, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Source, string Target) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Source ?? string.Empty),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Target ?? string.Empty));
     }
 
     private async Task<IReadOnlyList<ProviderCapability>> GetProviderCapabilitiesAsync(CancellationToken cancellationToken)
@@ -544,7 +587,7 @@ public sealed class ModelInventoryService(
 
         if (coverage.LanguagePairs.Count == 1)
         {
-            ModelLanguagePair pair = coverage.LanguagePairs[0];
+            Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair pair = coverage.LanguagePairs[0];
             return $"Language scope: {FormatLanguage(pair.SourceLanguage)} -> {FormatLanguage(pair.TargetLanguage)} only";
         }
 
@@ -597,7 +640,7 @@ public sealed class ModelInventoryService(
             var code => code.ToUpperInvariant()
         };
 
-    private static string? TryFormatSharedSourceLanguagePairs(IReadOnlyList<ModelLanguagePair> languagePairs)
+    private static string? TryFormatSharedSourceLanguagePairs(IReadOnlyList<Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair> languagePairs)
     {
         string? sourceLanguage = languagePairs[0].SourceLanguage;
         if (languagePairs.Any(pair => !pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase)))

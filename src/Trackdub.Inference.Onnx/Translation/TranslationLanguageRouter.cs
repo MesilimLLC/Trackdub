@@ -197,15 +197,18 @@ public sealed class TranslationLanguageRouter(
         string? displayName,
         string? preferredModelAlias = null)
     {
+        bool isOpusMtAuto = OpusMtAutoModel.IsAutoAlias(preferredModelAlias);
         string normalizedSourceLanguage = NormalizeLanguageCode(sourceLanguage)
-            ?? throw new InvalidOperationException("Source language is required.");
+            ?? (isOpusMtAuto ? "auto" : throw new InvalidOperationException("Source language is required."));
         string normalizedTargetLanguage = NormalizeLanguageCode(targetLanguage)
-            ?? throw new InvalidOperationException("Target language is required.");
+            ?? (isOpusMtAuto ? "unknown" : throw new InvalidOperationException("Target language is required."));
 
         if (normalizedSourceLanguage is "auto" or "und")
         {
             return new TranslationRouteSelection(normalizedSourceLanguage, normalizedTargetLanguage,
-                TranslationRoutingKind.Unavailable, false, "none", "Waiting for source language detection",
+                TranslationRoutingKind.Unavailable, false, "none",
+                isOpusMtAuto ? "Unavailable" : "Waiting for source language detection",
+                UnavailableReason: isOpusMtAuto ? "Transcribe first so the source language is known." : null,
                 PreparationStatus: TranslationPreparationStatus.SourceUnresolved);
         }
 
@@ -215,6 +218,11 @@ public sealed class TranslationLanguageRouter(
             !TranslationLanguageCoverageMatrix.GetTargets(normalizedSourceLanguage)
                 .Any(candidate => string.Equals(candidate.Code, normalizedTargetLanguage, StringComparison.Ordinal))))
         {
+            if (isOpusMtAuto)
+            {
+                return CreateUnavailablePreferredRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias!);
+            }
+
             return new TranslationRouteSelection(
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
@@ -226,7 +234,7 @@ public sealed class TranslationLanguageRouter(
         }
 
         string resolvedDisplayName = displayName ?? targetDefinition?.DisplayName ?? normalizedTargetLanguage;
-        if (TryResolvePreferredRoute(
+        if (!isOpusMtAuto && TryResolvePreferredRoute(
             context,
             normalizedSourceLanguage,
             normalizedTargetLanguage,
@@ -238,15 +246,19 @@ public sealed class TranslationLanguageRouter(
 
         // An installed direct model (e.g. a multi-pair opus-mt-en-ROMANCE) must win over an uninstalled
         // single-pair entry that sorts ahead of it; only an explicit alias forces that alias's download.
-        if (string.IsNullOrWhiteSpace(preferredModelAlias) &&
+        // The Opus auto sentinel follows the same installed-direct path, restricted to Opus entries.
+        if (isOpusMtAuto && TryResolveOpusAutoDirectRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, out TranslationRouteSelection? opusDirectRoute))
+        {
+            return opusDirectRoute!;
+        }
+
+        if (!isOpusMtAuto && string.IsNullOrWhiteSpace(preferredModelAlias) &&
             TryResolveDirectRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, out TranslationRouteSelection? directRoute))
         {
             return directRoute!;
         }
 
-        var downloadable = GetDirectEntriesForPair(context, normalizedSourceLanguage, normalizedTargetLanguage)
-            .FirstOrDefault(entry => entry.CommercialAllowed && entry.CommercialUseVerified && entry.DownloadFiles.Count > 0 &&
-                (string.IsNullOrWhiteSpace(preferredModelAlias) || HasAlias(entry, preferredModelAlias)));
+        BundledModelManifestEntry? downloadable = FindDownloadableEntry(context, normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias, isOpusMtAuto);
         if (context.CanDownload && downloadable is not null && !context.CacheIndex.ContainsKey(downloadable.ModelId))
             return new TranslationRouteSelection(normalizedSourceLanguage, normalizedTargetLanguage,
                 TranslationRoutingKind.Direct, false, ResolveProviderName(downloadable), "Download required",
@@ -256,7 +268,7 @@ public sealed class TranslationLanguageRouter(
 
         if (!string.IsNullOrWhiteSpace(preferredModelAlias))
         {
-            return CreateUnavailablePreferredRoute(normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias);
+            return CreateUnavailablePreferredRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, preferredModelAlias);
         }
 
         if (TryResolveMadladPivotRoute(context, normalizedSourceLanguage, normalizedTargetLanguage, out TranslationRouteSelection? madladRoute))
@@ -291,6 +303,36 @@ public sealed class TranslationLanguageRouter(
 
     private static bool HasAlias(BundledModelManifestEntry entry, string alias) =>
         entry.Aliases.Any(candidate => candidate.Equals(alias.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private bool TryResolveOpusAutoDirectRoute(
+        TranslationRoutingContext context,
+        string sourceLanguage,
+        string targetLanguage,
+        out TranslationRouteSelection? route)
+    {
+        route = null;
+        foreach (BundledModelManifestEntry entry in GetDirectEntriesForPair(context, sourceLanguage, targetLanguage)
+                     .Where(static entry => string.Equals(entry.EngineFamily, "opus-mt", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (TryResolveDirectRoute(context, sourceLanguage, targetLanguage, entry, out route))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static BundledModelManifestEntry? FindDownloadableEntry(
+        TranslationRoutingContext context,
+        string sourceLanguage,
+        string targetLanguage,
+        string? preferredModelAlias,
+        bool isOpusMtAuto) =>
+        GetDirectEntriesForPair(context, sourceLanguage, targetLanguage)
+            .FirstOrDefault(entry => entry.CommercialAllowed && entry.CommercialUseVerified && entry.DownloadFiles.Count > 0 &&
+                (!isOpusMtAuto || string.Equals(entry.EngineFamily, "opus-mt", StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(preferredModelAlias) || isOpusMtAuto || HasAlias(entry, preferredModelAlias)));
 
     private bool TryResolvePreferredRoute(
         TranslationRoutingContext context,
@@ -381,17 +423,35 @@ public sealed class TranslationLanguageRouter(
     }
 
     private static TranslationRouteSelection CreateUnavailablePreferredRoute(
+        TranslationRoutingContext context,
         string sourceLanguage,
         string targetLanguage,
         string preferredModelAlias)
     {
+        if (OpusMtAutoModel.IsAutoAlias(preferredModelAlias))
+        {
+            TranslationLanguageCoverageMatrix.TryGetLanguage(sourceLanguage, out TranslationLanguageDefinition? sourceDefinition);
+            TranslationLanguageCoverageMatrix.TryGetLanguage(targetLanguage, out TranslationLanguageDefinition? targetDefinition);
+            string sourceDisplay = sourceDefinition?.DisplayName ?? sourceLanguage;
+            string targetDisplay = targetDefinition?.DisplayName ?? targetLanguage;
+            bool hasCoverage = context.DirectEntriesByPair.ContainsKey((sourceLanguage, targetLanguage));
+            string reason = !hasCoverage
+                ? $"Opus MT has no model for {sourceDisplay} to {targetDisplay}. Choose a different target language or a cloud provider."
+                : !context.CanDownload
+                    ? $"Opus MT needs the {sourceDisplay} to {targetDisplay} model, but automatic model downloads are turned off. You can download it in Settings under Models."
+                    : $"Opus MT is unavailable for {sourceDisplay} to {targetDisplay}.";
+            return new TranslationRouteSelection(sourceLanguage, targetLanguage,
+                TranslationRoutingKind.Unavailable, false, "none", "Unavailable",
+                UnavailableReason: reason);
+        }
+
         bool gemmaRuntimeUnavailable = preferredModelAlias.Equals("gemma-4-e4b-translation", StringComparison.OrdinalIgnoreCase);
-        string reason = gemmaRuntimeUnavailable
+        string fallbackReason = gemmaRuntimeUnavailable
             ? "Gemma 4 E4B translation is not available until its runtime and memory requirements have been validated."
             : $"Selected translation model '{preferredModelAlias}' is not available for this language pair.";
         return new TranslationRouteSelection(sourceLanguage, targetLanguage,
             TranslationRoutingKind.Unavailable, false, gemmaRuntimeUnavailable ? "gemma-genai" : "none", "Unavailable",
-            UnavailableReason: reason);
+            UnavailableReason: fallbackReason);
     }
 
     private bool TryResolveMadladPivotRoute(
@@ -759,7 +819,7 @@ public sealed class TranslationLanguageRouter(
                 File.Exists(Path.Join(modelRootPath, "sentencepiece.model")));
     }
 
-    private static (string SourceLanguage, string TargetLanguage)? NormalizePair(ModelLanguagePair pair)
+    private static (string SourceLanguage, string TargetLanguage)? NormalizePair(Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair pair)
     {
         string? sourceLanguage = NormalizeLanguageCode(pair.SourceLanguage);
         string? targetLanguage = NormalizeLanguageCode(pair.TargetLanguage);

@@ -107,6 +107,23 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Theory]
+    [InlineData(false, "hf:onnx-community/opus-mt-xx-yy", "onnx-community/opus-mt-xx-yy")]
+    [InlineData(true, OpusMtAutoModel.Alias, null)]
+    public async Task OpusAutoSelectionProvisionsOnlyWhenDownloadsAllowed(bool offline, string expectedAlias, string? expectedSelected)
+    {
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        var downloader = new Downloader();
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = offline, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader, new TrackdubStoragePaths(Path.GetTempPath()));
+
+        string? alias = await service.EnsureAsync("xx", "yy", OpusMtAutoModel.Alias, CancellationToken.None);
+
+        Assert.Equal(expectedAlias, alias);
+        Assert.Equal(expectedSelected, downloader.Selected);
+    }
+
+    [Theory]
     [InlineData(NoDownloadScenario.Offline)]
     [InlineData(NoDownloadScenario.AutomaticDownloadDisabled)]
     [InlineData(NoDownloadScenario.UnknownSource)]
