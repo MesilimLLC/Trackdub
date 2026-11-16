@@ -35,7 +35,7 @@ import audiomath as am
 import metrics
 
 SEPARATOR_SR = 44100
-RESULTS_SCHEMA_VERSION = 5
+RESULTS_SCHEMA_VERSION = 6
 LENGTH_TOLERANCE_SAMPLES = 4
 
 PINNED_MANIFEST = (Path(__file__).resolve().parents[2] / "src" / "Trackdub.Inference" / "Runtime"
@@ -60,6 +60,7 @@ TRACKED_METRICS: dict[str, tuple[tuple[str, ...], bool]] = {
     "bed_si_sdr_inactive_db": (("damage", "si_sdr_inactive_db"), True),
     "bed_lsd_inactive_db": (("damage", "lsd_inactive_db"), False),
     "dialogue_si_sdr_db": (("dialogue_si_sdr_db",), True),
+    "false_dialogue_to_mixture_db": (("false_dialogue", "dialogue_to_mixture_db"), False),
     "reconstruction_residual_db": (("reconstruction", "residual_db"), False),
     "reconstruction_in_band_residual_db": (("reconstruction", "in_band_residual_db"), False),
     "reconstruction_in_band_residual_with_edges_db": (("reconstruction", "in_band_residual_with_edges_db"), False),
@@ -116,16 +117,45 @@ def write_pcm16(path: Path, x: np.ndarray, sr: int) -> np.ndarray:
     return q.astype(np.float32) / 32768.0
 
 
-def to_reference_domain(est_mono: np.ndarray, n_ref: int, sr_ref: int) -> tuple[np.ndarray, int]:
-    """Resample a 44.1 kHz mono stem to the clip rate and tile to stereo. Returns (stereo, length
-    adjustment in samples). Differences beyond a few samples are an error, not something to hide."""
-    est = am.resample(est_mono, SEPARATOR_SR, sr_ref)
+def load_stems(vocals_path: str | Path, bed_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Read both stems at 44.1 kHz in their own channel layout. Mono and stereo are accepted; when one stem is
+    mono and the other stereo, the mono one is tiled so the pair shares a layout."""
+    stems = []
+    for path in (vocals_path, bed_path):
+        x = am.load_audio(path, channels=None, sr=SEPARATOR_SR)
+        if x.shape[1] not in (1, 2):
+            raise EvalError(f"{Path(path).name}: stems must be mono or stereo, not {x.shape[1]} channels")
+        stems.append(x)
+    ch = max(x.shape[1] for x in stems)
+    vocals, bed = (x if x.shape[1] == ch else np.repeat(x, ch, axis=1) for x in stems)
+    return vocals, bed
+
+
+def gate_mixture(mixture44: np.ndarray, stem_channels: int) -> np.ndarray:
+    """What the stems must add up to: the mono downmix of the input for mono stems, the stereo input for stereo ones."""
+    return mixture44.mean(axis=1, keepdims=True) if stem_channels == 1 else mixture44
+
+
+def false_dialogue_record(clip: dict, corpus: Path, ref_d: np.ndarray, est_d: np.ndarray) -> dict | None:
+    """Dialogue-stem energy against the mixture on background-only clips (no active reference dialogue); None otherwise."""
+    sr = clip["sample_rate"]
+    if am.frame_activity(ref_d, sr).any():
+        return None
+    mix_ref = to_stereo(am.load_audio(corpus / clip["clip_id"] / "mixture.wav", clip["channels"], sr))
+    return metrics.false_dialogue(mix_ref, est_d).as_dict()
+
+
+def to_reference_domain(est: np.ndarray, n_ref: int, sr_ref: int) -> tuple[np.ndarray, int]:
+    """Resample a 44.1 kHz mono or stereo stem to the clip rate; a mono stem is tiled to stereo, a stereo stem is
+    scored as stereo. Returns (stereo, length adjustment in samples). Differences beyond a few samples are an
+    error, not something to hide."""
+    est = am.resample(est, SEPARATOR_SR, sr_ref)
     adjust = est.shape[0] - n_ref
     if abs(adjust) > LENGTH_TOLERANCE_SAMPLES:
         raise EvalError(f"stem length differs from the reference by {adjust} samples after resampling")
     est = est[:n_ref] if adjust >= 0 else np.concatenate(
         [est, np.zeros((-adjust, est.shape[1]), dtype=np.float32)], axis=0)
-    return np.repeat(est, 2, axis=1), adjust
+    return to_stereo(est), adjust
 
 
 def prepare_jobs(corpus: Path, work: Path, clips: list[dict]) -> tuple[list[dict], dict[str, np.ndarray]]:
@@ -244,10 +274,10 @@ def score_clip(clip: dict, corpus: Path, job: dict, timing: dict, mixture44: np.
         return record
     record["separator_ok"] = True
     try:
-        vocals = am.load_audio(job["vocals_output"], channels=1, sr=SEPARATOR_SR)
-        bed = am.load_audio(job["bed_output"], channels=1, sr=SEPARATOR_SR)
+        vocals, bed = load_stems(job["vocals_output"], job["bed_output"])
+        record["stem_channels"] = vocals.shape[1]
         record["reconstruction"] = metrics.check_reconstruction(
-            mixture44.mean(axis=1, keepdims=True), vocals, bed, SEPARATOR_SR, **(gate or {})).as_dict()
+            gate_mixture(mixture44, vocals.shape[1]), vocals, bed, SEPARATOR_SR, **(gate or {})).as_dict()
 
         sr, n = clip["sample_rate"], None
         ref_d = to_stereo(am.load_audio(corpus / clip["clip_id"] / "dialogue.wav", clip["channels"], sr))
@@ -266,6 +296,7 @@ def score_clip(clip: dict, corpus: Path, job: dict, timing: dict, mixture44: np.
         except metrics.MetricError as exc:
             record["damage"] = {"skipped": str(exc)}
         record["dialogue_si_sdr_db"] = metrics.si_sdr(ref_d, est_d)
+        record["false_dialogue"] = false_dialogue_record(clip, corpus, ref_d, est_d)
         record["ok"] = record["reconstruction"]["passed"]
         if not record["ok"]:
             reasons = record["reconstruction"].get("reasons") or ["reconstruction gate failed"]

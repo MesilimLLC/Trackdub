@@ -314,8 +314,33 @@ class BedDamageTests(unittest.TestCase):
         bad[5, 0] = np.inf
         with self.assertRaises(metrics.MetricError):
             metrics.bed_damage(self.d, self.b, bad, SR)
+
+    def test_background_only_clip_is_scored_as_wholly_inactive(self):
+        silent = np.zeros_like(self.d)
+        r = metrics.bed_damage(silent, self.b, self.b.copy(), SR)
+        self.assertEqual(r.inactive_fraction, 1.0)
+        self.assertIsNone(r.si_sdr_active_db)
+        self.assertEqual(r.si_sdr_inactive_db, metrics.DB_CEIL)
+        self.assertAlmostEqual(r.lsd_inactive_db, 0.0, places=6)
+        damaged = metrics.bed_damage(silent, self.b, 0.5 * self.b, SR)
+        self.assertAlmostEqual(damaged.lsd_inactive_db, 20 * np.log10(2.0), delta=0.01)
+        active, inactive = metrics._activity_masks(silent, SR, allow_silent=True)
+        self.assertFalse(active.any())
+        self.assertTrue(inactive.all())
         with self.assertRaises(metrics.MetricError):
-            metrics.bed_damage(np.zeros_like(self.d), self.b, self.b, SR)
+            metrics._activity_masks(silent, SR)
+
+
+class FalseDialogueTests(unittest.TestCase):
+    def test_dialogue_stem_energy_relative_to_mixture(self):
+        _, b = signals(seed=3)
+        self.assertEqual(metrics.false_dialogue(b, np.zeros_like(b)).dialogue_to_mixture_db, metrics.DB_FLOOR)
+        r = metrics.false_dialogue(b, 0.1 * b)
+        self.assertAlmostEqual(r.dialogue_to_mixture_db, -20.0, places=4)
+        self.assertAlmostEqual(r.dialogue_rms_dbfs, 10 * np.log10(float(((0.1 * b.astype(np.float64)) ** 2).mean())), places=4)
+        self.assertIsNone(metrics.false_dialogue(np.zeros_like(b), 0.1 * b).dialogue_to_mixture_db)
+        with self.assertRaises(metrics.MetricError):
+            metrics.false_dialogue(b, b[:-1])
 
 
 class ReconstructionTests(unittest.TestCase):
