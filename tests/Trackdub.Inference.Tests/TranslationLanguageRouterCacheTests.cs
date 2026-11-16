@@ -22,7 +22,7 @@ public sealed partial class TranslationLanguageRouterTests
         var original = registry.Entries.Single();
         registry.AddCatalogEntries([original with {
             ModelId = "test/xx-yy", Aliases = ["xx-yy"],
-            LanguageCoverage = new ModelLanguageCoverage([], [], [new ModelLanguagePair("xx", "yy")]),
+            LanguageCoverage = new ModelLanguageCoverage([], [], [new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("xx", "yy")]),
             CommercialAllowed = true, CommercialUseVerified = true, DownloadFiles = ["onnx/encoder_model.onnx"]
         }]);
         var router = CreateRouter(

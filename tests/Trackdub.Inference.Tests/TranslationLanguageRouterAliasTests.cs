@@ -58,7 +58,7 @@ public sealed partial class TranslationLanguageRouterTests
         {
             ModelId = "test/opus-mt-en-es",
             Aliases = ["en-es"],
-            LanguageCoverage = new ModelLanguageCoverage([], [], [new ModelLanguagePair("en", "es")]),
+            LanguageCoverage = new ModelLanguageCoverage([], [], [new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("en", "es")]),
             CommercialAllowed = true,
             CommercialUseVerified = true,
             DownloadFiles = ["onnx/encoder_model.onnx"]
