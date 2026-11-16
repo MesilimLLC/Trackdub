@@ -341,6 +341,11 @@ class FalseDialogueTests(unittest.TestCase):
         self.assertIsNone(metrics.false_dialogue(np.zeros_like(b), 0.1 * b).dialogue_to_mixture_db)
         with self.assertRaises(metrics.MetricError):
             metrics.false_dialogue(b, b[:-1])
+        for bad_value in (np.nan, np.inf):
+            bad = 0.1 * b
+            bad[7, 1] = bad_value
+            with self.subTest(bad_value=bad_value), self.assertRaises(metrics.MetricError):
+                metrics.false_dialogue(b, bad)
 
 
 class ReconstructionTests(unittest.TestCase):

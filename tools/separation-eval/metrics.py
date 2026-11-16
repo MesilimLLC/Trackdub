@@ -130,15 +130,23 @@ def project_onto_dialogue(d: np.ndarray, e: np.ndarray, max_lag: int) -> np.ndar
     return est
 
 
+def _check_signal(name: str, a: np.ndarray) -> None:
+    if a.ndim != 2:
+        raise MetricError(f"{name} must be shaped (samples, channels)")
+    if not np.isfinite(a).all():
+        raise MetricError(f"{name} contains NaN or infinite samples")
+
+
+def _validate_signals(**signals: np.ndarray) -> None:
+    """Every signal must be (samples, channels), finite, and the same shape as the others."""
+    for name, a in signals.items():
+        _check_signal(name, a)
+    if len({a.shape for a in signals.values()}) > 1:
+        raise MetricError("shape mismatch: " + ", ".join(f"{name} {a.shape}" for name, a in signals.items()))
+
+
 def _validate_triplet(ref_dialogue: np.ndarray, ref_bed: np.ndarray, est_bed: np.ndarray) -> None:
-    for name, a in (("ref_dialogue", ref_dialogue), ("ref_bed", ref_bed), ("est_bed", est_bed)):
-        if a.ndim != 2:
-            raise MetricError(f"{name} must be shaped (samples, channels)")
-        if not np.isfinite(a).all():
-            raise MetricError(f"{name} contains NaN or infinite samples")
-    if not (ref_dialogue.shape == ref_bed.shape == est_bed.shape):
-        raise MetricError(
-            f"shape mismatch: dialogue {ref_dialogue.shape}, ref bed {ref_bed.shape}, est bed {est_bed.shape}")
+    _validate_signals(ref_dialogue=ref_dialogue, ref_bed=ref_bed, est_bed=est_bed)
 
 
 def _activity_masks(ref_dialogue: np.ndarray, sr: int,
@@ -349,8 +357,7 @@ class FalseDialogueResult:
 
 
 def false_dialogue(mixture: np.ndarray, est_dialogue: np.ndarray) -> FalseDialogueResult:
-    if mixture.shape != est_dialogue.shape:
-        raise MetricError(f"shape mismatch: mixture {mixture.shape}, dialogue {est_dialogue.shape}")
+    _validate_signals(mixture=mixture, est_dialogue=est_dialogue)
     d_e = float((est_dialogue.astype(np.float64) ** 2).sum())
     m_e = float((mixture.astype(np.float64) ** 2).sum())
     return FalseDialogueResult(dialogue_to_mixture_db=_db(d_e, m_e) if m_e > 0.0 else None,
