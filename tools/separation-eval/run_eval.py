@@ -136,13 +136,22 @@ def gate_mixture(mixture44: np.ndarray, stem_channels: int) -> np.ndarray:
     return mixture44.mean(axis=1, keepdims=True) if stem_channels == 1 else mixture44
 
 
+def metric_or_skipped(measure: Callable, *args) -> dict:
+    """Run a metric; when it is undefined for this clip (MetricError), record it as skipped instead of failing the clip."""
+    try:
+        return measure(*args).as_dict()
+    except metrics.MetricError as exc:
+        return {"skipped": str(exc)}
+
+
 def false_dialogue_record(clip: dict, corpus: Path, ref_d: np.ndarray, est_d: np.ndarray) -> dict | None:
-    """Dialogue-stem energy against the mixture on background-only clips (no active reference dialogue); None otherwise."""
+    """Dialogue-stem energy against the mixture on background-only clips (no active reference dialogue); None otherwise.
+    A metric error is recorded as skipped, as for leakage and damage, rather than failing the clip."""
     sr = clip["sample_rate"]
     if am.frame_activity(ref_d, sr).any():
         return None
     mix_ref = to_stereo(am.load_audio(corpus / clip["clip_id"] / "mixture.wav", clip["channels"], sr))
-    return metrics.false_dialogue(mix_ref, est_d).as_dict()
+    return metric_or_skipped(metrics.false_dialogue, mix_ref, est_d)
 
 
 def to_reference_domain(est: np.ndarray, n_ref: int, sr_ref: int) -> tuple[np.ndarray, int]:
@@ -287,14 +296,8 @@ def score_clip(clip: dict, corpus: Path, job: dict, timing: dict, mixture44: np.
         est_b, adj_b = to_reference_domain(bed, n, sr)
         record["length_adjust_samples"] = {"dialogue": adj_d, "bed": adj_b}
 
-        try:
-            record["leakage"] = metrics.bed_leakage(ref_d, ref_b, est_b, sr).as_dict()
-        except metrics.MetricError as exc:
-            record["leakage"] = {"skipped": str(exc)}
-        try:
-            record["damage"] = metrics.bed_damage(ref_d, ref_b, est_b, sr).as_dict()
-        except metrics.MetricError as exc:
-            record["damage"] = {"skipped": str(exc)}
+        record["leakage"] = metric_or_skipped(metrics.bed_leakage, ref_d, ref_b, est_b, sr)
+        record["damage"] = metric_or_skipped(metrics.bed_damage, ref_d, ref_b, est_b, sr)
         record["dialogue_si_sdr_db"] = metrics.si_sdr(ref_d, est_d)
         record["false_dialogue"] = false_dialogue_record(clip, corpus, ref_d, est_d)
         record["ok"] = record["reconstruction"]["passed"]

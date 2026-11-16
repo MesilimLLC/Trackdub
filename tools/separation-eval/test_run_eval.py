@@ -183,6 +183,14 @@ class EvaluateTests(EvalTestBase):
         # About -20 dB: the stem is a tenth of the separator's input, which went through a 44.1 kHz PCM16 round trip.
         self.assertAlmostEqual(self.clip(leaky, "a10-dev-000")["false_dialogue"]["dialogue_to_mixture_db"], -20.0, delta=1.0)
 
+    def test_false_dialogue_error_is_skipped_not_a_clip_failure(self):
+        sep = fake_separator(lambda mono: (np.zeros_like(mono), mono))
+        with patch.object(run_eval.metrics, "false_dialogue", side_effect=run_eval.metrics.MetricError("bad shape")):
+            result = evaluate(self.root, self.corpus, sep)
+        a10 = self.clip(result, "a10-dev-000")
+        self.assertTrue(a10["ok"], a10["error"])
+        self.assertEqual(a10["false_dialogue"], {"skipped": "bad shape"})
+
     def test_stereo_stems_are_scored_in_stereo(self):
         mono = evaluate(self.root, self.corpus, fake_separator(lambda x: (np.zeros_like(x), x)))
         stereo = evaluate(self.root, self.corpus, fake_separator(lambda x: (np.zeros_like(x), x), stereo=True))
