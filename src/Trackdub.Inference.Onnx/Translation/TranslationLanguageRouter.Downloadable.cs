@@ -5,7 +5,23 @@ namespace Trackdub.Inference.Onnx.Translation;
 public sealed partial class TranslationLanguageRouter
 {
     private static BundledModelManifestEntry? FindDownloadableEntry(TranslationRoutingContext context, RouteQuery query) =>
-        GetDirectEntriesForPair(context, query).FirstOrDefault(entry => IsDownloadableEntry(entry, query));
+        // Skip cache hits here: installed resolution already failed for them above, so an
+        // uncached covering candidate must remain eligible for DownloadRequired.
+        GetDirectEntriesForPair(context, query)
+            .FirstOrDefault(entry => IsUncachedDownloadableEntry(context, entry, query));
+
+    private static bool IsUncachedDownloadableEntry(
+        TranslationRoutingContext context,
+        BundledModelManifestEntry entry,
+        RouteQuery query)
+    {
+        if (context.CacheIndex.ContainsKey(entry.ModelId))
+        {
+            return false;
+        }
+
+        return IsDownloadableEntry(entry, query);
+    }
 
     private static bool IsDownloadableEntry(BundledModelManifestEntry entry, RouteQuery query)
     {

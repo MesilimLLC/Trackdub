@@ -28,8 +28,9 @@ public sealed partial class CatalogTranslationModelProvisioner
             return EnsureSelection.None(explicitSelection);
         }
 
+        // Auto Opus selection must wait for Opus coverage, not just any translation family.
         bool shouldAwaitPending = !registeredSelection &&
-            (explicitSelection || !HasRegisteredDirectPair(sourceLanguage, targetLanguage));
+            (explicitSelection || !HasEligibleOpusPairCoverage(sourceLanguage, targetLanguage));
         await AwaitPendingRefreshAsync(shouldAwaitPending, cancellationToken).ConfigureAwait(false);
 
         BundledModelManifestEntry? selected = await SelectEntryAsync(sourceLanguage, targetLanguage, effectiveAlias, cancellationToken).ConfigureAwait(false);

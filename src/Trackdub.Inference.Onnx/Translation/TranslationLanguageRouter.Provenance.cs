@@ -8,7 +8,7 @@ public sealed partial class TranslationLanguageRouter
     // the recorded revision and hashes belong to; MADLAD's ModelId is google/madlad400-3b-mt but its
     // files come from tonythethompson/madlad400-3b-mt-onnx.
     internal static string ResolveProvenanceRepository(BundledModelManifestEntry entry) =>
-        TryGetHuggingFaceRepository(entry.SourceUrl, out string? repository) ? repository : entry.ModelId;
+        TryGetHuggingFaceRepository(entry.SourceUrl, out string? repository) ? repository! : entry.ModelId;
 
     private static bool TryGetHuggingFaceRepository(string sourceUrl, out string? repository)
     {

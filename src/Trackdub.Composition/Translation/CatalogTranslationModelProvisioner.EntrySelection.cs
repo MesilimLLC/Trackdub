@@ -1,3 +1,4 @@
+using Trackdub.Composition.Runtime;
 using Trackdub.Domain;
 using Trackdub.Inference.Runtime.ModelManifest;
 
@@ -11,8 +12,8 @@ public sealed partial class CatalogTranslationModelProvisioner
         string? effectiveAlias,
         CancellationToken cancellationToken)
     {
-        HashSet<string> installed = await LoadInstalledModelIdsAsync(cancellationToken).ConfigureAwait(false);
-        IEnumerable<BundledModelManifestEntry> candidates = BuildCandidates(installed);
+        ILookup<string, LocalModelCacheRecord> cacheByModelId = await LoadCacheByModelIdAsync(cancellationToken).ConfigureAwait(false);
+        IEnumerable<BundledModelManifestEntry> candidates = BuildCandidates(cacheByModelId);
         if (string.IsNullOrWhiteSpace(effectiveAlias))
         {
             return FindDefaultOpusEntry(candidates, sourceLanguage, targetLanguage);
@@ -21,22 +22,29 @@ public sealed partial class CatalogTranslationModelProvisioner
         return FindAliasedEntry(candidates, effectiveAlias);
     }
 
-    private async Task<HashSet<string>> LoadInstalledModelIdsAsync(CancellationToken cancellationToken)
+    private async Task<ILookup<string, LocalModelCacheRecord>> LoadCacheByModelIdAsync(CancellationToken cancellationToken)
     {
         if (cacheInventory is null)
         {
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return Array.Empty<LocalModelCacheRecord>().ToLookup(record => record.ModelId, StringComparer.OrdinalIgnoreCase);
         }
 
         IReadOnlyList<LocalModelCacheRecord> records = await cacheInventory.LoadAsync(cancellationToken).ConfigureAwait(false);
-        return records.Select(record => record.ModelId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return records.ToLookup(record => record.ModelId, StringComparer.OrdinalIgnoreCase);
     }
 
-    private IEnumerable<BundledModelManifestEntry> BuildCandidates(HashSet<string> installed) =>
+    private IEnumerable<BundledModelManifestEntry> BuildCandidates(
+        ILookup<string, LocalModelCacheRecord> cacheByModelId) =>
         registry.Entries
             .Where(entry => entry.Task == "translation" && entry.CommercialAllowed && entry.CommercialUseVerified)
-            .OrderBy(entry => installed.Contains(entry.ModelId) ? 0 : 1)
+            .OrderBy(entry => IsUsableInstalled(entry, cacheByModelId) ? 0 : 1)
             .ThenBy(entry => entry.LanguageCoverage.LanguagePairs.Count == 1 ? 0 : 1)
             .ThenBy(entry => entry.SourceUrl.Contains("/onnx-community/", StringComparison.Ordinal) ? 0 : 1)
             .ThenBy(entry => entry.ModelId, StringComparer.Ordinal);
+
+    private static bool IsUsableInstalled(
+        BundledModelManifestEntry entry,
+        ILookup<string, LocalModelCacheRecord> cacheByModelId) =>
+        cacheByModelId[entry.ModelId].Any(record =>
+            ModelInventoryService.DetermineState(entry, record) is ModelCacheState.Installed or ModelCacheState.Ready);
 }

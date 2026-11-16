@@ -90,6 +90,43 @@ public sealed partial class TranslationLanguageRouterTests
     }
 
     [Fact]
+    public async Task ResolveRouteAsync_WhenCachedIncompleteSinglePairExists_SelectsUncachedMultiPairDownload()
+    {
+        using var workspace = CreateWorkspace();
+        BundledModelManifestRegistry registry = workspace.WriteManifest(
+            CreateTranslationSpec("test/opus-mt-en-es", ["en-es"], "manifest-models/en-es"));
+        BundledModelManifestEntry singlePair = registry.Entries.Single();
+        registry.AddCatalogEntries(
+        [
+            singlePair with
+            {
+                ModelId = "test/opus-mt-en-ROMANCE",
+                Aliases = ["en-romance"],
+                LanguageCoverage = new ModelLanguageCoverage([], [],
+                [
+                    new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("en", "es"),
+                    new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("en", "fr")
+                ]),
+                CommercialAllowed = true,
+                CommercialUseVerified = true,
+                DownloadFiles = ["onnx/encoder_model.onnx"]
+            }
+        ]);
+        string incompleteRoot = workspace.CreateCacheRoot("test/opus-mt-en-es");
+        workspace.WriteCacheFile(incompleteRoot, "onnx/encoder_model.onnx");
+        TranslationLanguageRouter router = CreateRouter(
+            registry,
+            new RouterSettings(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }),
+            ("test/opus-mt-en-es", incompleteRoot));
+
+        TranslationRouteSelection route = await router.ResolveRouteAsync(
+            "en", "es", CancellationToken.None, preferredModelAlias: OpusMtAutoModel.Alias);
+
+        Assert.Equal(TranslationPreparationStatus.DownloadRequired, route.Status);
+        Assert.Equal("test/opus-mt-en-ROMANCE", route.ModelId);
+    }
+
+    [Fact]
     public async Task ResolveRouteAsync_WhenOpusAutoSourceUnknown_ReportsTranscribeFirst()
     {
         using var workspace = CreateWorkspace();

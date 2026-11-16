@@ -29,8 +29,12 @@ public sealed partial class CatalogTranslationModelProvisioner
     private static bool Covers(IReadOnlyList<string> languages, string language) =>
         languages.Any(candidate => candidate.Equals(language, StringComparison.OrdinalIgnoreCase) || candidate is "multi" or "any" or "*");
 
-    private bool HasRegisteredDirectPair(string sourceLanguage, string targetLanguage) =>
-        registry.Entries.Any(entry => entry.Task == "translation" &&
+    private bool HasEligibleOpusPairCoverage(string sourceLanguage, string targetLanguage) =>
+        registry.Entries.Any(entry =>
+            entry.Task == "translation" &&
+            entry.CommercialAllowed &&
+            entry.CommercialUseVerified &&
+            string.Equals(entry.EngineFamily, "opus-mt", StringComparison.OrdinalIgnoreCase) &&
             entry.LanguageCoverage.LanguagePairs.Any(pair =>
                 pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) &&
                 pair.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)));

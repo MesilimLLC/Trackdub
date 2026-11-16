@@ -1,3 +1,4 @@
+using Trackdub.Domain;
 using Trackdub.Inference.Runtime.ModelManifest;
 using Trackdub.Inference.Runtime.Planning;
 
