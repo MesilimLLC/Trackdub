@@ -27,16 +27,14 @@ jobs:
       issues: write
     steps:
       - name: Run CodeScene refactoring agent
-        uses: Mesililm-LLC/pr-refactoring-agent@58bd1554e60d5958fd7cd66e3e81591d662c2dd8 # v1.1.9 with isolated project config
+        uses: MesilimLLC/pr-refactoring-agent@61e04f98be3b66197686dfba84f9c6ebea2f7862 # v1.1.10 with Meta Model API support
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
         with:
           pr_number: ${{ inputs.pr_number || github.event.issue.number }}
           command: ${{ (github.event_name == 'workflow_dispatch' || github.event.comment.body == '/cs-agent') && '/cs-agent skill:fix-code-health-degradations' || github.event.comment.body }}
-          model: ${{ vars.CODESCENE_AGENT_MODEL || 'cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017' }}
+          model: ${{ vars.CODESCENE_AGENT_MODEL || 'model_api/muse-ember-1.0' }}
           codescene_token: ${{ secrets.CODESCENE_ACCESS_TOKEN }}
-          opencode_auth_json: ${{ secrets.OPENCODE_AUTH_JSON }}
 
 
 
