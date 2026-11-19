@@ -113,7 +113,9 @@ Do not make unsupported acceleration a hard blocker. If the app cannot use a GPU
 Trackdub caches compiled inference engines to reduce startup latency. The default desktop cache location for TensorRT is:
 `%LOCALAPPDATA%\Trackdub\EngineCache`
 
-`TRACKDUB_ENGINE_CACHE_ROOT` overrides the location; the Linux container sets it to `/data/engine-cache`. Classic TensorRT engines (server profile) are stored under `classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver, TensorRT binary and ONNX Runtime identity. On a server, build engines on the target instance type with `trackdub cache warm --provider tensorrt` (the default provider is `tensorrt-rtx`) and persist them; never copy a cache between GPU models or driver versions.
+`TRACKDUB_ENGINE_CACHE_ROOT` overrides the location; the Linux container sets it to `/data/engine-cache`. Classic TensorRT engines (server profile) are stored under `classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver, TensorRT binary and ONNX Runtime identity. On a server, build engines on the target instance type with `scripts/docker/seed-and-warm-gpu-worker.sh` using `TRACKDUB_GPU_PROFILE=server`; see the [onboarding provisioning commands](../handoff/snapsoft-onboarding.md#6-commands-you-will-use) for the complete model-set and Compose environment. The script supplies explicit `--model` paths from the reviewed `docker/poc-warm-models.server.txt` allow-list.
+
+For a single reviewed graph, use `trackdub cache warm --provider tensorrt --model <path-to-reviewed-graph.onnx>` (the default provider is `tensorrt-rtx`). Omitting `--model` scans the entire model cache, including graphs that can fail compilation or terminate the native process; do not use that scan for POC provisioning. Persist engines for the target GPU/driver; never copy a cache between GPU models or driver versions.
 
 - **Automatic Invalidation**: TensorRT verifies environment metadata embedded in the cached `.engine` files. It automatically invalidates the cache and triggers recompilation if it detects a mismatch in GPU architecture, NVIDIA Display Driver version, or specific ONNX model shapes/profiles.
 - **Manual Cache Clearing Rules**: If persistent inference crashes occur (especially following unexpected shutdowns or driver updates), or if the hardware is changed, users should manually delete all files in `%LOCALAPPDATA%\Trackdub\EngineCache`. The engines will automatically rebuild on their next use.
@@ -188,7 +190,7 @@ trackdub run pipeline --media in.mp4 --output ./project --preset <preset> \
   --result-file result.json --progress-file progress.jsonl
 ```
 
-It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor`, `trackdub models download|verify` and `trackdub cache warm` (with `--provider tensorrt` on the server profile, see 2.2.1) cover health checks, hash-verified model provisioning and engine builds.
+It writes the same per-stage project artifacts as the desktop app, plus a structured result file and a progress stream that a job runner can parse. `trackdub doctor` and `trackdub models download|verify` cover health checks and hash-verified model provisioning. For engine builds, use the reviewed provisioning script or an explicit `trackdub cache warm --provider tensorrt --model <path-to-reviewed-graph.onnx>` invocation on the server profile (see 2.2.1); do not scan the whole cache.
 
 Cloud presets fix the models, variants and per-stage providers for server runs (`src/Trackdub.Cli/PocServerPreset.cs`, `src/Trackdub.Cloud/Jobs/CloudPresets.cs`): `poc-server-v1` (English to Spanish) and `poc-server-zh-v1` (English to Chinese). Clients pick a preset name; they never supply commands, model IDs or paths.
 
@@ -201,7 +203,7 @@ Cloudflare API (auth, job record) -> SQS -> EC2 GPU worker (trackdub run pipelin
 - The existing Cloudflare API stays the authentication and job-recording front door. It enqueues to SQS and polls S3 for artifacts; status wiring back into the Cloudflare job API comes later.
 - The worker is the `server` container image, unchanged engine code, running the CLI. It reads the SQS message, fetches source media from S3, runs `trackdub run pipeline`, parses the result and progress files, and writes per-stage artifacts back to S3. `trackdub doctor` is its health check.
 - Instance candidates are G6 (NVIDIA L4) and G6e (NVIDIA L40S), selected from Mesilim's own benchmarks. The orchestrator (AWS Batch or Amazon ECS) is decided in the Design phase.
-- TensorRT engines are built once per instance type with `trackdub cache warm` and baked into the image or an EBS snapshot, to keep cold start under two minutes.
+- TensorRT engines are built on the target instance type with `scripts/docker/seed-and-warm-gpu-worker.sh` using the explicit server environment in the [onboarding provisioning commands](../handoff/snapsoft-onboarding.md#6-commands-you-will-use). It warms only the reviewed allow-list, not the whole cache. Persist those engines in the image or an EBS snapshot as the POC cold-start strategy; the under-two-minute target still requires measurement on the selected instance type.
 - The POC is a single US region. All transcription, translation and synthesis use Trackdub's own models; no stage is replaced by an AWS-managed AI service.
 - Deferred to a follow-on phase: status wiring into the Cloudflare job API, Spot capacity, autoscaling, billing, and production cutover.
 - The POC infrastructure-as-code and the worker job loop are SnapSoft deliverables; they are not in this repository yet.
