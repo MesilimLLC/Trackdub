@@ -130,22 +130,36 @@ def project_onto_dialogue(d: np.ndarray, e: np.ndarray, max_lag: int) -> np.ndar
     return est
 
 
+def _check_signal(name: str, a: np.ndarray) -> None:
+    if a.ndim != 2:
+        raise MetricError(f"{name} must be shaped (samples, channels)")
+    if not np.isfinite(a).all():
+        raise MetricError(f"{name} contains NaN or infinite samples")
+
+
+def _validate_signals(**signals: np.ndarray) -> None:
+    """Every signal must be (samples, channels), finite, and the same shape as the others."""
+    for name, a in signals.items():
+        _check_signal(name, a)
+    if len({a.shape for a in signals.values()}) > 1:
+        raise MetricError("shape mismatch: " + ", ".join(f"{name} {a.shape}" for name, a in signals.items()))
+
+
 def _validate_triplet(ref_dialogue: np.ndarray, ref_bed: np.ndarray, est_bed: np.ndarray) -> None:
-    for name, a in (("ref_dialogue", ref_dialogue), ("ref_bed", ref_bed), ("est_bed", est_bed)):
-        if a.ndim != 2:
-            raise MetricError(f"{name} must be shaped (samples, channels)")
-        if not np.isfinite(a).all():
-            raise MetricError(f"{name} contains NaN or infinite samples")
-    if not (ref_dialogue.shape == ref_bed.shape == est_bed.shape):
-        raise MetricError(
-            f"shape mismatch: dialogue {ref_dialogue.shape}, ref bed {ref_bed.shape}, est bed {est_bed.shape}")
+    _validate_signals(ref_dialogue=ref_dialogue, ref_bed=ref_bed, est_bed=est_bed)
 
 
-def _activity_masks(ref_dialogue: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
+def _activity_masks(ref_dialogue: np.ndarray, sr: int,
+                    allow_silent: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Sample-level (active, inactive) masks from the reference dialogue. The inactive mask is
-    guarded by GUARD_FRAMES on each side so reverb tails and onsets are not treated as untouched bed."""
+    guarded by GUARD_FRAMES on each side so reverb tails and onsets are not treated as untouched bed.
+    With `allow_silent`, a reference with no active frames (background-only input) gives an all-inactive
+    clip instead of an error: there is no dialogue to confuse the measure, so the whole bed should be untouched."""
     mask = am.frame_activity(ref_dialogue, sr)
     if not mask.any():
+        if allow_silent:
+            n = ref_dialogue.shape[0]
+            return np.zeros(n, dtype=bool), np.ones(n, dtype=bool)
         raise MetricError("reference dialogue has no active frames")
     frame = max(1, int(sr * 20 / 1000))
     n = ref_dialogue.shape[0]
@@ -312,9 +326,10 @@ def log_spectral_distance(ref: np.ndarray, est: np.ndarray, inactive: np.ndarray
 def bed_damage(ref_dialogue: np.ndarray, ref_bed: np.ndarray, est_bed: np.ndarray, sr: int) -> BedDamageResult:
     """Measure damage to the bed: SI-SDR overall and split by dialogue activity, plus log-spectral
     distance where no dialogue is present. Dialogue activity comes from the reference dialogue;
-    very quiet dialogue (below the activity floor) counts as inactive, so whispers are a known blind spot."""
+    very quiet dialogue (below the activity floor) counts as inactive, so whispers are a known blind spot.
+    A clip with no dialogue at all (A10) is scored as wholly inactive."""
     _validate_triplet(ref_dialogue, ref_bed, est_bed)
-    active, inactive = _activity_masks(ref_dialogue, sr)
+    active, inactive = _activity_masks(ref_dialogue, sr, allow_silent=True)
     lsd, frames = log_spectral_distance(ref_bed, est_bed, inactive, sr)
     return BedDamageResult(
         si_sdr_db=si_sdr(ref_bed, est_bed),
@@ -324,6 +339,29 @@ def bed_damage(ref_dialogue: np.ndarray, ref_bed: np.ndarray, est_bed: np.ndarra
         inactive_fraction=float(inactive.mean()),
         lsd_frames=frames,
     )
+
+
+@dataclass(frozen=True)
+class FalseDialogueResult:
+    """Dialogue-stem energy on background-only input (rubric section 4, A10), where the right output is silence.
+
+    dialogue_to_mixture_db: dialogue-stem energy relative to mixture energy, lower is better; DB_FLOOR when the stem
+        is silent, None when the mixture is silent too.
+    dialogue_rms_dbfs: dialogue-stem RMS over all samples and channels.
+    """
+    dialogue_to_mixture_db: float | None
+    dialogue_rms_dbfs: float
+
+    def as_dict(self) -> dict:
+        return {"dialogue_to_mixture_db": self.dialogue_to_mixture_db, "dialogue_rms_dbfs": self.dialogue_rms_dbfs}
+
+
+def false_dialogue(mixture: np.ndarray, est_dialogue: np.ndarray) -> FalseDialogueResult:
+    _validate_signals(mixture=mixture, est_dialogue=est_dialogue)
+    d_e = float((est_dialogue.astype(np.float64) ** 2).sum())
+    m_e = float((mixture.astype(np.float64) ** 2).sum())
+    return FalseDialogueResult(dialogue_to_mixture_db=_db(d_e, m_e) if m_e > 0.0 else None,
+                               dialogue_rms_dbfs=_db(d_e, est_dialogue.size))
 
 
 RECONSTRUCTION_GATE_DB = -60.0

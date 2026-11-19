@@ -22,8 +22,9 @@ def build_corpus(root: Path, recipes=("A1", "A9", "A10"), count=1) -> Path:
     return out
 
 
-def fake_separator(make_outputs, fail_ids=(), timing_extra=None):
-    """Stands in for `Trackdub.Benchmarks separation-eval`: reads the jobs file, writes stems and results."""
+def fake_separator(make_outputs, fail_ids=(), timing_extra=None, stereo=False):
+    """Stands in for `Trackdub.Benchmarks separation-eval`: reads the jobs file, writes stems and results.
+    `make_outputs` gets the mono downmix, or the stereo input when `stereo` is set."""
     def run(jobs_path: Path, results_path: Path) -> None:
         lines = []
         for index, line in enumerate(jobs_path.read_text().splitlines()):
@@ -32,7 +33,7 @@ def fake_separator(make_outputs, fail_ids=(), timing_extra=None):
                 lines.append({"id": job["id"], "job_index": index, "ok": False, "error": "boom", "wall_ms": 5.0})
                 continue
             mix = am.load_audio(job["input"], channels=2, sr=run_eval.SEPARATOR_SR)
-            vocals, bed = make_outputs(mix.mean(axis=1, keepdims=True))
+            vocals, bed = make_outputs(mix if stereo else mix.mean(axis=1, keepdims=True))
             Path(job["vocals_output"]).parent.mkdir(parents=True, exist_ok=True)
             run_eval.write_pcm16(Path(job["vocals_output"]), vocals, run_eval.SEPARATOR_SR)
             run_eval.write_pcm16(Path(job["bed_output"]), bed, run_eval.SEPARATOR_SR)
@@ -64,6 +65,26 @@ class EvalTestBase(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_load_stems_keeps_layout_and_tiles_a_mono_partner(self):
+        with tempfile.TemporaryDirectory() as td:
+            rng = np.random.default_rng(1)
+            st = (rng.standard_normal((4410, 2)) * 0.1).astype(np.float32)
+            mono = st[:, :1].copy()
+            run_eval.write_pcm16(Path(td) / "s.wav", st, run_eval.SEPARATOR_SR)
+            run_eval.write_pcm16(Path(td) / "m.wav", mono, run_eval.SEPARATOR_SR)
+            run_eval.write_pcm16(Path(td) / "q.wav", np.zeros((4410, 4), np.float32), run_eval.SEPARATOR_SR)
+            v, b = run_eval.load_stems(Path(td) / "m.wav", Path(td) / "m.wav")
+            self.assertEqual((v.shape[1], b.shape[1]), (1, 1))
+            v, b = run_eval.load_stems(Path(td) / "m.wav", Path(td) / "s.wav")
+            self.assertEqual((v.shape[1], b.shape[1]), (2, 2))
+            np.testing.assert_array_equal(v[:, 0], v[:, 1])
+            self.assertFalse(np.array_equal(b[:, 0], b[:, 1]))
+            with self.assertRaisesRegex(run_eval.EvalError, "mono or stereo"):
+                run_eval.load_stems(Path(td) / "q.wav", Path(td) / "s.wav")
+            est, adjust = run_eval.to_reference_domain(b, 4410 * 48000 // 44100, 48000)
+            self.assertEqual(adjust, 0)
+            self.assertFalse(np.allclose(est[:, 0], est[:, 1]))
+
     def test_to_stereo(self):
         mono = np.ones((10, 1), np.float32)
         self.assertEqual(run_eval.to_stereo(mono).shape, (10, 2))
@@ -148,6 +169,39 @@ class EvaluateTests(EvalTestBase):
         accounting = result["summary"]["strata"]["A9"]["bed_leakage_accounting"]
         self.assertEqual(accounting["not_applicable_reference_bed_below_floor"], 1)
         self.assertEqual(accounting["estimated_bed_active_rms_dbfs"]["n"], 1)
+
+    def test_background_only_clip_gets_damage_and_false_dialogue(self):
+        result = evaluate(self.root, self.corpus, fake_separator(lambda mono: (np.zeros_like(mono), mono)))
+        a10 = self.clip(result, "a10-dev-000")
+        self.assertEqual(a10["damage"]["inactive_fraction"], 1.0)
+        self.assertIsNotNone(a10["damage"]["si_sdr_inactive_db"])
+        self.assertEqual(a10["false_dialogue"]["dialogue_to_mixture_db"], run_eval.metrics.DB_FLOOR)
+        self.assertIsNone(self.clip(result, "a1-dev-000")["false_dialogue"])
+        self.assertEqual(result["summary"]["strata"]["A10"]["metrics"]["false_dialogue_to_mixture_db"]["n"], 1)
+
+        leaky = evaluate(self.root, self.corpus, fake_separator(lambda x: (0.1 * x, 0.9 * x), stereo=True))
+        # About -20 dB: the stem is a tenth of the separator's input, which went through a 44.1 kHz PCM16 round trip.
+        self.assertAlmostEqual(self.clip(leaky, "a10-dev-000")["false_dialogue"]["dialogue_to_mixture_db"], -20.0, delta=1.0)
+
+    def test_false_dialogue_error_is_skipped_not_a_clip_failure(self):
+        sep = fake_separator(lambda mono: (np.zeros_like(mono), mono))
+        with patch.object(run_eval.metrics, "false_dialogue", side_effect=run_eval.metrics.MetricError("bad shape")):
+            result = evaluate(self.root, self.corpus, sep)
+        a10 = self.clip(result, "a10-dev-000")
+        self.assertTrue(a10["ok"], a10["error"])
+        self.assertEqual(a10["false_dialogue"], {"skipped": "bad shape"})
+
+    def test_stereo_stems_are_scored_in_stereo(self):
+        mono = evaluate(self.root, self.corpus, fake_separator(lambda x: (np.zeros_like(x), x)))
+        stereo = evaluate(self.root, self.corpus, fake_separator(lambda x: (np.zeros_like(x), x), stereo=True))
+        for result, ch in ((mono, 1), (stereo, 2)):
+            for clip in result["clips"]:
+                self.assertTrue(clip["ok"], clip["error"])
+                self.assertEqual(clip["stem_channels"], ch)
+        # A passthrough bed keeps the dialogue in both layouts, but only the mono collapse also loses the bed's
+        # side channel, so the stereo bed must score at least as close to the reference bed.
+        self.assertGreaterEqual(self.clip(stereo, "a10-dev-000")["damage"]["si_sdr_db"],
+                                self.clip(mono, "a10-dev-000")["damage"]["si_sdr_db"])
 
     def test_failed_and_missing_jobs_are_recorded_per_clip(self):
         sep = fake_separator(lambda mono: (np.zeros_like(mono), mono), fail_ids={"a9-dev-000"})
