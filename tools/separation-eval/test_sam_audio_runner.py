@@ -68,6 +68,23 @@ class EstimateTests(unittest.TestCase):
         self.assertTrue(all(c == sam.NATIVE_SR for c in calls))
 
 
+class XformersTests(unittest.TestCase):
+    def test_stand_ins_import_and_refuse_to_run(self):
+        import sys
+        import types
+        saved = {k: sys.modules.pop(k) for k in ("xformers", "xformers.ops") if k in sys.modules}
+        try:
+            with mock.patch.dict(sys.modules, {"xformers": types.ModuleType("xformers"),
+                                               "xformers.ops": types.ModuleType("xformers.ops")}):
+                self.assertTrue(sam.prepare_xformers().startswith("stand-in"))
+                from xformers.ops import AttentionBias, fmha
+                self.assertTrue(isinstance(AttentionBias, type))
+                with self.assertRaises(sam.rc.RunnerError):
+                    fmha.memory_efficient_attention(None, None, None)
+        finally:
+            sys.modules.update(saved)
+
+
 class ProfileTests(unittest.TestCase):
     def test_candidates_have_float_full_band_profiles(self):
         for name in sam.MODELS:

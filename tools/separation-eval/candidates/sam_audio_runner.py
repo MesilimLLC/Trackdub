@@ -70,12 +70,38 @@ def crossfade_join(pieces: list, starts: list[int], n: int, overlap: int):
     return out / weight.clamp_min(1e-6)
 
 
+def prepare_xformers() -> str:
+    """perception_models (SAM-Audio's encoder dependency) imports xformers' AttentionBias and fmha at module load but
+    calls them only when attn_impl == "fmha"; SAM-Audio uses the default "sdpa". xformers 0.0.36 on Windows lacks its
+    mslk backend, so the import fails; register stand-ins that raise if they are ever used. Returns what was used."""
+    import types
+
+    try:
+        from xformers.ops import AttentionBias, fmha  # noqa: F401
+        return "xformers"
+    except ImportError:
+        pass
+    ops = sys.modules.get("xformers.ops")
+    if ops is None:
+        ops = types.ModuleType("xformers.ops")
+        sys.modules.setdefault("xformers", types.ModuleType("xformers")).ops = ops
+        sys.modules["xformers.ops"] = ops
+
+    def unavailable(*_args, **_kwargs):
+        raise rc.RunnerError("xformers fmha is unavailable here; SAM-Audio must use attn_impl='sdpa'")
+
+    ops.AttentionBias = type("AttentionBias", (), {})
+    ops.fmha = types.SimpleNamespace(memory_efficient_attention=unavailable)
+    return "stand-in (fmha unavailable; sdpa attention)"
+
+
 class Separator:
     def __init__(self, model_directory: Path, provider: str | None):
         import torch
 
         if provider not in (None, "cuda") or not torch.cuda.is_available():
             raise rc.RunnerError("SAM-Audio is evaluated on CUDA only")
+        self.xformers = prepare_xformers()
         from sam_audio import SAMAudio, SAMAudioProcessor
 
         self.torch = torch
@@ -115,9 +141,10 @@ def code_revision() -> str:
     return out.stdout.strip() or "unknown"
 
 
-def metadata(model_directory: Path, model: str) -> dict:
+def metadata(model_directory: Path, model: str, xformers: str) -> dict:
     checkpoint = model_directory / "checkpoint.pt"
     return {"runner": "sam_audio_runner", "candidate": model, "size": MODELS[model], "prompt": PROMPT,
+            "xformers": xformers,
             "checkpoint_sha256": rc.file_hash(checkpoint, "sha256"), "code_revision": code_revision(),
             "window_seconds": str(WINDOW_SECONDS), "overlap_seconds": str(OVERLAP_SECONDS), "seed": str(SEED),
             "options": "predict_spans=False, reranking_candidates=1, default ODE options",
@@ -129,7 +156,7 @@ def metadata(model_directory: Path, model: str) -> dict:
 def main(argv: list[str]) -> int:
     args = rc.parse_command_line(argv, list(MODELS))
     sep = Separator(args.model_directory, args.provider)
-    ctx = rc.RunContext(sep.torch, "cuda", args.provider or "cuda", metadata(args.model_directory, args.model))
+    ctx = rc.RunContext(sep.torch, "cuda", args.provider or "cuda", metadata(args.model_directory, args.model, sep.xformers))
     return rc.run_all(sep.estimate, args, ctx)
 
 
