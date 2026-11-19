@@ -18,7 +18,7 @@ readiness: no AWS resource has been created and no GPU run on G6/G6e has happene
 | Container build, seed and warm runbook | [docs/operations/cloud-gpu-container.md](../operations/cloud-gpu-container.md) |
 | What was verified locally and what was not | [docs/operations/snapsoft-poc-validation.md](../operations/snapsoft-poc-validation.md) |
 | Smoke fixture | `tests/Fixtures/cloud-poc/en-speech.mp4` (single speaker, EN) |
-| Kickoff item "containerization of application code" | The `Dockerfile` `server` target, published as `ghcr.io/mesilimllc/trackdub:<tag>-server` (section 6) |
+| Kickoff item "containerization of application code" | The `Dockerfile` `server` target, configured to publish as `ghcr.io/mesilimllc/trackdub:<tag>-server` (section 6) |
 
 The 10-clip test set (English-to-Spanish and English-to-Chinese) with reference output from a local RTX 5070 run
 is Mesilim's deliverable, due by the end of Day 5 (SOW, Customer Responsibilities). It is not in the repository.
@@ -87,9 +87,9 @@ Reference contract for that stack: [docs/operations/snapsoft-poc-acceptance.md](
    `runtime/trt-rtx-ep.manifest.json` is for the desktop `rtx` profile and does not apply to G6/G6e.
 2. **Engine caches cannot be built in CI.** CI runners have no GPU. Classic TensorRT caches live under
    `$TRACKDUB_ENGINE_CACHE_ROOT/classic-trt/<fingerprint>`, where the fingerprint covers the GPU, driver,
-   TensorRT binary and ONNX Runtime identity. Build them on the target instance type with `trackdub cache warm --provider tensorrt`,
-   then bake them into the image or an EBS snapshot as the SOW describes. Never copy a cache between GPU models or
-   drivers.
+   TensorRT binary and ONNX Runtime identity. Build them on the target instance type with `scripts/docker/seed-and-warm-gpu-worker.sh`
+   using the explicit server provisioning environment in section 6, then bake them into the image or an EBS
+   snapshot as the SOW describes. Never copy a cache between GPU models or drivers.
 3. **Model weights at build time vs a seeded volume.** The SOW has models downloaded and hash-verified at image
    build time. The runbook instead seeds a persistent model volume (`scripts/docker/seed-model-volume.sh`). Both
    use `trackdub models download` and `trackdub models verify`; which one the POC uses is a Design decision.
@@ -150,8 +150,8 @@ There is no separate allow-list configuration file. The allow-list is the per-st
 | vad | CPU (Silero is excluded from TensorRT; CPU cost is negligible) |
 | asr, translation, tts, diarization, separation, speech-enhancement | CUDA |
 
-TensorRT engines. The SOW includes building TensorRT engines once per instance type with `trackdub cache warm --provider tensorrt` and
-baking them into the image or an EBS snapshot. `docker/poc-warm-models.server.txt` lists the classic-TensorRT
+TensorRT engines. The SOW includes building TensorRT engines once per instance type and baking them into the
+image or an EBS snapshot. `docker/poc-warm-models.server.txt` lists the classic-TensorRT
 graphs to warm (DeepFilterNet3, Sortformer, Spleeter, Parakeet), and `scripts/docker/seed-and-warm-gpu-worker.sh`
 builds them. The presets currently pin those stages to CUDA, so preset runs do not yet use the warmed engines. On a
 local RTX 5070, diarization (Sortformer) and ASR (Parakeet) have run end-to-end on classic TensorRT. Whether the
@@ -169,26 +169,67 @@ Constraints:
 
 ## 6. Commands you will use
 
+After provisioning, place the source video at `docker/input/in.mp4` on the host (mounted at
+`/work/input/in.mp4` in the container), then open a shell from the repository root on the GPU host:
+
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.aws.yml run --rm --entrypoint bash trackdub
+```
+
+Run the following in that container shell. The image entrypoint normally invokes the DLL through `dotnet`;
+it does not install a `trackdub` executable on `PATH`, so define this wrapper for the interactive examples:
+
+```bash
+trackdub() { dotnet /app/Trackdub.Cli.dll --model-directory /data/models "$@"; }
+
 trackdub doctor                       # health check; checks manifest, ffmpeg/ffprobe, model cache, VRAM budget
 trackdub providers list               # CUDA and TensorRT must both report available on the GPU host
 trackdub models download <model-id>   # hash-verified download (use scripts/docker/seed-model-volume.sh for the set)
-trackdub models verify                # integrity check of the seeded models
-trackdub cache warm --provider tensorrt   # per-GPU engine build; see docker/poc-warm-models.server.txt
-trackdub run pipeline --media in.mp4 --output ./project --source-language en --target-language es \
+trackdub models verify --model-id <model-id>  # verify one seeded model; repeat for each POC model
+
+# Allocate a fresh directory for each job attempt, including retries.
+job_dir="$(mktemp -d /data/poc-job.XXXXXXXX)"
+trackdub run pipeline --media /work/input/in.mp4 --output "$job_dir/project" --source-language en --target-language es \
   --preset poc-server-v1 --voice SPEAKER_00:ef_dora --subtitle-format srt \
-  --result-file result.json --progress-file progress.jsonl
+  --result-file "$job_dir/result.json" --progress-file "$job_dir/progress.jsonl"
 ```
+
+`--result-file` and `--progress-file` must name new files; they do not overwrite prior attempt evidence.
+Without `--model-id`, `trackdub models verify` checks **all manifest models**, not just the seeded POC set.
+It emits a JSON array, including missing models with `hashMatch: false`, and exits 2 if any model fails
+verification (0 only when all match). That nonzero status is expected for a deliberately partial cache; do not
+use this whole-manifest check as the POC-set readiness gate. Use the targeted check for each seeded model and
+retain the hash-verified download evidence for the exact variants listed in the model-set files.
 
 To run a specific model variant without editing a preset, add `--variant <stage>:<variant>` (for example
 `--variant translation:trt-fp16`); see [gpu-execution-providers.md](../reference/gpu-execution-providers.md#choosing-a-variant-explicitly-run-pipeline---variant).
 
-Provisioning a GPU host with the runbook scripts: `TRACKDUB_GPU_PROFILE=server ./scripts/docker/seed-and-warm-gpu-worker.sh`
-with `TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml` (see the runbook for the EBS mount and UID 10001
-ownership). The script seeds the Spanish set (`docker/poc-server-models.txt`) by default. For `poc-server-zh-v1`
-the host also needs the Qwen3-TTS weights, for example
-`TRACKDUB_MODEL_SET=docker/poc-server-zh-models.txt ./scripts/docker/seed-model-volume.sh` (same compose override).
-Keep Kokoro seeded for `poc-server-v1`; the two lists share every other model.
+Run these provisioning scripts from the repository root on the **GPU host**, not inside the container shell
+(see the runbook for the EBS mount and UID 10001 ownership):
+
+```bash
+TRACKDUB_GPU_PROFILE=server \
+TRACKDUB_MODEL_SET=docker/poc-server-models.txt \
+TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml \
+  ./scripts/docker/seed-and-warm-gpu-worker.sh
+
+# Add the Mandarin preset's Qwen3-TTS weights to the same volume.
+TRACKDUB_GPU_TARGET=server \
+TRACKDUB_MODEL_SET=docker/poc-server-zh-models.txt \
+TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml \
+  ./scripts/docker/seed-model-volume.sh
+```
+
+The combined script already defaults to the Spanish set for the server profile; it is explicit here for
+reproducibility. The standalone `seed-model-volume.sh` instead defaults to `docker/poc-models.txt`, so always
+supply `TRACKDUB_MODEL_SET` when using it for a server preset. Keep Kokoro seeded for `poc-server-v1`; the two
+server lists share every other model.
+
+Use the combined script for engine warming: it supplies explicit `--model` paths from the reviewed
+`docker/poc-warm-models.server.txt` allow-list. **Do not run bare `trackdub cache warm --provider tensorrt`**
+for POC provisioning. Without `--model`, it recursively scans the entire cache, including graphs that can fail
+compilation or terminate the native process. Warm only on the target GPU/driver, and inspect failed or skipped
+targets; completion does not prove that preset stages used TensorRT.
 
 Build and test without AWS or a GPU (the Cloud, Api and CloudJobAdapter tests cover the out-of-scope job stack in
 section 2, including the reusable CLI runner and preset code):
@@ -200,9 +241,39 @@ dotnet test tests/Trackdub.CloudJobAdapter.Tests -c Release -m:1
 dotnet test tests/Trackdub.Architecture.Tests -m:1
 ```
 
-Registry: the server image publishes to `ghcr.io/mesilimllc/trackdub:<tag>-server` from `main`; the package may be
-private until its visibility is changed. Decide GHCR pull credentials or an ECR mirror in Design.
+Registry: the container workflow is configured to publish `ghcr.io/mesilimllc/trackdub:<tag>-server`; the AWS
+Compose override defaults to `ghcr.io/mesilimllc/trackdub:main-server`. This configuration is not proof that a
+particular tag is pullable by a worker. The successful [November 16, 2026 container publish run](https://github.com/MesilimLLC/Trackdub/actions/runs/43910597341)
+recorded `main-server`, `latest-server`, and `sha-e349c4bfb44bbd02f4929f502a9a2bb5c13efbd7-server` at
+`sha256:f446fe1213b53268998b0668d622dca5613f0632c39ac710e2fc6e8f7d6a7f19`. Anonymous manifest inspection
+returned HTTP 401 on that date; the local GitHub credential also lacks `read:packages`. Publication is confirmed
+by the push log, but worker pull access is not. Confirm access to the chosen tag/digest before provisioning;
+decide GHCR pull credentials, a visibility change, or an ECR mirror in Design.
 `Dockerfile.cloud-worker` belongs to the out-of-scope job stack in section 2 and is built, not published, by CI.
+
+### Local command checks (November 16, 2026)
+
+Runtime checks used the **pre-existing** `trackdub-gpu:server-snapsoft` image (ID `3969d1d88223`, built
+November 12), not the newly published GHCR digest above. Cached weights were mounted read-only in an isolated
+container with writable scratch metadata. These are local RTX 5070 / Docker Desktop checks, not AWS evidence.
+
+| Check | Observed result |
+|---|---|
+| `doctor` | First attempt timed out at 180 s; retry exited 0 with warnings (including absent desktop playback natives and TRT-RTX plugin) |
+| `providers list` | Exit 0; CUDA and classic TensorRT available |
+| Targeted Silero verification | Exit 0, `hashMatch: true` |
+| Silero download command against the existing cache | Exit 0, Installed; not a fresh network-download test |
+| Whole-manifest verification against a separate Silero-only cache | Exit 2; one matching model and 47 missing entries |
+| Whole-manifest verification against the larger mounted cache | Timed out at 120 s; integrity check did not complete |
+| Interactive wrapper and pipeline example with `--help` | Exit 0; argument/help check only, no inference |
+| Fresh `/data/poc-job.XXXXXXXX` directories | Distinct directories created; result/progress files did not exist |
+| Current provisioning scripts | Bash syntax and stubbed dry-run passed: 14 download invocations across the two lists, six explicit classic-TensorRT warm paths, AWS override retained throughout |
+| AWS Compose configuration | Rendered server target, expected GHCR image, and `/mnt/trackdub-data` bind to `/data` |
+| Four documented offline suites | 76 passed using existing Release binaries with `-f net11.0 --no-build --no-restore`; no fresh build was performed |
+
+The full provisioning download, engine compilation and real pipeline execution were **not** run in this check.
+Another Python workload occupied about 11 GiB of the 12 GiB GPU at 99% utilization; it was left untouched.
+An authenticated GHCR pull and an idle GPU are still required to validate the published image end to end.
 
 ## 7. Decisions for the Design phase
 
