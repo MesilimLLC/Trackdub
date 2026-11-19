@@ -18,6 +18,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,9 @@ import audiomath as am
 import ingest
 
 GAP_S = 0.25
+# ffmpeg occasionally fails to start under heavy parallel load on Windows (exit 0xC0000142); a retry clears it.
+DECODE_ATTEMPTS = 3
+DECODE_RETRY_WAIT_S = 2.0
 VCTK_DOI = "https://doi.org/10.7488/ds/2645"
 VCTK_PAGE = "https://datashare.ed.ac.uk/handle/10283/3443"
 CV_LISTING_URL = "https://commonvoice.mozilla.org/en/datasets"
@@ -139,7 +143,17 @@ def load_clip(clip: dict) -> np.ndarray:
     data = clip["path"].read_bytes()
     if hashlib.sha256(data).hexdigest() != clip["sha256"]:
         raise BuildError(f"{clip['path']}: sha256 differs from the subset manifest")
-    return am.load_audio(clip["path"], channels=1)[:, 0]
+    return decode_mono(clip["path"])
+
+
+def decode_mono(path: Path) -> np.ndarray:
+    for attempt in range(1, DECODE_ATTEMPTS + 1):
+        try:
+            return am.load_audio(path, channels=1)[:, 0]
+        except am.AudioError:
+            if attempt == DECODE_ATTEMPTS:
+                raise
+            time.sleep(DECODE_RETRY_WAIT_S * attempt)
 
 
 def concat_clips(clips: list[dict], gap_s: float = GAP_S) -> np.ndarray:
