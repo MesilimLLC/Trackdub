@@ -19,6 +19,13 @@ build_local_items.py reads, with `split: train`. Then:
 
 --cv-root holds the `*cv-corpus-<version>-<date>-<lang>.tar.gz` archives and a `cv-meta/<lang>/` folder with
 each archive's `validated.tsv` and `clip_durations.tsv`.
+
+`--dataset spontaneous` reads the Common Voice Spontaneous Speech archives (`*sps-corpus-*.tar.gz`, CC0) instead.
+Their tables are inside each archive, and the filter is stricter because the speech is unscripted and often
+recorded casually: a validated transcription, not reported, no quality tags, and no noise, music, breath, silence
+or other-voice marker in the transcription, so background sound does not end up in the dialogue target. Its
+speakers keep the same group scheme and get `cvsps-dlg-` item ids from build_local_items.py. A lower
+--min-clips (for example 2) suits it, because most speakers recorded only a few answers.
 """
 from __future__ import annotations
 
@@ -26,6 +33,7 @@ import argparse
 import collections
 import csv
 import hashlib
+import io
 import json
 import re
 import sys
@@ -36,8 +44,17 @@ from typing import Iterator, NamedTuple
 csv.field_size_limit(sys.maxsize)
 
 DEFAULT_SEED = "cv-train-v1"
-FILTER = "up_votes>=2, down_votes==0, 2-15 s"
-ARCHIVE_NAME = re.compile(r"cv-corpus-([\d.]+)-(\d{4}-\d{2}-\d{2})-(.+)\.tar\.gz$")
+ARCHIVE_NAME = re.compile(r"(cv|sps)-corpus-([\d.]+)-(\d{4}-\d{2}-\d{2})-(.+)\.tar\.gz$")
+ARCHIVE_PREFIX = {"scripted": "cv", "spontaneous": "sps"}
+FILTERS = {
+    "scripted": "validated, up_votes>=2, down_votes==0, 2-15 s",
+    "spontaneous": "transcription votes>=1, not in the reported-audio list, no quality tags, no noise, music, "
+                   "breath, silence or other-voice marker in the transcription, 2-30 s",
+}
+# Transcription markers for sound other than the speaker; such clips would put background into the dialogue target.
+NOISE_MARKER = re.compile(r"[<\[][^>\]]*(noise|background|music|horn|typing|multiple|people|laugh|cough|unclear|"
+                          r"click|silen|blank|breath|burp|mumbl|whisper)", re.IGNORECASE)
+AUDIO_DIRS = ("/clips/", "/audios/")
 GENDER_CLASS = {"female_feminine": "F", "male_masculine": "M"}
 
 
@@ -139,22 +156,24 @@ def eval_groups(manifest_path: Path) -> set[str]:
 class Archive(NamedTuple):
     path: Path
     lang: str
+    dataset: str = "scripted"
 
 
 def manifest_entry(archive: Archive, member: str, raw: bytes, pick: tuple[Speaker, Clip]) -> dict:
     speaker, clip = pick
-    version, date, _ = ARCHIVE_NAME.search(archive.path.name).groups()
+    kind, version, date, _ = ARCHIVE_NAME.search(archive.path.name).groups()
     lang, base = archive.lang, Path(member).name
     return {"language": lang, "path": f"commonvoice/{lang}/clips/{base}", "group": speaker.group, "split": "train",
             "gender_class": speaker.gender_class, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
             "duration_s": clip.duration_s, "age": clip.age, "accent": clip.accent, "up_votes": clip.up_votes,
-            "archive": archive.path.name, "member": member, "corpus": f"cv-corpus-{version}-{date}"}
+            "archive": archive.path.name, "member": member, "corpus": f"{kind}-corpus-{version}-{date}",
+            "dataset": archive.dataset}
 
 
 def wanted_clip(member: tarfile.TarInfo, wanted: dict) -> str | None:
     """The clip's file name when this archive member is one of the wanted clips, else None."""
     base = Path(member.name).name
-    is_clip = member.isfile() and "/clips/" in member.name
+    is_clip = member.isfile() and any(d in member.name for d in AUDIO_DIRS)
     return base if is_clip and base in wanted else None
 
 
@@ -177,9 +196,66 @@ def extract(archive: Archive, speakers: list[Speaker], out_dir: Path) -> list[di
     return entries
 
 
-def archives_in(cv_root: Path, languages: set[str] | None) -> list[Archive]:
-    found = [Archive(p, ARCHIVE_NAME.search(p.name).group(3)) for p in sorted(cv_root.glob("*cv-corpus-*.tar.gz"))]
+def archives_in(cv_root: Path, languages: set[str] | None, dataset: str = "scripted") -> list[Archive]:
+    pattern = f"*{ARCHIVE_PREFIX[dataset]}-corpus-*.tar.gz"
+    found = [Archive(p, ARCHIVE_NAME.search(p.name).group(4), dataset) for p in sorted(cv_root.glob(pattern))]
     return [a for a in found if languages is None or a.lang in languages]
+
+
+def text_rows(text: str) -> list[dict]:
+    return list(csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE))
+
+
+def archive_tables(archive: Archive) -> tuple[list[dict], set[str]]:
+    """The Spontaneous Speech clip table and the reported audio files, read from inside the archive."""
+    corpus_name, reported_name = f"ss-corpus-{archive.lang}.tsv", f"ss-reported-audios-{archive.lang}.tsv"
+    tables: dict[str, list[dict]] = {}
+    with tarfile.open(archive.path, mode="r|gz") as tf:
+        for member in tf:
+            name = Path(member.name).name
+            if member.isfile() and name in (corpus_name, reported_name):
+                tables[name] = text_rows(tf.extractfile(member).read().decode("utf-8-sig"))
+    return tables.get(corpus_name, []), {r.get("audio_file", "") for r in tables.get(reported_name, [])}
+
+
+def milliseconds(value) -> float | None:
+    return int(value) / 1000.0 if str(value).isdigit() else None
+
+
+def clean_spontaneous(row: dict, reported: set[str]) -> bool:
+    checks = (str(row.get("votes", "")).isdigit() and int(row["votes"]) >= 1,
+              row.get("audio_file") not in reported,
+              not (row.get("quality_tags") or "").strip(),
+              not NOISE_MARKER.search(row.get("transcription") or ""))
+    return all(checks)
+
+
+def spontaneous_length(duration: float | None) -> bool:
+    return duration is not None and 2.0 <= duration <= 30.0
+
+
+def spontaneous_clip(row: dict, reported: set[str]) -> Clip | None:
+    duration = milliseconds(row.get("duration_ms"))
+    if not (clean_spontaneous(row, reported) and spontaneous_length(duration)):
+        return None
+    return Clip(row["audio_file"], duration, int(row["votes"]), row.get("gender") or "", row.get("age") or "",
+                row.get("accents") or "")
+
+
+def spontaneous_clips_by_client(archive: Archive) -> dict[str, list[Clip]]:
+    corpus, reported = archive_tables(archive)
+    clips: dict[str, list[Clip]] = collections.defaultdict(list)
+    for row in corpus:
+        clip = spontaneous_clip(row, reported)
+        if clip:
+            clips[row["client_id"]].append(clip)
+    return clips
+
+
+def clips_for(archive: Archive, cv_root: Path) -> dict[str, list[Clip]]:
+    if archive.dataset == "spontaneous":
+        return spontaneous_clips_by_client(archive)
+    return good_clips_by_client(cv_root / "cv-meta" / archive.lang)
 
 
 def select_and_extract(args: argparse.Namespace) -> dict:
@@ -187,17 +263,17 @@ def select_and_extract(args: argparse.Namespace) -> dict:
     languages = set(args.languages.split(",")) if args.languages else None
     files, summary = [], {}
     rules = Rules(args.min_clips, args.clips_per_speaker, args.seed)
-    for archive in archives_in(args.cv_root, languages):
+    for archive in archives_in(args.cv_root, languages, args.dataset):
         lang = archive.lang
-        clips = good_clips_by_client(args.cv_root / "cv-meta" / lang)
+        clips = clips_for(archive, args.cv_root)
         speakers = select_speakers(lang, clips, excluded, rules)
         entries = extract(archive, speakers, args.out_dir)
         files.extend(entries)
         summary[lang] = {"speakers": len(speakers), "clips_wanted": sum(len(s.clips) for s in speakers),
                          "clips_extracted": len(entries), "hours": round(sum(e["duration_s"] for e in entries) / 3600, 2)}
         print(f"{lang}: {summary[lang]}", file=sys.stderr, flush=True)
-    return {"purpose": "separator training (never eval)", "seed": args.seed, "min_good_clips": args.min_clips,
-            "clips_per_speaker": args.clips_per_speaker, "filter": FILTER,
+    return {"purpose": "separator training (never eval)", "dataset": args.dataset, "seed": args.seed,
+            "min_good_clips": args.min_clips, "clips_per_speaker": args.clips_per_speaker, "filter": FILTERS[args.dataset],
             "excluded_eval_items_sha256": json.loads(args.eval_manifest.read_text(encoding="utf-8"))["items_sha256"],
             "summary": summary, "files": files}
 
@@ -211,6 +287,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-clips", type=int, default=10, help="good clips a speaker needs to be chosen (default 10)")
     parser.add_argument("--clips-per-speaker", type=int, default=60, help="cap per speaker (default 60)")
     parser.add_argument("--seed", default=DEFAULT_SEED)
+    parser.add_argument("--dataset", choices=sorted(ARCHIVE_PREFIX), default="scripted",
+                        help="scripted: cv-corpus archives with cv-meta/<lang>/ tables; spontaneous: sps-corpus "
+                             "archives, whose tables are inside the archive")
     args = parser.parse_args(argv)
     if args.out_dir.resolve() == (args.cv_root / "commonvoice").resolve():
         parser.error("--out-dir must not be the eval subset folder")

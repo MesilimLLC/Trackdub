@@ -110,5 +110,81 @@ class ExtractionTests(CvTrainFixture):
             self.run_main(self.root / "commonvoice")
 
 
+SPS_ARCHIVE = "1789489286931-sps-corpus-5.0-2026-09-11-yy.tar.gz"
+SPS_COLUMNS = ["client_id", "audio_id", "audio_file", "duration_ms", "transcription", "votes", "age", "gender",
+               "accents", "quality_tags"]
+
+
+class SpontaneousTests(unittest.TestCase):
+    """Speaker 'sam' has two clean clips and one of each kind of rejected clip; 'tia' has one clean clip."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        rows = [
+            ("sam", "a.mp3", 5000, "hello there", 1, ""),
+            ("sam", "b.mp3", 9000, "a clean answer", 2, ""),
+            ("sam", "unvoted.mp3", 5000, "not yet checked", 0, ""),
+            ("sam", "reported.mp3", 5000, "reported by a listener", 1, ""),
+            ("sam", "tagged.mp3", 5000, "too fast", 1, "speech-rate"),
+            ("sam", "noisy.mp3", 5000, "I like [background music] a lot", 1, ""),
+            ("sam", "short.mp3", 1500, "hi", 1, ""),
+            ("sam", "long.mp3", 45000, "a very long answer", 1, ""),
+            ("tia", "c.mp3", 6000, "only one clip", 1, ""),
+        ]
+        corpus = ["\t".join(SPS_COLUMNS)] + [
+            "\t".join([c, str(n), f, str(ms), t, str(v), "", "male_masculine", "", q])
+            for n, (c, f, ms, t, v, q) in enumerate(rows)]
+        reported = "client_id\taudio_id\taudio_file\treason\nsam\t3\treported.mp3\tother\n"
+        prefix = "sps-corpus-5.0-2026-09-11-yy"
+        with tarfile.open(self.root / SPS_ARCHIVE, "w:gz") as tf:
+            members = {f"{prefix}/ss-corpus-yy.tsv": "\n".join(corpus) + "\n",
+                       f"{prefix}/ss-reported-audios-yy.tsv": reported,
+                       **{f"{prefix}/audios/{r[1]}": f"audio {r[1]}" for r in rows}}
+            for name, text in members.items():
+                data = text.encode("utf-8")
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+        self.eval_manifest = self.root / "items.v1.2.manifest.json"
+        self.eval_manifest.write_text(json.dumps(ingest.build_manifest([])), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_filter_keeps_only_clean_validated_unreported_clips(self):
+        archive = sel.archives_in(self.root, None, "spontaneous")[0]
+        self.assertEqual((archive.lang, archive.dataset), ("yy", "spontaneous"))
+        clips = sel.spontaneous_clips_by_client(archive)
+        self.assertEqual(sorted(c.path for c in clips["sam"]), ["a.mp3", "b.mp3"])
+        self.assertEqual([c.path for c in clips["tia"]], ["c.mp3"])
+
+    def test_scripted_mode_ignores_spontaneous_archives(self):
+        self.assertEqual(sel.archives_in(self.root, None, "scripted"), [])
+
+    def test_end_to_end_manifest_and_item_naming(self):
+        out = self.root / "sps"
+        sel.main(["--cv-root", str(self.root), "--eval-manifest", str(self.eval_manifest), "--out-dir", str(out),
+                  "--dataset", "spontaneous", "--min-clips", "2"])
+        manifest = json.loads((out / "commonvoice-subset.manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["dataset"], "spontaneous")
+        self.assertEqual(manifest["summary"]["yy"]["speakers"], 1)
+        self.assertEqual({e["dataset"] for e in manifest["files"]}, {"spontaneous"})
+        self.assertEqual({e["corpus"] for e in manifest["files"]}, {"sps-corpus-5.0-2026-09-11"})
+        self.assertTrue((out / "yy" / "clips" / "a.mp3").is_file())
+        (source,) = bli.commonvoice_sources(out)
+        self.assertTrue(source.item_id.startswith("cvsps-dlg-yy-"))
+        self.assertIn("Spontaneous Speech 5.0 (yy)", source.attribution)
+        self.assertEqual(source.group, sel.speaker_group("yy", "sam"))
+
+
+class ScriptedNamingTests(unittest.TestCase):
+    def test_scripted_naming_is_unchanged(self):
+        item_id, url, attribution = bli.commonvoice_naming({"corpus": "cv-corpus-27.0-2026-09-11"}, "ar", "abc")
+        self.assertEqual(item_id, "cv-dlg-ar-abc")
+        self.assertEqual(url, bli.CV_DATASET_URLS["ar"])
+        self.assertTrue(attribution.startswith("Mozilla Common Voice Scripted Speech 27.0 (ar)"))
+
+
 if __name__ == "__main__":
     unittest.main()
