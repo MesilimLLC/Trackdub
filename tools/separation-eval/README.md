@@ -100,3 +100,28 @@ Caveats that affect what the corpus can show:
 - Impulse responses are checked for RT60 (0.4 to 2.0 s) from the audio cache before recipe coverage passes; mixgen applies the same range when generating A3.
 - CC BY items carry their attribution text in the manifest; keep it with any redistributed copy.
 - The group is the creator (or the LibriVox book), so one voice or artist stays on one side of the split.
+
+## Training pool disjointness check
+
+`train_pool.py check` decides which candidate items may be used to train a separator. Rubric 2.3 (amended 2026-11-16)
+allows corpus sources in training only when the training items are disjoint from every eval item, dev and test alike,
+so each candidate is compared with the frozen eval manifest (corpus v1.2: `items.v1.2.manifest.json`) and with any
+`--exclude-records` (for example the v1.1 records, which hold the item dropped at the v1.2 freeze):
+
+```bash
+python tools/separation-eval/train_pool.py check --eval-manifest items.v1.2.manifest.json \
+    --candidates cv-train.jsonl --candidates fma-train.jsonl --exclude-records items.v1.1.records.jsonl \
+    --out items.train.jsonl --report train-pool-report.json
+```
+
+- A candidate is rejected when it shares an item id, audio content (sha256), group (speaker, uploader, artist, book
+  or room, case-insensitive) or upstream id (Freesound sound, Jamendo track) with an eval or excluded item; when it
+  fails ingest's record validation, with share-alike always refused; when it has no sha256 or is marked
+  `excluded_from_training`; or when it repeats an id or audio already accepted into the pool.
+- Candidates are records in the ingest schema with `sha256` filled in, so ingest or hash the audio first. Groups must
+  be built the same way as the eval groups (for Common Voice, the truncated hashed `client_id` of `build_local_items.py`).
+- Accepted records are written with `split: train`, `excluded_from_training: false` and the eval `items_sha256` they
+  were checked against. Keep them in their own file; never merge them into an eval manifest. The report lists every
+  rejection with its reasons and the hashes of all inputs.
+- Known limit: eval LibriVox items record the book, not the reader, so LibriVox candidates are accepted with a
+  warning until readers are recorded. All 110 VCTK speakers are in the eval corpus, so VCTK yields no training items.
