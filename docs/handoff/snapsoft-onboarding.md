@@ -277,21 +277,28 @@ sudo chown -R 10001:10001 /mnt/trackdub-data
 so the host needs a checkout. Until the registry decision above is made, log in to GHCR with a token that has
 `read:packages`. Pin an immutable `sha-<commit>-server` tag or digest instead of the moving `main-server`;
 `docker-compose.aws.yml` reads `TRACKDUB_IMAGE` for the service image and falls back to `main-server` only when it
-is unset.
+is unset. Check out the same commit the image tag names, so the seed lists, warm targets and scripts match the
+image's bundled manifest. Create `docker/input` yourself before the first Compose run; otherwise Docker creates it
+as root.
 
 ```bash
-git clone --depth 1 https://github.com/MesilimLLC/Trackdub.git && cd Trackdub
+COMMIT=<full commit sha>
+git init Trackdub && cd Trackdub
+git remote add origin https://github.com/MesilimLLC/Trackdub.git
+git fetch --depth 1 origin "$COMMIT" && git checkout --detach FETCH_HEAD
+mkdir -p docker/input
 echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
 export TRACKDUB_COMPOSE_OVERRIDE=docker-compose.aws.yml
-export TRACKDUB_IMAGE=ghcr.io/mesilimllc/trackdub:sha-<commit>-server
+export TRACKDUB_IMAGE="ghcr.io/mesilimllc/trackdub:sha-$COMMIT-server"
 docker compose -f docker-compose.yml -f docker-compose.aws.yml pull trackdub
 ```
 
 **Step 3: seed models and warm engines (once per GPU model and driver).** Use the two provisioning commands shown
 earlier in this section (`seed-and-warm-gpu-worker.sh` for the Spanish set and the warm, then
 `seed-model-volume.sh` with `docker/poc-server-zh-models.txt` for Qwen3-TTS). Both write to `/mnt/trackdub-data`.
-Repeat this step after any driver, TensorRT, ONNX Runtime or model change, or attach an EBS snapshot seeded on the
-same GPU model and driver instead. The presets currently pin every warmed stage to CUDA, so a `poc-server-v1` run
+Repeat this step after any driver, TensorRT, ONNX Runtime or model change. An EBS snapshot can replace it only if
+it was seeded on the same GPU model and driver with an image that has the same model set, TensorRT and ONNX
+Runtime versions as the selected image; do not attach an older snapshot after a model change. The presets currently pin every warmed stage to CUDA, so a `poc-server-v1` run
 does not yet depend on the warmed engines (section 5).
 
 **Step 4: verify the worker before scheduling jobs.**
@@ -301,20 +308,24 @@ dc() { docker compose -f docker-compose.yml -f docker-compose.aws.yml "$@"; }
 dc run --rm --entrypoint sh trackdub -c 'ls /proc/driver/nvidia/gpus'   # GPU visible inside the container
 dc run --rm trackdub providers list    # CUDA and TensorRT available
 dc run --rm trackdub doctor            # check the accelerator-vram-budget row
+status=0
 for m in $(cat docker/poc-server-models.txt docker/poc-server-zh-models.txt | grep -v '^#' | cut -d'|' -f1 | sort -u); do
-  dc run --rm trackdub models verify --model-id "$m"
+  dc run --rm trackdub models verify --model-id "$m" || status=1
 done
+[ "$status" -eq 0 ] && echo "all POC models verified" || echo "model verification FAILED"
 ```
 
-Do not run `models verify` without `--model-id` here; on a partial cache it exits 2 by design.
+Do not run `models verify` without `--model-id` here; on a partial cache it exits 2 by design. The loop checks every
+model and reports a failure from any of them.
 
 **Step 5: run one job.** The image entrypoint already passes `--model-directory /data/models`, so pipeline
 arguments follow the service name directly. Use a new job directory for every attempt, including retries. Create
 it on the host under the EBS mount, owned by the container user; inside the container the same directory is under
-`/data/jobs`.
+`/data/jobs`. The input file must be readable by UID 10001, so make it world-readable after copying.
 
 ```bash
 cp /path/to/source.mp4 docker/input/in.mp4
+chmod 0644 docker/input/in.mp4
 JOB_ID=$(date +%Y%m%d-%H%M%S)
 sudo install -d -o 10001 -g 10001 "/mnt/trackdub-data/jobs/$JOB_ID"
 JOB=/data/jobs/$JOB_ID
