@@ -89,6 +89,17 @@ CANDIDATE_PROFILES: dict[str, dict] = {
     "mdxnet-vocals-residual": {"band_limit_hz": 14700.0, "output_bits": 32, "output_rounding": "nearest"},
     # MossFormer2_SE_48K (candidates/mossformer2_runner.py): full band, float32 stems, bed = mixture - enhanced speech.
     "mossformer2-se-48k-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # Meta SAM-Audio (candidates/sam_audio_runner.py), prompted "speech": generative, 48 kHz, full band, float32 stems;
+    # bed = mixture - target. GPU-only evaluation candidate; licence and training data are not cleared for shipping.
+    "sam-audio-small-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    "sam-audio-base-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # `native`: the bed is SAM-Audio's own generated residual stem; it is not additive, so the gate is expected to fail.
+    "sam-audio-small-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    "sam-audio-base-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # Dynamic Band Splitting (candidates/dbs_runner.py): 44.1 kHz mono cinematic models, full band, float32 stems,
+    # bed = mixture - speech. Apache 2.0 weights trained on DnR v2 (non-commercial sources): evaluation only.
+    "dbs-tiger-dnr-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    "dbs-bsrnn-dnr-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
 }
 
 
