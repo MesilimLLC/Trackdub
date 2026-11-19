@@ -214,11 +214,11 @@ class MainTests(LocalItemTestBase):
 class DecodeRetryTests(unittest.TestCase):
     def test_transient_decode_failure_is_retried(self):
         good = np.zeros((10, 1), dtype=np.float32)
-        with mock.patch.object(bli.am, "load_audio", side_effect=[am.AudioError("start failed"), good]),                 mock.patch.object(bli, "DECODE_RETRY_WAIT_S", 0.0):
+        with mock.patch.object(bli.am, "load_audio", side_effect=[am.AudioError("start failed"), good]), mock.patch.object(bli, "DECODE_RETRY_WAIT_S", 0.0):
             self.assertEqual(bli.decode_mono(Path("x.mp3")).shape, (10,))
 
     def test_persistent_decode_failure_is_raised(self):
-        with mock.patch.object(bli.am, "load_audio", side_effect=am.AudioError("bad file")) as load,                 mock.patch.object(bli, "DECODE_RETRY_WAIT_S", 0.0):
+        with mock.patch.object(bli.am, "load_audio", side_effect=am.AudioError("bad file")) as load, mock.patch.object(bli, "DECODE_RETRY_WAIT_S", 0.0):
             with self.assertRaises(am.AudioError):
                 bli.decode_mono(Path("x.mp3"))
         self.assertEqual(load.call_count, bli.DECODE_ATTEMPTS)
