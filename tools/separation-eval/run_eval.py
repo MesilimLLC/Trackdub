@@ -96,6 +96,10 @@ CANDIDATE_PROFILES: dict[str, dict] = {
     # `native`: the bed is SAM-Audio's own generated residual stem; it is not additive, so the gate is expected to fail.
     "sam-audio-small-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
     "sam-audio-base-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # Dynamic Band Splitting (candidates/dbs_runner.py): 44.1 kHz mono cinematic models, full band, float32 stems,
+    # bed = mixture - speech. Apache 2.0 weights trained on DnR v2 (non-commercial sources): evaluation only.
+    "dbs-tiger-dnr-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    "dbs-bsrnn-dnr-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
 }
 
 
