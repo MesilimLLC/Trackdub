@@ -5,6 +5,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import build_local_items as bli
 import ingest
@@ -128,6 +129,7 @@ class SpontaneousTests(unittest.TestCase):
             ("sam", "reported.mp3", 5000, "reported by a listener", 1, ""),
             ("sam", "tagged.mp3", 5000, "too fast", 1, "speech-rate"),
             ("sam", "noisy.mp3", 5000, "I like [background music] a lot", 1, ""),
+            ("sam", "othervoice.mp3", 5000, "answer with [other-voice] marker", 1, ""),
             ("sam", "short.mp3", 1500, "hi", 1, ""),
             ("sam", "long.mp3", 45000, "a very long answer", 1, ""),
             ("tia", "c.mp3", 6000, "only one clip", 1, ""),
@@ -184,6 +186,42 @@ class ScriptedNamingTests(unittest.TestCase):
         self.assertEqual(item_id, "cv-dlg-ar-abc")
         self.assertEqual(url, bli.CV_DATASET_URLS["ar"])
         self.assertTrue(attribution.startswith("Mozilla Common Voice Scripted Speech 27.0 (ar)"))
+
+    def test_scripted_naming_uses_corpus_version(self):
+        _, _, attribution = bli.commonvoice_naming({"corpus": "cv-corpus-26.0-2025-06-15"}, "de", "abc")
+        self.assertTrue(attribution.startswith("Mozilla Common Voice Scripted Speech 26.0 (de)"))
+
+
+class ArchivesInTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_skips_non_matching_archive_names(self):
+        (self.root / "manual-download.tar.gz").write_bytes(b"x")
+        (self.root / "1789493165313-cv-corpus-27.0-2026-09-11-xx.tar.gz").write_bytes(b"x")
+        archives = sel.archives_in(self.root, None, "scripted")
+        self.assertEqual([a.lang for a in archives], ["xx"])
+
+    def test_keeps_one_archive_per_locale(self):
+        for name in ("100-cv-corpus-26.0-2025-01-01-zz.tar.gz",
+                     "200-cv-corpus-27.0-2026-09-11-zz.tar.gz"):
+            (self.root / name).write_bytes(b"x")
+        archives = sel.archives_in(self.root, None, "scripted")
+        self.assertEqual(len(archives), 1)
+        self.assertEqual(archives[0].path.name, "200-cv-corpus-27.0-2026-09-11-zz.tar.gz")
+
+
+class CsvFieldLimitTests(unittest.TestCase):
+    def test_configure_csv_field_size_limit_handles_overflow(self):
+        import csv as csv_mod
+
+        with mock.patch.object(csv_mod, "field_size_limit", side_effect=[OverflowError(), None]) as patched:
+            sel.configure_csv_field_size_limit()
+        self.assertGreaterEqual(patched.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,18 @@ import tarfile
 from pathlib import Path
 from typing import Iterator, NamedTuple
 
-csv.field_size_limit(sys.maxsize)
+def configure_csv_field_size_limit() -> None:
+    limit = min(sys.maxsize, 2**31 - 1)
+    while limit >= 131072:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 2
+    csv.field_size_limit(131072)
+
+
+configure_csv_field_size_limit()
 
 DEFAULT_SEED = "cv-train-v1"
 ARCHIVE_NAME = re.compile(r"(cv|sps)-corpus-([\d.]+)-(\d{4}-\d{2}-\d{2})-(.+)\.tar\.gz$")
@@ -53,7 +64,7 @@ FILTERS = {
 }
 # Transcription markers for sound other than the speaker; such clips would put background into the dialogue target.
 NOISE_MARKER = re.compile(r"[<\[][^>\]]*(noise|background|music|horn|typing|multiple|people|laugh|cough|unclear|"
-                          r"click|silen|blank|breath|burp|mumbl|whisper)", re.IGNORECASE)
+                          r"click|silen|blank|breath|burp|mumbl|whisper|other)", re.IGNORECASE)
 AUDIO_DIRS = ("/clips/", "/audios/")
 GENDER_CLASS = {"female_feminine": "F", "male_masculine": "M"}
 
@@ -159,9 +170,16 @@ class Archive(NamedTuple):
     dataset: str = "scripted"
 
 
+def archive_name_fields(path: Path) -> tuple[str, str, str, str]:
+    match = ARCHIVE_NAME.search(path.name)
+    if match is None:
+        raise ValueError(f"archive filename does not match expected pattern: {path.name}")
+    return match.groups()
+
+
 def manifest_entry(archive: Archive, member: str, raw: bytes, pick: tuple[Speaker, Clip]) -> dict:
     speaker, clip = pick
-    kind, version, date, _ = ARCHIVE_NAME.search(archive.path.name).groups()
+    kind, version, date, _ = archive_name_fields(archive.path)
     lang, base = archive.lang, Path(member).name
     return {"language": lang, "path": f"commonvoice/{lang}/clips/{base}", "group": speaker.group, "split": "train",
             "gender_class": speaker.gender_class, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
@@ -188,7 +206,10 @@ def extract(archive: Archive, speakers: list[Speaker], out_dir: Path) -> list[di
             base = wanted_clip(member, wanted)
             if base is None:
                 continue
-            raw = tf.extractfile(member).read()
+            fobj = tf.extractfile(member)
+            if fobj is None:
+                continue
+            raw = fobj.read()
             part = dest / (base + ".part")
             part.write_bytes(raw)
             part.replace(dest / base)
@@ -196,10 +217,28 @@ def extract(archive: Archive, speakers: list[Speaker], out_dir: Path) -> list[di
     return entries
 
 
+def archive_preference_key(path: Path) -> tuple[str, str, str]:
+    kind, version, date, lang = archive_name_fields(path)
+    return date, version, path.name
+
+
 def archives_in(cv_root: Path, languages: set[str] | None, dataset: str = "scripted") -> list[Archive]:
     pattern = f"*{ARCHIVE_PREFIX[dataset]}-corpus-*.tar.gz"
-    found = [Archive(p, ARCHIVE_NAME.search(p.name).group(4), dataset) for p in sorted(cv_root.glob(pattern))]
-    return [a for a in found if languages is None or a.lang in languages]
+    chosen: dict[str, Archive] = {}
+    for path in sorted(cv_root.glob(pattern)):
+        match = ARCHIVE_NAME.search(path.name)
+        if match is None:
+            print(f"skipping non-matching archive: {path.name}", file=sys.stderr, flush=True)
+            continue
+        archive = Archive(path, match.group(4), dataset)
+        if languages is not None and archive.lang not in languages:
+            continue
+        previous = chosen.get(archive.lang)
+        if previous is None or archive_preference_key(path) > archive_preference_key(previous.path):
+            if previous is not None:
+                print(f"{archive.lang}: using {path.name} instead of {previous.path.name}", file=sys.stderr, flush=True)
+            chosen[archive.lang] = archive
+    return [chosen[lang] for lang in sorted(chosen)]
 
 
 def text_rows(text: str) -> list[dict]:
@@ -214,7 +253,10 @@ def archive_tables(archive: Archive) -> tuple[list[dict], set[str]]:
         for member in tf:
             name = Path(member.name).name
             if member.isfile() and name in (corpus_name, reported_name):
-                tables[name] = text_rows(tf.extractfile(member).read().decode("utf-8-sig"))
+                fobj = tf.extractfile(member)
+                if fobj is None:
+                    continue
+                tables[name] = text_rows(fobj.read().decode("utf-8-sig"))
     return tables.get(corpus_name, []), {r.get("audio_file", "") for r in tables.get(reported_name, [])}
 
 

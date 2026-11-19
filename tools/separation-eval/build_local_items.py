@@ -120,12 +120,12 @@ def vctk_sources(vctk_dir: Path) -> list[SpeakerSource]:
 def commonvoice_naming(first_file: dict, lang: str, speaker: str) -> tuple[str, str, str]:
     """(item id, url, attribution) for a speaker; Spontaneous Speech gets its own id prefix so it never collides
     with a Scripted Speech item of the same speaker. Scripted naming is unchanged, so eval items rebuild identically."""
+    version = first_file["corpus"].split("-")[2]
     if first_file.get("dataset") == "spontaneous":
-        version = first_file["corpus"].split("-")[2]
         return (f"cvsps-dlg-{lang.lower()}-{speaker}", CV_LISTING_URL,
                 f"Mozilla Common Voice Spontaneous Speech {version} ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}")
     return (f"cv-dlg-{lang.lower()}-{speaker}", CV_DATASET_URLS.get(lang, CV_LISTING_URL),
-            f"Mozilla Common Voice Scripted Speech 27.0 ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}")
+            f"Mozilla Common Voice Scripted Speech {version} ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}")
 
 
 def commonvoice_sources(cv_dir: Path) -> list[SpeakerSource]:
