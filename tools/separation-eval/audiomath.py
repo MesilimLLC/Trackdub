@@ -35,8 +35,8 @@ def resample(x: np.ndarray, sr_from: int, sr_to: int) -> np.ndarray:
     return signal.resample_poly(x, sr_to // g, sr_from // g, axis=0).astype(np.float32)
 
 
-def _adapt_channels(x: np.ndarray, channels: int) -> np.ndarray:
-    if x.shape[1] == channels:
+def _adapt_channels(x: np.ndarray, channels: int | None) -> np.ndarray:
+    if channels in (None, x.shape[1]):
         return x
     mono = x.mean(axis=1, keepdims=True)
     return mono if channels == 1 else np.repeat(mono, channels, axis=1)
@@ -59,8 +59,9 @@ def _read_pipe_wav(data: bytes) -> tuple[int, np.ndarray]:
     return wavfile.read(BytesIO(payload))
 
 
-def load_audio(path: str | Path, channels: int = 2, sr: int = SR) -> np.ndarray:
-    """Decode to float32 (n, channels) at `sr`. Uses ffmpeg when present, else WAV via scipy."""
+def load_audio(path: str | Path, channels: int | None = 2, sr: int = SR) -> np.ndarray:
+    """Decode to float32 (n, channels) at `sr`; `channels=None` keeps the file's own channel count.
+    Uses ffmpeg when present, else WAV via scipy."""
     path = Path(path)
     if have_ffmpeg():
         proc = subprocess.run(
