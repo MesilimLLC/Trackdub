@@ -93,6 +93,9 @@ CANDIDATE_PROFILES: dict[str, dict] = {
     # bed = mixture - target. GPU-only evaluation candidate; licence and training data are not cleared for shipping.
     "sam-audio-small-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
     "sam-audio-base-residual": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    # `native`: the bed is SAM-Audio's own generated residual stem; it is not additive, so the gate is expected to fail.
+    "sam-audio-small-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
+    "sam-audio-base-native": {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"},
 }
 
 

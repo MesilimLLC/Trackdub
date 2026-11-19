@@ -35,7 +35,10 @@ import runner_common as rc  # noqa: E402
 
 os.environ.setdefault("TQDM_DISABLE", "1")
 
-MODELS = {"sam-audio-small-residual": "small", "sam-audio-base-residual": "base"}
+# candidate -> (checkpoint size, bed): "residual" is input minus target (passes the gate by construction);
+# "native" is the model's own generated residual stem, which a product would use but which is not additive.
+MODELS = {"sam-audio-small-residual": ("small", "residual"), "sam-audio-base-residual": ("base", "residual"),
+          "sam-audio-small-native": ("small", "native"), "sam-audio-base-native": ("base", "native")}
 PROMPT = "speech"
 NATIVE_SR = 48000
 WINDOW_SECONDS, OVERLAP_SECONDS = 30.0, 5.0
@@ -95,9 +98,31 @@ def prepare_xformers() -> str:
     return "stand-in (fmha unavailable; sdpa attention)"
 
 
+def drop_unused_parts(torch, model):
+    """Remove what text-prompted, span-free, video-free separation never runs, so the rest fits a 12 GB card in fp32:
+    the span predictor (about 1.5 B parameters, used only by predict_spans) and the vision encoder (about 0.7 B,
+    called only when a masked video is given; without one the model reads just its `dim` to build zero features)."""
+
+    class NoVideo(torch.nn.Module):
+        def __init__(self, dim: int):
+            super().__init__()
+            self.dim = dim
+
+        def forward(self, *_args, **_kwargs):
+            raise rc.RunnerError("video prompting is not part of this evaluation")
+
+    model.vision_encoder = NoVideo(model.vision_encoder.dim)
+    for name in ("span_predictor", "span_predictor_transform"):
+        if hasattr(model, name):
+            delattr(model, name)
+    return model
+
+
 class Separator:
-    def __init__(self, model_directory: Path, provider: str | None):
+    def __init__(self, model_directory: Path, provider: str | None, bed: str = "residual"):
         import torch
+
+        self.bed = bed
 
         if provider not in (None, "cuda") or not torch.cuda.is_available():
             raise rc.RunnerError("SAM-Audio is evaluated on CUDA only")
@@ -106,7 +131,13 @@ class Separator:
 
         self.torch = torch
         self.device = torch.device("cuda")
-        self.model = SAMAudio.from_pretrained(str(model_directory)).to(self.device).eval()
+        # Called directly: current huggingface_hub no longer forwards proxies/resume_download, which SAM-Audio's
+        # loader still requires; the model directory is local, so no download arguments matter. The rerankers are
+        # disabled (reranking_candidates is 1, so they are never consulted, and the judge model is not fetched).
+        model = SAMAudio._from_pretrained(
+            model_id=str(model_directory), cache_dir=None, force_download=False, proxies=None,
+            resume_download=False, local_files_only=True, token=None, visual_ranker=None, text_ranker=None)
+        self.model = drop_unused_parts(torch, model).to(self.device).eval()
         self.processor = SAMAudioProcessor.from_pretrained(str(model_directory))
 
     def separate_window(self, channels_48k):
@@ -114,9 +145,9 @@ class Separator:
         audios = [channels_48k[c:c + 1] for c in range(channels_48k.shape[0])]
         batch = self.processor(audios=audios, descriptions=[PROMPT] * len(audios)).to(self.device)
         result = self.model.separate(batch, predict_spans=False, reranking_candidates=1)
-        targets = [t.reshape(-1).float().cpu() for t in result.target]
         n = channels_48k.shape[1]
-        return torch.stack([rc.fix_length(torch, t.unsqueeze(0), n)[0] for t in targets])
+        stems = [t.reshape(-1).float().cpu() for t in [*result.target, *result.residual]]
+        return torch.stack([rc.fix_length(torch, t.unsqueeze(0), n)[0] for t in stems])
 
     def estimate(self, mix):
         import torchaudio
@@ -127,10 +158,10 @@ class Separator:
         window, overlap = int(WINDOW_SECONDS * NATIVE_SR), int(OVERLAP_SECONDS * NATIVE_SR)
         starts = window_starts(x.shape[1], window, overlap)
         pieces = [self.separate_window(x[:, s:s + window]) for s in starts]
-        target = crossfade_join(pieces, starts, x.shape[1], overlap)
-        dialogue = rc.fix_length(torch, torchaudio.functional.resample(target, NATIVE_SR, rc.SEPARATOR_SR),
-                                 mix.shape[1])
-        return dialogue, mix - dialogue
+        joined = crossfade_join(pieces, starts, x.shape[1], overlap)
+        back = rc.fix_length(torch, torchaudio.functional.resample(joined, NATIVE_SR, rc.SEPARATOR_SR), mix.shape[1])
+        dialogue, native_bed = back[:mix.shape[0]], back[mix.shape[0]:]
+        return dialogue, (native_bed if self.bed == "native" else mix - dialogue)
 
 
 def code_revision() -> str:
@@ -143,19 +174,21 @@ def code_revision() -> str:
 
 def metadata(model_directory: Path, model: str, xformers: str) -> dict:
     checkpoint = model_directory / "checkpoint.pt"
-    return {"runner": "sam_audio_runner", "candidate": model, "size": MODELS[model], "prompt": PROMPT,
+    size, bed = MODELS[model]
+    return {"runner": "sam_audio_runner", "candidate": model, "size": size, "prompt": PROMPT,
             "xformers": xformers,
             "checkpoint_sha256": rc.file_hash(checkpoint, "sha256"), "code_revision": code_revision(),
             "window_seconds": str(WINDOW_SECONDS), "overlap_seconds": str(OVERLAP_SECONDS), "seed": str(SEED),
             "options": "predict_spans=False, reranking_candidates=1, default ODE options",
-            "bed": "input mixture minus the prompted target, in the 44.1 kHz domain",
+            "bed": ("the model's own residual stem (not additive)" if bed == "native"
+                    else "input mixture minus the prompted target, in the 44.1 kHz domain"),
             "selected_provider": "cuda",
             "licence_note": "SAM License (Meta) and Meta-internal training data; evaluation only"}
 
 
 def main(argv: list[str]) -> int:
     args = rc.parse_command_line(argv, list(MODELS))
-    sep = Separator(args.model_directory, args.provider)
+    sep = Separator(args.model_directory, args.provider, MODELS[args.model][1])
     ctx = rc.RunContext(sep.torch, "cuda", args.provider or "cuda", metadata(args.model_directory, args.model, sep.xformers))
     return rc.run_all(sep.estimate, args, ctx)
 

@@ -45,8 +45,18 @@ class EstimateTests(unittest.TestCase):
     def separator(self):
         sep = sam.Separator.__new__(sam.Separator)
         sep.torch = torch
-        sep.separate_window = lambda chunk: 0.5 * chunk
+        sep.bed = "residual"
+        sep.separate_window = lambda chunk: torch.cat([0.5 * chunk, 0.25 * chunk])  # targets, then residuals
         return sep
+
+    def test_native_bed_is_the_model_residual(self):
+        t = torch.arange(sam.rc.SEPARATOR_SR * 3) / sam.rc.SEPARATOR_SR
+        mix = 0.1 * torch.stack([torch.sin(2 * torch.pi * 440 * t), torch.sin(2 * torch.pi * 660 * t)])
+        sep = self.separator()
+        sep.bed = "native"
+        dialogue, bed = sep.estimate(mix)
+        torch.testing.assert_close(bed, 0.25 * mix, atol=2e-3, rtol=0)
+        torch.testing.assert_close(dialogue, 0.5 * mix, atol=2e-3, rtol=0)
 
     def test_bed_is_the_mixture_minus_the_target_and_lengths_match(self):
         # A tone well inside the band, so the 44.1 -> 48 -> 44.1 kHz round trip is close to exact.
