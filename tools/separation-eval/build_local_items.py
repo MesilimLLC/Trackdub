@@ -18,6 +18,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,9 @@ import audiomath as am
 import ingest
 
 GAP_S = 0.25
+# ffmpeg occasionally fails to start under heavy parallel load on Windows (exit 0xC0000142); a retry clears it.
+DECODE_ATTEMPTS = 3
+DECODE_RETRY_WAIT_S = 2.0
 VCTK_DOI = "https://doi.org/10.7488/ds/2645"
 VCTK_PAGE = "https://datashare.ed.ac.uk/handle/10283/3443"
 CV_LISTING_URL = "https://commonvoice.mozilla.org/en/datasets"
@@ -113,6 +117,17 @@ def vctk_sources(vctk_dir: Path) -> list[SpeakerSource]:
     ) for speaker, clips in sorted(by_speaker.items())]
 
 
+def commonvoice_naming(first_file: dict, lang: str, speaker: str) -> tuple[str, str, str]:
+    """(item id, url, attribution) for a speaker; Spontaneous Speech gets its own id prefix so it never collides
+    with a Scripted Speech item of the same speaker. Scripted naming is unchanged, so eval items rebuild identically."""
+    version = first_file["corpus"].split("-")[2]
+    if first_file.get("dataset") == "spontaneous":
+        return (f"cvsps-dlg-{lang.lower()}-{speaker}", CV_LISTING_URL,
+                f"Mozilla Common Voice Spontaneous Speech {version} ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}")
+    return (f"cv-dlg-{lang.lower()}-{speaker}", CV_DATASET_URLS.get(lang, CV_LISTING_URL),
+            f"Mozilla Common Voice Scripted Speech {version} ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}")
+
+
 def commonvoice_sources(cv_dir: Path) -> list[SpeakerSource]:
     manifest = read_manifest(cv_dir, "commonvoice-subset.manifest.json")
     by_group: dict[str, list[dict]] = collections.defaultdict(list)
@@ -123,11 +138,11 @@ def commonvoice_sources(cv_dir: Path) -> list[SpeakerSource]:
         lang, speaker = files[0]["language"], group.rsplit(":", 1)[-1]
         clips = [clip_entry(cv_dir / f["language"] / "clips" / Path(f["path"]).name, f["member"], f["sha256"], f["bytes"])
                  for f in files]
+        item_id, url, attribution = commonvoice_naming(files[0], lang, speaker)
         sources.append(SpeakerSource(
-            item_id=f"cv-dlg-{lang.lower()}-{speaker}", group=group, language=lang,
+            item_id=item_id, group=group, language=lang,
             gender_class=files[0]["gender_class"], source="commonvoice", license_spdx="CC0-1.0",
-            url=CV_DATASET_URLS.get(lang, CV_LISTING_URL), evidence_url=CV_TERMS_URL,
-            attribution=f"Mozilla Common Voice Scripted Speech 27.0 ({lang}), CC0-1.0, speaker {speaker}, {CV_LISTING_URL}",
+            url=url, evidence_url=CV_TERMS_URL, attribution=attribution,
             clips=clips,
             provenance={"corpus": files[0]["corpus"], "archive": files[0]["archive"],
                         "selection": f"seed {manifest['seed']}; {manifest['filter']}"},
@@ -139,7 +154,17 @@ def load_clip(clip: dict) -> np.ndarray:
     data = clip["path"].read_bytes()
     if hashlib.sha256(data).hexdigest() != clip["sha256"]:
         raise BuildError(f"{clip['path']}: sha256 differs from the subset manifest")
-    return am.load_audio(clip["path"], channels=1)[:, 0]
+    return decode_mono(clip["path"])
+
+
+def decode_mono(path: Path) -> np.ndarray:
+    for attempt in range(1, DECODE_ATTEMPTS + 1):
+        try:
+            return am.load_audio(path, channels=1)[:, 0]
+        except am.AudioError:
+            if attempt == DECODE_ATTEMPTS:
+                raise
+            time.sleep(DECODE_RETRY_WAIT_S * attempt)
 
 
 def concat_clips(clips: list[dict], gap_s: float = GAP_S) -> np.ndarray:
