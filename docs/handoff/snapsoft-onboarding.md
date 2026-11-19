@@ -275,7 +275,9 @@ sudo chown -R 10001:10001 /mnt/trackdub-data
 
 **Step 2: repository and image.** The provisioning scripts, Compose files and model lists live in the repository,
 so the host needs a checkout. Until the registry decision above is made, log in to GHCR with a token that has
-`read:packages`. Pin an immutable `sha-<commit>-server` tag or digest instead of the moving `main-server`.
+`read:packages`. Pin an immutable `sha-<commit>-server` tag or digest instead of the moving `main-server`;
+`docker-compose.aws.yml` reads `TRACKDUB_IMAGE` for the service image and falls back to `main-server` only when it
+is unset.
 
 ```bash
 git clone --depth 1 https://github.com/MesilimLLC/Trackdub.git && cd Trackdub
@@ -299,7 +301,7 @@ dc() { docker compose -f docker-compose.yml -f docker-compose.aws.yml "$@"; }
 dc run --rm --entrypoint sh trackdub -c 'ls /proc/driver/nvidia/gpus'   # GPU visible inside the container
 dc run --rm trackdub providers list    # CUDA and TensorRT available
 dc run --rm trackdub doctor            # check the accelerator-vram-budget row
-for m in $(grep -v '^#' docker/poc-server-models.txt | cut -d'|' -f1); do
+for m in $(cat docker/poc-server-models.txt docker/poc-server-zh-models.txt | grep -v '^#' | cut -d'|' -f1 | sort -u); do
   dc run --rm trackdub models verify --model-id "$m"
 done
 ```
@@ -307,18 +309,22 @@ done
 Do not run `models verify` without `--model-id` here; on a partial cache it exits 2 by design.
 
 **Step 5: run one job.** The image entrypoint already passes `--model-directory /data/models`, so pipeline
-arguments follow the service name directly. Use a new job directory for every attempt, including retries.
+arguments follow the service name directly. Use a new job directory for every attempt, including retries. Create
+it on the host under the EBS mount, owned by the container user; inside the container the same directory is under
+`/data/jobs`.
 
 ```bash
 cp /path/to/source.mp4 docker/input/in.mp4
-JOB=/data/jobs/$(date +%Y%m%d-%H%M%S)
+JOB_ID=$(date +%Y%m%d-%H%M%S)
+sudo install -d -o 10001 -g 10001 "/mnt/trackdub-data/jobs/$JOB_ID"
+JOB=/data/jobs/$JOB_ID
 dc run --rm trackdub run pipeline --media /work/input/in.mp4 --output "$JOB/project" \
   --source-language en --target-language es --preset poc-server-v1 --voice SPEAKER_00:ef_dora \
   --subtitle-format srt --result-file "$JOB/result.json" --progress-file "$JOB/progress.jsonl"
 ```
 
 For Mandarin, use `--target-language zh --preset poc-server-zh-v1 --voice SPEAKER_00:qwen3:vivian` (not yet
-qualified end to end, section 3 item 4). Results land on the host under `/mnt/trackdub-data/jobs/<timestamp>/`.
+qualified end to end, section 3 item 4). Results land on the host under `/mnt/trackdub-data/jobs/$JOB_ID/`.
 Input limits are MP4, up to 1 GiB, 600 s and 1920x1080.
 
 Steps 1 and 2 happen once per instance or AMI, step 3 once per GPU model and driver, step 4 after each
