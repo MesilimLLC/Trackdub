@@ -31,7 +31,18 @@ Every model should have a manifest entry with:
   "benchmark_entry": "model.onnx",
   "variants": [
     { "alias": "default", "entry_path": "model.onnx" }
-  ]
+  ],
+  "risk_acceptance": {
+    "decision_record": "record-reference",
+    "accepted_risks": [
+      "licence indemnity to the licensor",
+      "termination and deletion on licence end",
+      "licensor's right to change terms",
+      "unverified training-data provenance"
+    ],
+    "owner": "owner-name",
+    "date": "YYYY-MM-DD"
+  }
 }
 ```
 
@@ -67,9 +78,13 @@ Rules:
 - **Accepted-risk exception (owner decision, 2026-11-19).** A model whose
   licence explicitly grants commercial use, but whose training-data provenance
   cannot be verified, may be selected for a commercial lane only if all of the
-  following hold. Without them it stays out of the bundled manifest.
-  - `license` is `custom`, and the licence text is bundled with the product
-    wherever the artifact is distributed.
+  following hold. Without them it stays out of the bundled manifest and the
+  downloadable catalog.
+  - `license` names the specific licence where one exists (for example
+    `NVIDIA-Open-Model-License`, `OpenMDW-1.1`, or `openrail++`); use `custom`
+    only as a fallback when no established identifier for the licence exists.
+    The licence text is bundled with the product wherever the artifact is
+    distributed.
   - `commercial_allowed: true`, `redistribution_allowed: true`, and `sha256`
     is set to the exact artifact being shipped.
   - `commercial_use_verified` stays `false`. It keeps meaning the model was
@@ -81,5 +96,11 @@ Rules:
   - The exception never applies to non-commercial or unknown-licence models,
     which remain banned from the bundled manifest.
   - The product gate (`ModelManifest.CommercialSafeMode`) must be extended to
-    accept `risk_acceptance` before any such model can be selected. Until that
-    code change lands, the exception has no effect in the product.
+    accept `risk_acceptance` in combination with `commercial_use_verified: false`
+    (not the `custom` licence string alone) before any such model can be
+    selected. Until that code change lands, no accepted-risk entry may be added
+    to the bundled manifest or the downloadable catalog, because the download
+    and model-manager selection paths key on `commercial_allowed` and
+    `can_auto_download` and do not yet enforce this gate. Once the gate lands,
+    those paths must enforce the same combination so that an accepted-risk
+    entry cannot become selectable through them before the gate does.
