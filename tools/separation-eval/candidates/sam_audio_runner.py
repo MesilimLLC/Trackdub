@@ -18,8 +18,8 @@ SAM-Audio is generative: a flow-matching transformer produces the prompted targe
      no span prediction, no reranking, noise seeded per job so a rerun gives the same stems;
   3. inputs longer than WINDOW_SECONDS (the training clip length) are separated in windows overlapping by
      OVERLAP_SECONDS and joined with linear crossfades;
-  4. resample the target back to 44.1 kHz; the dialogue is that target and the bed is the input minus it (the
-     residual form, as for the other generative or enhancement candidates; the model's own residual is not used).
+  4. resample both stems back to 44.1 kHz; the dialogue is the target and the bed is either input minus target
+     (residual profiles) or the model's own residual stem (native profiles).
 The licence (SAM License, Meta) and the training data (Meta-internal) are not cleared for shipping; this runner is
 for evaluation only.
 """
@@ -146,8 +146,13 @@ class Separator:
         batch = self.processor(audios=audios, descriptions=[PROMPT] * len(audios)).to(self.device)
         result = self.model.separate(batch, predict_spans=False, reranking_candidates=1)
         n = channels_48k.shape[1]
-        stems = [t.reshape(-1).float().cpu() for t in [*result.target, *result.residual]]
-        return torch.stack([rc.fix_length(torch, t.unsqueeze(0), n)[0] for t in stems])
+        # SAM-Audio decodes whole codec frames; only that known trailing padding may be cropped.
+        padded = n + (-n % self.processor.audio_hop_length)
+        stems = [t.reshape(-1) for t in [*result.target, *result.residual]]
+        for stem in stems:
+            if stem.numel() not in (n, padded):
+                raise rc.RunnerError(f"unexpected SAM-Audio stem length {stem.numel()}; expected {n} or {padded}")
+        return torch.stack([t[:n].float().cpu() for t in stems])
 
     def estimate(self, mix):
         import torchaudio

@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 try:
@@ -24,6 +25,9 @@ class WindowTests(unittest.TestCase):
         for a, b in zip(starts, starts[1:]):
             self.assertLessEqual(b - a, 250)
 
+    def test_aligned_final_window_occurs_once(self):
+        self.assertEqual(sam.window_starts(550, 50, 0), list(range(0, 550, 50)))
+
     @unittest.skipIf(torch is None, "needs torch")
     def test_crossfade_join_reconstructs_a_signal_split_into_windows(self):
         n, window, overlap = 1000, 300, 50
@@ -36,6 +40,30 @@ class WindowTests(unittest.TestCase):
     def test_single_window_passes_through(self):
         x = torch.randn(2, 120)
         torch.testing.assert_close(sam.crossfade_join([x], [0], 120, 50), x)
+
+
+@unittest.skipIf(torch is None, "needs torch")
+class SeparateWindowTests(unittest.TestCase):
+    def separator(self, output_length):
+        sep = sam.Separator.__new__(sam.Separator)
+        sep.torch = torch
+        sep.device = torch.device("cpu")
+        sep.processor = mock.Mock(audio_hop_length=1920)
+        stems = [torch.full((output_length,), float(i)) for i in range(1, 5)]
+        sep.model = mock.Mock()
+        sep.model.separate.return_value = SimpleNamespace(target=stems[:2], residual=stems[2:])
+        return sep
+
+    def test_crops_codec_padding_from_targets_and_residuals(self):
+        stems = self.separator(49920).separate_window(torch.zeros(2, 48480))
+        expected = torch.arange(1, 5, dtype=torch.float32)[:, None].expand(4, 48480)
+        torch.testing.assert_close(stems, expected)
+
+    def test_rejects_truncated_or_unexpectedly_padded_output(self):
+        for length in (48479, 49921):
+            with self.subTest(length=length):
+                with self.assertRaises(sam.rc.RunnerError):
+                    self.separator(length).separate_window(torch.zeros(2, 48480))
 
 
 @unittest.skipIf(torch is None, "needs torch")
@@ -101,6 +129,7 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(run_eval.CANDIDATE_PROFILES[name],
                              {"band_limit_hz": None, "output_bits": 32, "output_rounding": "nearest"})
 
+    @unittest.skipIf(torch is None, "needs torch")
     def test_cpu_provider_is_refused(self):
         with self.assertRaises(sam.rc.RunnerError):
             sam.Separator(Path("unused"), "cpu")
