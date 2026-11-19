@@ -63,6 +63,8 @@ class OverlapTests(unittest.TestCase):
         (v,) = check([candidate])
         self.assertIn("eval-upstream", codes(v))
         self.assertEqual(train_pool.jamendo_track_id("https://example.org/?trackid=685596"), None)
+        self.assertEqual(train_pool.jamendo_track_id("https://notjamendo.com/?trackid=685596"), None)
+        self.assertEqual(train_pool.jamendo_track_id("https://JAMENDO.com/track/685596"), "685596")
 
     def test_excluded_records_count_as_eval(self):
         (v,) = check([rec("fs-dia-y", 15, "freesound:ShangusBurger", source="freesound", license_spdx="CC0-1.0")])
@@ -84,6 +86,12 @@ class RecordTests(unittest.TestCase):
             with self.subTest(code=code):
                 (v,) = check([candidate])
                 self.assertEqual(codes(v), [code])
+
+    def test_missing_group_is_a_clean_rejection(self):
+        candidate = rec("vctk-dlg-p235", 25, "vctk:p235")
+        del candidate["group"]
+        (v,) = check([candidate])
+        self.assertEqual(codes(v), ["invalid"])
 
     def test_noncommercial_licence_is_rejected(self):
         (v,) = check([rec("vctk-dlg-p234", 24, "vctk:p234", license_spdx="CC-BY-NC-4.0")])

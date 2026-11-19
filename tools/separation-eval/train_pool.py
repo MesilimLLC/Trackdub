@@ -75,19 +75,26 @@ def upstream_keys(item: dict) -> set[str]:
     return keys
 
 
+def is_jamendo_host(host: str | None) -> bool:
+    host = (host or "").lower()
+    return host == "jamendo.com" or host.endswith(".jamendo.com")
+
+
+def track_in_path(path: str) -> str | None:
+    """The numeric segment after 'track', as in /track/339322/name or /download/track/685596/mp32/."""
+    segments = [s for s in path.split("/") if s]
+    after = [nxt for cur, nxt in zip(segments, segments[1:]) if cur == "track" and nxt.isdigit()]
+    return after[0] if after else None
+
+
 def jamendo_track_id(url: str) -> str | None:
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return None
-    if not (parts.hostname or "").endswith("jamendo.com"):
+    if not is_jamendo_host(parts.hostname):
         return None
-    track = urllib.parse.parse_qs(parts.query).get("trackid", [None])[0]
-    if track:
-        return track
-    segments = [s for s in parts.path.split("/") if s]
-    after = [segments[i + 1] for i, s in enumerate(segments[:-1]) if s == "track" and segments[i + 1].isdigit()]
-    return after[0] if after else None
+    return urllib.parse.parse_qs(parts.query).get("trackid", [None])[0] or track_in_path(parts.path)
 
 
 def load_eval_identity(manifest: dict, excluded: list[dict]) -> EvalIdentity:
