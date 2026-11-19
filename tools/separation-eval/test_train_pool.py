@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -73,6 +74,22 @@ class OverlapTests(unittest.TestCase):
                      excluded=[])
         self.assertEqual(v.reasons, [])
 
+    def test_freesound_id_in_a_url_matches_an_eval_sound(self):
+        for url in ("https://freesound.org/people/someone/sounds/102096/",
+                    "https://freesound.org/apiv2/sounds/102096/download/",
+                    "https://freesound.org/s/102096/",
+                    "https://cdn.freesound.org/previews/102/102096_5121236-hq.mp3"):
+            with self.subTest(url=url):
+                (v,) = check([rec("fs-sfx-z", 16, "freesound:other", source="freesound", url=url,
+                                  license_spdx="CC0-1.0")])
+                self.assertIn("eval-upstream", codes(v))
+        self.assertIsNone(train_pool.freesound_id_in_url("https://notfreesound.org/s/102096/"))
+        self.assertIsNone(train_pool.freesound_id_in_url("https://freesound.org/people/someone/"))
+
+    def test_eval_record_with_unreadable_freesound_id_does_not_crash(self):
+        identity = train_pool.load_eval_identity(ingest.build_manifest(EVAL), [{"id": "x-1", "freesound_id": "n/a"}])
+        self.assertIn("x-1", identity.ids)
+
 
 class RecordTests(unittest.TestCase):
     def test_record_problems(self):
@@ -86,6 +103,15 @@ class RecordTests(unittest.TestCase):
             with self.subTest(code=code):
                 (v,) = check([candidate])
                 self.assertEqual(codes(v), [code])
+
+    def test_malformed_freesound_id_is_rejected_without_stopping_the_batch(self):
+        bad, good = check([rec("fs-sfx-b", 26, "freesound:b", source="freesound", freesound_id="unknown",
+                               license_spdx="CC0-1.0"),
+                           rec("fs-sfx-c", 27, "freesound:c", source="freesound", freesound_id="00777",
+                               license_spdx="CC0-1.0")])
+        self.assertEqual(codes(bad), ["bad-freesound-id"])
+        self.assertEqual(good.reasons, [])
+        self.assertEqual(train_pool.upstream_keys(good.record), {"freesound:777"})
 
     def test_missing_group_is_a_clean_rejection(self):
         candidate = rec("vctk-dlg-p235", 25, "vctk:p235")
@@ -142,6 +168,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(report["rejected_by_reason"], {"eval-group": 1})
             self.assertEqual(report["rejections"][0]["id"], "vctk-dlg-p301")
             self.assertIn(str(dropped), report["exclude_records"])
+            self.assertEqual(report["candidate_files"][str(cands)], hashlib.sha256(cands.read_bytes()).hexdigest())
+            self.assertEqual(report["eval_manifest_sha256"], hashlib.sha256(manifest.read_bytes()).hexdigest())
+
+    def test_outputs_that_alias_inputs_or_each_other_are_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "m.json"
+            manifest.write_text(json.dumps(ingest.build_manifest(EVAL)), encoding="utf-8")
+            cands = root / "c.jsonl"
+            cands.write_text(json.dumps(rec("vctk-dlg-p500", 80, "vctk:p500")), encoding="utf-8")
+            before = {p: p.read_bytes() for p in (manifest, cands)}
+            cases = {"out is a candidate file": (cands, root / "r.json"),
+                     "report is the eval manifest": (root / "o.jsonl", manifest),
+                     "out and report are the same": (root / "same.json", root / "same.json"),
+                     "out names a candidate another way": (root / "x" / ".." / "c.jsonl", root / "r.json")}
+            for label, (out, report) in cases.items():
+                with self.subTest(label), self.assertRaises(SystemExit):
+                    train_pool.main(["check", "--eval-manifest", str(manifest), "--candidates", str(cands),
+                                     "--out", str(out), "--report", str(report)])
+            self.assertEqual({p: p.read_bytes() for p in (manifest, cands)}, before)
+            self.assertFalse((root / "same.json").exists())
 
     def test_edited_eval_manifest_is_refused(self):
         with tempfile.TemporaryDirectory() as td:

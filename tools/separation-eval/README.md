@@ -115,13 +115,16 @@ python tools/separation-eval/train_pool.py check --eval-manifest items.v1.2.mani
 ```
 
 - A candidate is rejected when it shares an item id, audio content (sha256), group (speaker, uploader, artist, book
-  or room, case-insensitive) or upstream id (Freesound sound, Jamendo track) with an eval or excluded item; when it
+  or room, case-insensitive) or upstream id (Freesound sound, from `freesound_id` or any freesound.org sound, API or
+  preview URL; Jamendo track, from any jamendo.com URL form) with an eval or excluded item; when it
   fails ingest's record validation, with share-alike always refused; when it has no sha256 or is marked
-  `excluded_from_training`; or when it repeats an id or audio already accepted into the pool.
+  `excluded_from_training`, or has a `freesound_id` that is not a whole number; or when it repeats an id or audio
+  already accepted into the pool. A bad candidate is reported and the rest of the batch is still checked.
 - Candidates are records in the ingest schema with `sha256` filled in, so ingest or hash the audio first. Groups must
   be built the same way as the eval groups (for Common Voice, the truncated hashed `client_id` of `build_local_items.py`).
 - Accepted records are written with `split: train`, `excluded_from_training: false` and the eval `items_sha256` they
   were checked against. Keep them in their own file; never merge them into an eval manifest. The report lists every
-  rejection with its reasons and the hashes of all inputs.
+  rejection with its reasons and the hashes of all inputs, computed from the same bytes the check read. `--out` and
+  `--report` are refused if they would overwrite an input or each other.
 - Known limit: eval LibriVox items record the book, not the reader, so LibriVox candidates are accepted with a
   warning until readers are recorded. All 110 VCTK speakers are in the eval corpus, so VCTK yields no training items.

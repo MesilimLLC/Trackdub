@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import urllib.parse
 from collections import Counter
@@ -66,13 +67,34 @@ def normalize_group(group: str) -> str:
 
 def upstream_keys(item: dict) -> set[str]:
     """Upstream catalogue ids that identify the same recording across re-encodes."""
-    keys = set()
-    if item.get("freesound_id") is not None:
-        keys.add(f"freesound:{int(item['freesound_id'])}")
-    track = jamendo_track_id(item.get("url", ""))
-    if track:
-        keys.add(f"jamendo:{track}")
-    return keys
+    urls = [str(item.get(key) or "") for key in ("url", "license_evidence_url")]
+    sounds = {freesound_id_field(item), *(freesound_id_in_url(u) for u in urls)}
+    tracks = {jamendo_track_id(u) for u in urls}
+    return {f"freesound:{s}" for s in sounds if s} | {f"jamendo:{t}" for t in tracks if t}
+
+
+def freesound_id_field(item: dict) -> str | None:
+    """The record's freesound_id as a canonical decimal string, or None when absent or not a whole number."""
+    value = item.get("freesound_id")
+    text = "" if value is None or isinstance(value, bool) else str(value).strip()
+    return str(int(text)) if text.isdigit() else None
+
+
+FREESOUND_SOUND_PATH = re.compile(r"/(?:sounds|s)/(\d+)(?:/|$)")
+FREESOUND_PREVIEW_PATH = re.compile(r"/previews/\d+/(\d+)_")
+
+
+def freesound_id_in_url(url: str) -> str | None:
+    """Sound id in a freesound.org sound page, API or preview URL."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if host != "freesound.org" and not host.endswith(".freesound.org"):
+        return None
+    match = FREESOUND_SOUND_PATH.search(parts.path) or FREESOUND_PREVIEW_PATH.search(parts.path)
+    return str(int(match.group(1))) if match else None
 
 
 def is_jamendo_host(host: str | None) -> bool:
@@ -117,18 +139,21 @@ def eval_overlap(rec: dict, identity: EvalIdentity) -> list[str]:
     return reasons
 
 
+def field_problems(rec: dict) -> list[str]:
+    checks = [
+        (not ingest.SHA256_PATTERN.match(str(rec.get("sha256", ""))),
+         "no-sha256: ingest or hash the audio before checking"),
+        (":" not in rec["group"].strip(":"), f"bad-group: group '{rec['group']}' must be '<scheme>:<value>'"),
+        (rec.get("excluded_from_training") is True, "marked-excluded: record is marked excluded_from_training"),
+        ("freesound_id" in rec and freesound_id_field(rec) is None,
+         f"bad-freesound-id: freesound_id {rec.get('freesound_id')!r} is not a whole number"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
 def record_problems(rec: dict) -> list[str]:
     reason = ingest.validate_record(rec, allow_sharealike=False)
-    if reason:
-        return [f"invalid: {reason}"]
-    problems = []
-    if not ingest.SHA256_PATTERN.match(str(rec.get("sha256", ""))):
-        problems.append("no-sha256: ingest or hash the audio before checking")
-    if ":" not in rec["group"].strip(":"):
-        problems.append(f"bad-group: group '{rec['group']}' must be '<scheme>:<value>'")
-    if rec.get("excluded_from_training") is True:
-        problems.append("marked-excluded: record is marked excluded_from_training")
-    return problems
+    return [f"invalid: {reason}"] if reason else field_problems(rec)
 
 
 def check_record(rec: dict, identity: EvalIdentity, seen: EvalIdentity) -> Verdict:
@@ -185,19 +210,47 @@ def summarize(verdicts: list[Verdict], provenance: dict) -> dict:
     }
 
 
-def file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+@dataclass(frozen=True)
+class InputFile:
+    """An input read once: its hash and its parsed content both come from these bytes."""
+    path: Path
+    sha256: str
+    text: str
 
 
-def read_records(paths: list[Path]) -> list[dict]:
-    return [r for p in paths for r in ingest.read_jsonl(p)]
+def read_input(path: Path) -> InputFile:
+    data = path.read_bytes()
+    return InputFile(path, hashlib.sha256(data).hexdigest(), data.decode("utf-8-sig"))
 
 
-def load_eval_manifest(path: Path) -> dict:
-    manifest = json.loads(path.read_text(encoding="utf-8"))
+def parse_records(inputs: list[InputFile]) -> list[dict]:
+    return [r for inp in inputs for r in ingest.parse_jsonl(inp.text, str(inp.path))]
+
+
+def load_eval_manifest(inp: InputFile) -> dict:
+    manifest = json.loads(inp.text)
     if manifest.get("items_sha256") != ingest.items_hash(manifest.get("items", [])):
-        raise SystemExit(f"{path}: items_sha256 does not match its items")
+        raise SystemExit(f"{inp.path}: items_sha256 does not match its items")
     return manifest
+
+
+def same_file(a: Path, b: Path) -> bool:
+    if a.resolve() == b.resolve():
+        return True
+    try:
+        return a.exists() and b.exists() and a.samefile(b)
+    except OSError:
+        return False
+
+
+def refuse_aliased_outputs(args: argparse.Namespace) -> None:
+    """--out and --report must be two new or distinct files that are not any input."""
+    if same_file(args.out, args.report):
+        raise SystemExit("--out and --report must be different files")
+    inputs = [args.eval_manifest, *args.exclude_records, *args.candidates]
+    clashes = sorted({str(out) for out in (args.out, args.report) for inp in inputs if same_file(out, inp)})
+    if clashes:
+        raise SystemExit(f"output would overwrite an input: {', '.join(clashes)}")
 
 
 def write_pool(path: Path, records: list[dict], eval_items_sha256: str) -> None:
@@ -207,19 +260,24 @@ def write_pool(path: Path, records: list[dict], eval_items_sha256: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def input_provenance(args: argparse.Namespace, eval_items_sha256: str) -> dict:
-    return {"eval_manifest_sha256": file_sha256(args.eval_manifest), "eval_items_sha256": eval_items_sha256,
-            "exclude_records": {str(p): file_sha256(p) for p in args.exclude_records},
-            "candidate_files": {str(p): file_sha256(p) for p in args.candidates}}
+def input_provenance(manifest: InputFile, excluded: list[InputFile], candidates: list[InputFile],
+                     eval_items_sha256: str) -> dict:
+    return {"eval_manifest_sha256": manifest.sha256, "eval_items_sha256": eval_items_sha256,
+            "exclude_records": {str(i.path): i.sha256 for i in excluded},
+            "candidate_files": {str(i.path): i.sha256 for i in candidates}}
 
 
 def run_check(args: argparse.Namespace) -> dict:
-    manifest = load_eval_manifest(args.eval_manifest)
+    refuse_aliased_outputs(args)
+    manifest_in = read_input(args.eval_manifest)
+    excluded_in = [read_input(p) for p in args.exclude_records]
+    candidates_in = [read_input(p) for p in args.candidates]
+    manifest = load_eval_manifest(manifest_in)
     items_sha = manifest["items_sha256"]
-    identity = load_eval_identity(manifest, read_records(args.exclude_records))
-    verdicts = check_candidates(read_records(args.candidates), identity)
+    identity = load_eval_identity(manifest, parse_records(excluded_in))
+    verdicts = check_candidates(parse_records(candidates_in), identity)
     write_pool(args.out, [train_record(v.record, items_sha) for v in verdicts if not v.reasons], items_sha)
-    report = summarize(verdicts, input_provenance(args, items_sha))
+    report = summarize(verdicts, input_provenance(manifest_in, excluded_in, candidates_in, items_sha))
     args.report.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
     return report
 

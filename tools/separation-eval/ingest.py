@@ -482,17 +482,22 @@ def verify_manifest(manifest: dict, cache: Path) -> list[str]:
 
 
 def read_jsonl(path: Path) -> list[dict]:
+    return parse_jsonl(path.read_text(encoding="utf-8-sig"), str(path))
+
+
+def parse_jsonl(text: str, label: str) -> list[dict]:
+    """Records from JSONL text; blank lines and '#' comment lines are skipped. `label` names the source in errors."""
     records = []
-    for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+    for n, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise IngestError(f"{path}:{n}: invalid JSON: {exc}") from exc
+            raise IngestError(f"{label}:{n}: invalid JSON: {exc}") from exc
         if not isinstance(record, dict):
-            raise IngestError(f"{path}:{n}: expected a JSON object")
+            raise IngestError(f"{label}:{n}: expected a JSON object")
         records.append(record)
     return records
 
