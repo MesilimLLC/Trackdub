@@ -222,22 +222,40 @@ def archive_preference_key(path: Path) -> tuple[str, str, str]:
     return date, version, path.name
 
 
+def archive_for(path: Path, dataset: str) -> Archive | None:
+    """The archive for this file name, or None (with a warning) when it does not match the pattern."""
+    match = ARCHIVE_NAME.search(path.name)
+    if match is None:
+        print(f"skipping non-matching archive: {path.name}", file=sys.stderr, flush=True)
+        return None
+    return Archive(path, match.group(4), dataset)
+
+
+def language_selected(archive: Archive, languages: set[str] | None) -> bool:
+    return languages is None or archive.lang in languages
+
+
+def preferred_over(previous: Archive | None, archive: Archive) -> bool:
+    return previous is None or archive_preference_key(archive.path) > archive_preference_key(previous.path)
+
+
+def keep_preferred(chosen: dict[str, Archive], archive: Archive) -> None:
+    previous = chosen.get(archive.lang)
+    if not preferred_over(previous, archive):
+        return
+    if previous is not None:
+        print(f"{archive.lang}: using {archive.path.name} instead of {previous.path.name}",
+              file=sys.stderr, flush=True)
+    chosen[archive.lang] = archive
+
+
 def archives_in(cv_root: Path, languages: set[str] | None, dataset: str = "scripted") -> list[Archive]:
     pattern = f"*{ARCHIVE_PREFIX[dataset]}-corpus-*.tar.gz"
     chosen: dict[str, Archive] = {}
     for path in sorted(cv_root.glob(pattern)):
-        match = ARCHIVE_NAME.search(path.name)
-        if match is None:
-            print(f"skipping non-matching archive: {path.name}", file=sys.stderr, flush=True)
-            continue
-        archive = Archive(path, match.group(4), dataset)
-        if languages is not None and archive.lang not in languages:
-            continue
-        previous = chosen.get(archive.lang)
-        if previous is None or archive_preference_key(path) > archive_preference_key(previous.path):
-            if previous is not None:
-                print(f"{archive.lang}: using {path.name} instead of {previous.path.name}", file=sys.stderr, flush=True)
-            chosen[archive.lang] = archive
+        archive = archive_for(path, dataset)
+        if archive is not None and language_selected(archive, languages):
+            keep_preferred(chosen, archive)
     return [chosen[lang] for lang in sorted(chosen)]
 
 
