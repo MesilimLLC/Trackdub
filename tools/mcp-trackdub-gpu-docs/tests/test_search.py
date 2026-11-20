@@ -36,17 +36,12 @@ class TermTests(unittest.TestCase):
         self.assertEqual(set(weights), {"use", "allocator"})
 
 
-class SourceMergeTests(unittest.TestCase):
-    def test_remote_sources_come_from_the_docs_rag_corpus(self):
-        corpus = json.loads((EVAL_DIR.parent / "docs-rag" / "corpus.v1.json").read_text(encoding="utf-8"))
-        gpu_ids = {
-            entry["gpu"]["id"]
-            for vendor in corpus["vendors"]
-            for entry in vendor["sources"]
-            if isinstance(entry, dict) and "gpu" in entry
-        }
+class ManifestSourceTests(unittest.TestCase):
+    def test_remote_sources_come_from_the_manifest(self):
+        manifest = json.loads((EVAL_DIR.parent / "mcp-trackdub-gpu-docs" / "corpus" / "manifest.v0.json").read_text(encoding="utf-8"))
+        manifest_ids = {s["id"] for s in manifest["sources"] if s["kind"] == "url"}
         loaded = {s.id for s in load_sources() if s.kind == "url"}
-        self.assertEqual(loaded, gpu_ids)
+        self.assertEqual(loaded, manifest_ids)
         self.assertTrue(loaded)
 
 

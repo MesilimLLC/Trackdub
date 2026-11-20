@@ -47,14 +47,13 @@ def find_repo_root(start: Path | None = None) -> Path:
     )
 
 
-@lru_cache(maxsize=1)
-def load_manifest() -> dict[str, Any]:
+@lru_cache(maxsize=2)
+def _read_manifest(stamp: int) -> dict[str, Any]:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-def _docs_rag_corpus() -> dict[str, Any]:
-    path = find_repo_root() / "tools" / "docs-rag" / "corpus.v1.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_manifest() -> dict[str, Any]:
+    return _read_manifest(MANIFEST_PATH.stat().st_mtime_ns)
 
 
 def load_sources() -> list[CorpusSource]:
@@ -73,23 +72,6 @@ def load_sources() -> list[CorpusSource]:
                 pin_warning=raw.get("pinWarning"),
             )
         )
-    # Remote pages live once, in the docs-rag corpus; a vendor source opts in with a "gpu" block.
-    for vendor in _docs_rag_corpus()["vendors"]:
-        for entry in vendor["sources"]:
-            gpu = entry.get("gpu") if isinstance(entry, dict) else None
-            if gpu is None:
-                continue
-            sources.append(
-                CorpusSource(
-                    id=gpu["id"],
-                    kind="url",
-                    title=gpu["title"],
-                    tags=tuple(gpu.get("tags", [])),
-                    priority=int(gpu.get("priority", 0)),
-                    url=entry["url"],
-                    pin_warning=gpu.get("pinWarning"),
-                )
-            )
     return sources
 
 
@@ -133,24 +115,26 @@ def _read_ingested_url(source: CorpusSource) -> str | None:
     return None
 
 
+def _source_text(
+    source: CorpusSource, repo_root: Path, include_remote_if_cached: bool
+) -> tuple[str, str] | None:
+    """Return (text, origin) for a source, or None when it has nothing to index."""
+    if source.kind == "repo-file":
+        return _read_repo_file(source, repo_root), source.path or source.id
+    if source.kind == "url" and include_remote_if_cached:
+        text = _read_ingested_url(source)
+        return (text, source.url or source.id) if text is not None else None
+    return None
+
+
 def load_chunks(*, include_remote_if_cached: bool = True) -> list[Chunk]:
     repo_root = find_repo_root()
     chunks: list[Chunk] = []
     for source in load_sources():
-        text: str | None = None
-        origin: str
-        if source.kind == "repo-file":
-            text = _read_repo_file(source, repo_root)
-            origin = source.path or source.id
-        elif source.kind == "url":
-            if not include_remote_if_cached:
-                continue
-            text = _read_ingested_url(source)
-            if text is None:
-                continue
-            origin = source.url or source.id
-        else:
+        loaded = _source_text(source, repo_root, include_remote_if_cached)
+        if loaded is None:
             continue
+        text, origin = loaded
 
         for index, piece in enumerate(_chunk_text(text)):
             chunks.append(

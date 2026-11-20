@@ -141,7 +141,7 @@ Never claim Done without proof attached; the proof lives in the gate evidence, n
 | GitKraken MCP | workspace-aware `git_push`, workspace listing |
 | cubic MCP | repo wiki, review, codebase scan findings |
 | Context7 | third-party library docs outside the Trackdub corpus; verify against live code |
-| `trackdub-docs-rag` / `trackdub-gpu-docs` / `nvidia-cuda-docs` MCP | implementation facts, GPU/TRT-RTX docs, CUDA internals |
+| `trackdub-gpu-docs` / `nvidia-cuda-docs` MCP | implementation facts, GPU/TRT-RTX docs, CUDA internals |
 | External issue tracker | **not used**, only on explicit user request |
 
 ## Report shape at handoff

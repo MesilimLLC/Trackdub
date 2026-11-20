@@ -79,7 +79,7 @@ Therefore:
 - **`NOT VERIFIED` is a valid and expected output**, not a failure to be papered over. It is the honest state when a rung has no evidence behind it. Every rung of `/ready`, every gate of `/validate`, every delta of `/bench` accepts it.
 - **Partial evidence never becomes a pass.** `/validate` stops at the first failing gate and shows the exact command and output. `/bench` reports measured numbers only — a missing baseline means `NOT VERIFIED`, never "no regression". `/ready` never rounds a rung up.
 - **Rules are enforced by the build wherever possible.** `BannedSymbols.txt` via `Microsoft.CodeAnalysis.BannedApiAnalyzers`; dependency direction, acyclicity, ADR-0011 Contracts isolation, ONNX/WinML/DNNL asset invariants and portable-RID lock graphs via `tests/Trackdub.Architecture.Tests`; analyzer diagnostics via `src/Trackdub.Analyzers`. A rule that can be a test should be a test — a test fails deterministically, and an instruction does not.
-- **Documentation is not evidence.** For implementation facts, `trackdub-docs-rag` MCP (spec `tools/docs-rag/SPEC.md`) grounds answers, Context7 covers third-party libraries, and both are treated as evidence to be verified against live code. The conflict order still governs: source/tests > task instructions > documentation.
+- **Documentation is not evidence.** For implementation facts, the checkout and `runtime/trt-rtx-ep.manifest.json` ground answers, Context7 covers third-party libraries, and any retrieved text is treated as evidence to be verified against live code. The conflict order still governs: source/tests > task instructions > documentation.
 
 ## Stateless design
 
