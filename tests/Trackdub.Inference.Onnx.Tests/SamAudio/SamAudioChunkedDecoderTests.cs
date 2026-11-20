@@ -4,10 +4,19 @@ namespace Trackdub.Inference.Onnx.Tests.SamAudio;
 
 public sealed class SamAudioChunkedDecoderTests
 {
-    /// <summary>A pointwise stand-in decoder: sample i is the first latent channel of its frame (target) and its negation (residual).</summary>
+    /// <summary>
+    /// A pointwise stand-in decoder: sample i is the first latent channel of its frame (target) and its negation (residual).
+    /// <see cref="EdgeBias"/> models a convolutional decoder's edge artefacts: the first and last two samples of every call
+    /// are off by that much, so a chunking scheme that keeps chunk edges at full weight is visible in the output.
+    /// </summary>
     private sealed class PointwiseGraphs : ISamAudioGraphs
     {
+        public float EdgeBias { get; init; }
+
         public List<(int Frames, float[] Message)> Calls { get; } = [];
+
+        /// <summary>Frame index at which each call's chunk begins (the test latent holds frame index + 1 in channel 0).</summary>
+        public List<int> ChunkStarts { get; } = [];
 
         public float[] Encode(float[] paddedWave, CancellationToken cancellationToken) => throw new NotSupportedException();
 
@@ -16,10 +25,12 @@ public sealed class SamAudioChunkedDecoderTests
         public (float[] Target, float[] Residual) Decode(float[] latent, int frames, float[] message, CancellationToken cancellationToken)
         {
             Calls.Add((frames, message));
+            ChunkStarts.Add((int)latent[0] - 1);
             float[] target = new float[frames * SamAudioModelConstants.HopLength];
             for (int i = 0; i < target.Length; i++)
             {
-                target[i] = latent[i / SamAudioModelConstants.HopLength * SamAudioModelConstants.LatentChannels];
+                bool atEdge = i < 2 || i >= target.Length - 2;
+                target[i] = latent[i / SamAudioModelConstants.HopLength * SamAudioModelConstants.LatentChannels] + (atEdge ? EdgeBias : 0f);
             }
 
             return (target, [.. target.Select(static v => -v)]);
@@ -62,6 +73,36 @@ public sealed class SamAudioChunkedDecoderTests
             Assert.Equal(expectedResidual[i], residual[i], 1e-3f);
         });
         Assert.All(graphs.Calls, call => Assert.Equal(SamAudioModelConstants.DecodeChunkFrames, call.Frames));
+    }
+
+    /// <summary>
+    /// Chunk edges are wrong by a large bias here, so the result only matches a whole decode if every chunk edge sits at
+    /// (near) zero weight inside an overlap that the crossfade ramps over.
+    /// </summary>
+    [Fact]
+    public void Chunk_edge_artefacts_are_crossfaded_away()
+    {
+        foreach (int frames in new[] { 400, 750 })
+        {
+            float[] latent = Latent(frames);
+
+            (float[] target, float[] residual) = SamAudioChunkedDecoder.Decode(latent, new float[32], new PointwiseGraphs { EdgeBias = 1000f }, CancellationToken.None);
+            (float[] expectedTarget, float[] expectedResidual) = new PointwiseGraphs { EdgeBias = 1000f }.Decode(latent, frames, new float[32], CancellationToken.None);
+
+            Assert.Equal(expectedTarget.Length, target.Length);
+            Assert.InRange(expectedTarget.Zip(target, (e, a) => Math.Abs(e - a)).Max(), 0f, 0.05f);
+            Assert.InRange(expectedResidual.Zip(residual, (e, a) => Math.Abs(e - a)).Max(), 0f, 0.05f);
+        }
+    }
+
+    [Fact]
+    public void Chunks_start_one_chunk_minus_the_overlap_apart_and_the_last_ends_at_the_end()
+    {
+        PointwiseGraphs graphs = new();
+
+        SamAudioChunkedDecoder.Decode(Latent(400), new float[32], graphs, CancellationToken.None);
+
+        Assert.Equal([0, 125, 250], graphs.ChunkStarts);
     }
 
     [Fact]

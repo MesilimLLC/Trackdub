@@ -4,19 +4,32 @@ namespace Trackdub.Inference.Onnx.Tests.SamAudio;
 
 public sealed class SamAudioChunkedEncoderTests
 {
-    /// <summary>A pointwise stand-in encoder: channel 0 of a frame is the first sample of that frame, the rest are zero.</summary>
+    private const int EdgeFrames = 3;
+
+    /// <summary>
+    /// A pointwise stand-in encoder: channel 0 of a frame is the first sample of that frame, the rest are zero.
+    /// <see cref="EdgeBias"/> models a convolutional encoder's edge artefacts: the first and last few frames of every call
+    /// are off by that much, so stitching at a chunk edge instead of mid-overlap shows up in the features.
+    /// </summary>
     private sealed class PointwiseGraphs : ISamAudioGraphs
     {
+        public float EdgeBias { get; init; }
+
         public List<int> EncodedFrames { get; } = [];
+
+        /// <summary>First wave sample of each call (the test wave holds frame index + 1), so chunk spacing is visible.</summary>
+        public List<int> ChunkStarts { get; } = [];
 
         public float[] Encode(float[] paddedWave, CancellationToken cancellationToken)
         {
             int frames = paddedWave.Length / SamAudioModelConstants.HopLength;
             EncodedFrames.Add(frames);
+            ChunkStarts.Add((int)paddedWave[0] - 1);
             float[] features = new float[frames * SamAudioModelConstants.FeatureChannels];
             for (int f = 0; f < frames; f++)
             {
-                features[f * SamAudioModelConstants.FeatureChannels] = paddedWave[f * SamAudioModelConstants.HopLength];
+                bool atEdge = f < EdgeFrames || f >= frames - EdgeFrames;
+                features[f * SamAudioModelConstants.FeatureChannels] = paddedWave[f * SamAudioModelConstants.HopLength] + (atEdge ? EdgeBias : 0f);
             }
 
             return features;
@@ -58,6 +71,31 @@ public sealed class SamAudioChunkedEncoderTests
         Assert.Equal(expected, features);
         Assert.True(graphs.EncodedFrames.Count > 1);
         Assert.All(graphs.EncodedFrames, encoded => Assert.Equal(SamAudioModelConstants.EncodeChunkFrames, encoded));
+    }
+
+    /// <summary>Chunk edges are wrong by a large bias here, so only a stitch point well inside the overlap reproduces a whole encode.</summary>
+    [Fact]
+    public void Chunk_edge_artefacts_never_reach_the_stitched_features()
+    {
+        foreach (int frames in new[] { 400, 750 })
+        {
+            float[] wave = Wave(frames);
+
+            float[] features = SamAudioChunkedEncoder.Encode(wave, new PointwiseGraphs { EdgeBias = 1000f }, CancellationToken.None);
+            float[] expected = new PointwiseGraphs { EdgeBias = 1000f }.Encode(wave, CancellationToken.None);
+
+            Assert.Equal(expected, features);
+        }
+    }
+
+    [Fact]
+    public void Chunks_start_one_chunk_minus_the_overlap_apart()
+    {
+        PointwiseGraphs graphs = new();
+
+        SamAudioChunkedEncoder.Encode(Wave(400), graphs, CancellationToken.None);
+
+        Assert.Equal([0, 125, 250], graphs.ChunkStarts);
     }
 
     [Fact]

@@ -11,10 +11,25 @@ public sealed class SamAudioRunnerTests
         /// <summary>When set, the decoder returns this many samples regardless of the frame count.</summary>
         public int? DecodedSamples { get; init; }
 
+        /// <summary>When set, the decoded stems follow the latent (target = its first channel per frame, residual = the negation) instead of being constant.</summary>
+        public bool VaryingStems { get; init; }
+
+        /// <summary>Called with the graph letter on every call, so a test can cancel at a chosen point of the run.</summary>
+        public Action<char>? OnCall { get; init; }
+
         public int Decodes { get; private set; }
 
         /// <summary>Which graph each call used, in order: E(ncode), V(elocity), D(ecode).</summary>
         public List<char> Calls { get; } = [];
+
+        public List<CancellationToken> Tokens { get; } = [];
+
+        private void Observe(char graph, CancellationToken cancellationToken)
+        {
+            Calls.Add(graph);
+            Tokens.Add(cancellationToken);
+            OnCall?.Invoke(graph);
+        }
 
         public float[]? DecodedLatent { get; private set; }
 
@@ -22,14 +37,14 @@ public sealed class SamAudioRunnerTests
 
         public float[] Encode(float[] paddedWave, CancellationToken cancellationToken)
         {
-            Calls.Add('E');
+            Observe('E', cancellationToken);
             Assert.Equal(0, paddedWave.Length % SamAudioModelConstants.HopLength);
             return new float[paddedWave.Length / SamAudioModelConstants.HopLength * SamAudioModelConstants.FeatureChannels];
         }
 
         public float[] Velocity(float time, float[] noisy, float[] features, CancellationToken cancellationToken)
         {
-            Calls.Add('V');
+            Observe('V', cancellationToken);
             Assert.Equal(features.Length / SamAudioModelConstants.FeatureChannels * SamAudioModelConstants.LatentChannels, noisy.Length);
             return new float[noisy.Length];
         }
@@ -37,10 +52,16 @@ public sealed class SamAudioRunnerTests
         public (float[] Target, float[] Residual) Decode(float[] latent, int frames, float[] message, CancellationToken cancellationToken)
         {
             Decodes++;
-            Calls.Add('D');
+            Observe('D', cancellationToken);
             DecodedLatent = latent;
             Message = message;
             int samples = DecodedSamples ?? frames * SamAudioModelConstants.HopLength;
+            if (VaryingStems)
+            {
+                float[] target = SamAudioRunnerTests.FrameValues(latent, samples);
+                return (target, [.. target.Select(static v => -v)]);
+            }
+
             return ([.. Enumerable.Repeat(1f, samples)], [.. Enumerable.Repeat(0.5f, samples)]);
         }
     }
@@ -90,6 +111,32 @@ public sealed class SamAudioRunnerTests
         Assert.Equal(18, reports[^1].TotalChunks);
     }
 
+    /// <summary>First latent channel of the frame each sample belongs to: a signal that differs from sample to sample.</summary>
+    private static float[] FrameValues(float[] latent, int samples) =>
+        [.. Enumerable.Range(0, samples).Select(i => latent[i / SamAudioModelConstants.HopLength * SamAudioModelConstants.LatentChannels])];
+
+    [Fact]
+    public void Runner_joins_overlapping_windows_exactly_like_a_manual_crossfade_of_the_window_stems()
+    {
+        // With zero velocity each window decodes to a function of its seeded noise, so the expected stems can be rebuilt
+        // from the layout and the crossfade alone, overlap regions included.
+        int length = 65 * SamAudioModelConstants.SampleRate;
+        WindowLayout layout = new(length, SamAudioModelConstants.WindowSamples, SamAudioModelConstants.OverlapSamples);
+        SamAudioRandom noise = new(SamAudioSeparationRunner.Seed);
+        int windowFrames = layout.Window / SamAudioModelConstants.HopLength;
+        List<float[]> speech = [.. layout.Starts().Select(_ => FrameValues(noise.Gaussian(windowFrames * SamAudioModelConstants.LatentChannels), layout.Window))];
+        List<float[]> bed = [.. speech.Select(static piece => piece.Select(static v => -v).ToArray())];
+
+        SamAudioSeparation result = SamAudioSeparationRunner.Run([new float[length]], new FakeGraphs { VaryingStems = true }, null, CancellationToken.None);
+
+        // Each window is itself joined from decode chunks, so allow float rounding but nothing like a missing or shifted fade.
+        float[] expectedSpeech = SamAudioCrossfade.Join(speech, layout);
+        float[] expectedBed = SamAudioCrossfade.Join(bed, layout);
+        Assert.Equal([expectedSpeech.Length, expectedBed.Length], [result.Speech.Single().Length, result.Bed.Single().Length]);
+        Assert.InRange(expectedSpeech.Zip(result.Speech.Single(), (e, a) => Math.Abs(e - a)).Max(), 0f, 1e-4f);
+        Assert.InRange(expectedBed.Zip(result.Bed.Single(), (e, a) => Math.Abs(e - a)).Max(), 0f, 1e-4f);
+    }
+
     [Fact]
     public void Runner_runs_one_graph_at_a_time_across_all_windows()
     {
@@ -134,6 +181,27 @@ public sealed class SamAudioRunnerTests
     }
 
     [Fact]
+    public void Runner_stops_mid_pass_when_cancelled_and_forwards_the_token_to_every_graph_call()
+    {
+        FakeGraphs oneWindow = new();
+        SamAudioSeparationRunner.Run([new float[SamAudioModelConstants.SampleRate]], oneWindow, null, CancellationToken.None);
+        int stepsPerWindow = oneWindow.Calls.Count(c => c == 'V');
+
+        // Cancelling inside a pass ends it at its next check, and no later pass starts.
+        foreach ((char stage, char later, int expectedCalls) in new[] { ('E', 'V', 1), ('V', 'D', stepsPerWindow), ('D', '\0', 1) })
+        {
+            using CancellationTokenSource cts = new();
+            FakeGraphs graphs = new() { OnCall = call => { if (call == stage) { cts.Cancel(); } } };
+
+            Assert.Throws<OperationCanceledException>(() =>
+                SamAudioSeparationRunner.Run([new float[65 * SamAudioModelConstants.SampleRate]], graphs, null, cts.Token));
+
+            Assert.All(graphs.Tokens, token => Assert.Equal(cts.Token, token));
+            Assert.Equal(expectedCalls, graphs.Calls.Count(c => c == stage || c == later));
+        }
+    }
+
+    [Fact]
     public void Runner_rejects_empty_or_ragged_channels()
     {
         Assert.Throws<ArgumentException>(() => SamAudioSeparationRunner.Run([Array.Empty<float>()], new FakeGraphs(), null, CancellationToken.None));
@@ -156,15 +224,6 @@ public sealed class SamAudioRunnerTests
         float[] mono = SamAudioStemOutputs.DownmixToMono([[1f, 0f], [0f, 1f]]);
 
         Assert.Equal([0.5f, 0.5f], mono);
-    }
-
-    [Fact]
-    public void EnsureSameProvider_refuses_mixed_execution()
-    {
-        SamAudioSessionLeases.EnsureSameProvider(null, "cuda");
-        SamAudioSessionLeases.EnsureSameProvider("cuda", "cuda");
-
-        Assert.Throws<InvalidOperationException>(() => SamAudioSessionLeases.EnsureSameProvider("cuda", "cpu"));
     }
 
     private sealed class Progress(Action<StemSeparationProgress> report) : IProgress<StemSeparationProgress>

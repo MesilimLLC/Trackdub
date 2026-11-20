@@ -26,7 +26,7 @@ public sealed class SpleeterInputNameResolutionTests
     ///     output: ValueInfo{ name: "output_0",  type: tensor(float32) }
     ///   }
     /// </summary>
-    private static readonly byte[] MinimalOnnxIdentityModel =
+    internal static readonly byte[] MinimalOnnxIdentityModel =
     [
         0x08, 0x08,                                                           // ir_version: 8
         0x42, 0x04, 0x0A, 0x00, 0x10, 0x11,                                 // opset: domain="", version=17
