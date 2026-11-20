@@ -66,7 +66,7 @@ Use `trackdub-gpu-docs` (local, offline) for TRT-RTX EP ABI facts, `nvidia-cuda-
 | `tools/model-lab/` | graph-surgery scripts: `decompose-mha-qkv.py`, `decompose-microsoft-contrib-ops.py`, `decompose-whisper-mha.py`, `decompose-whisper-cross-attention.py` |
 | `tools/dev/model-conversion/` | per-model ONNX export/upload pipelines (whisper GenAI, Qwen text refinement, opus, latentsync) |
 | `tools/mcp-trackdub-gpu-docs/` | local FastMCP over the Trackdub GPU/TRT-RTX corpus, allowlist keyed to the pinned EP ABI |
-| `tools/docs-rag/` | ingest + verification for the hosted `trackdub-docs-rag` MCP (`SPEC.md`) |
+| `tools/docs-rag/` | corpus manifest (`corpus.v1.json`) for the hosted `trackdub-docs-rag` MCP; agent spec in `SPEC.md` |
 | `tools/quality-baseline/` | pre/post-decompose ASR quality baselines, `compare_transcripts.py` (WER/CER gates) |
 | `tools/separation-eval/` | separation evaluation assets |
 | `tools/models/` | starter-pack publish + download smoke |
