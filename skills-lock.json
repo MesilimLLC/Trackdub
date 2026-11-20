@@ -3,6 +3,7 @@
   "skills": {
     "gh-stack": {
       "source": "github/gh-stack",
+      "commit": "80b6d6e910cc1b7eaa26b961d7721ade21084fed",
       "sourceType": "github",
       "skillPath": "skills/gh-stack/SKILL.md",
       "computedHash": "4ff26e30a0103af77552e5eebbabfbf80734fd23b1485f0c513a0b35a3126613"
