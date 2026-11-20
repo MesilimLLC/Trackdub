@@ -87,7 +87,12 @@ doctor_exit=0
 doctor_json="$(timeout "$DOCTOR_TIMEOUT" "${COMPOSE[@]}" run --rm trackdub doctor </dev/null)" || doctor_exit=$?
 printf '%s\n' "$doctor_json"
 [[ "$doctor_exit" -ne 124 ]] || fail "trackdub doctor did not finish within ${DOCTOR_TIMEOUT}s."
-[[ "$doctor_exit" -eq 0 ]] || fail "trackdub doctor reported a failing check (exit $doctor_exit)."
+# A nonzero exit can come from docker compose (no image, network) as well as from doctor itself, so tell them
+# apart by doctor's own JSON verdict.
+doctor_status="$(python3 -c 'import json, sys; print(json.loads(sys.stdin.read()).get("status", ""))' \
+  <<<"$doctor_json" 2>/dev/null || true)"
+[[ "$doctor_status" != fail ]] || fail "trackdub doctor reported a failing check (exit $doctor_exit); see the fail rows above."
+[[ "$doctor_exit" -eq 0 ]] || fail "trackdub doctor did not run to completion (exit $doctor_exit); check the docker compose output above."
 
 step "5/5 Verify seeded models"
 verify_failed=0

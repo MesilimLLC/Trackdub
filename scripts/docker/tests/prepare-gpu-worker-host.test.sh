@@ -14,7 +14,8 @@ printf '%s\n' "$*" >> "$TEST_LOG"
 case "$*" in
   'info --format {{json .Runtimes}}') printf '%s\n' "${FAKE_RUNTIMES:-{\"nvidia\":{},\"runc\":{}}}" ;;
   *' providers list') printf '{"providers":[{"kind":"Cpu","available":true},{"kind":"Cuda","available":%s}]}\n' "${FAKE_CUDA:-true}" ;;
-  *' doctor') printf '{"status":"warn","checks":[]}\n'; exit "${FAKE_DOCTOR_EXIT:-0}" ;;
+  *' doctor') [[ "${FAKE_DOCTOR_STATUS:-warn}" == none ]] || printf '{"status":"%s","checks":[]}\n' "${FAKE_DOCTOR_STATUS:-warn}"
+              exit "${FAKE_DOCTOR_EXIT:-0}" ;;
 esac
 exit 0
 MOCK
@@ -75,11 +76,17 @@ TRACKDUB_IMAGE='' expect_failure 'missing image' 'Set TRACKDUB_IMAGE'
 FAKE_DATA_UID=0 expect_failure 'data root ownership' 'not 10001'
 ! grep -q ' pull ' "$TEST_LOG"
 FAKE_RUNTIMES='{"runc":{}}' expect_failure 'nvidia runtime' 'no nvidia runtime'
+! grep -q ' pull ' "$TEST_LOG"
 TRACKDUB_DATA_ROOT="$TEST_ROOT/missing" expect_failure 'missing data root' 'does not exist'
+! grep -q ' pull ' "$TEST_LOG"
 
 # Health check failures stop before model verification.
 FAKE_CUDA=false expect_failure 'cuda unavailable' 'CUDA is not reported as available'
-FAKE_DOCTOR_EXIT=3 expect_failure 'doctor fail' 'trackdub doctor reported a failing check (exit 3)'
+FAKE_DOCTOR_STATUS=fail FAKE_DOCTOR_EXIT=2 expect_failure 'doctor fail' 'trackdub doctor reported a failing check (exit 2)'
+! grep -q 'models verify' "$TEST_LOG"
+# A compose failure (no JSON from doctor) must not be reported as a failing doctor check.
+FAKE_DOCTOR_STATUS=none FAKE_DOCTOR_EXIT=125 expect_failure 'compose failure' 'trackdub doctor did not run to completion (exit 125)'
+! grep -q 'reported a failing check' "$TEST_ROOT/output"
 ! grep -q 'models verify' "$TEST_LOG"
 
 TRACKDUB_IMAGE=ghcr.io/mesilimllc/trackdub:main-server TRACKDUB_ALLOW_MUTABLE_IMAGE=1 run \
