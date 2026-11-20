@@ -298,7 +298,10 @@ public sealed class BundledModelManifestRegistry
             ProviderId: model.ProviderId,
             ExpectedRuntime: model.ExpectedRuntime,
             Deprecated: model.Deprecated ?? false,
-            DeprecatedReason: model.DeprecatedReason);
+            DeprecatedReason: model.DeprecatedReason)
+        {
+            RiskAcceptance = model.RiskAcceptance
+        };
     }
 
     private static BundledModelManifestEntry MergeEntry(
@@ -320,6 +323,8 @@ public sealed class BundledModelManifestRegistry
             throw new InvalidOperationException(
                 $"Generated manifest '{incomingManifestPath}' cannot merge model '{incoming.ModelId}' because its governance metadata does not match the base entry.");
         }
+
+        ModelRiskAcceptanceReader.EnsureSameRiskAcceptance(existing, incoming, incomingManifestPath);
 
         if (!existing.RootDirectory.Equals(incoming.RootDirectory, StringComparison.OrdinalIgnoreCase))
         {
@@ -712,7 +717,9 @@ public sealed record BundledModelManifestEntry(
     string? CatalogPolicyVersion = null,
     IReadOnlyDictionary<string, string?>? TargetPrefixes = null)
 {
-    public bool CommercialSafeMode => CommercialUseVerified;
+    public bool CommercialSafeMode => ModelRiskAcceptanceReader.IsCommercialSafe(CommercialUseVerified, RiskAcceptance);
+
+    public ModelRiskAcceptance? RiskAcceptance { get; init; }
 }
 
 public sealed record BundledModelManifestVariant(

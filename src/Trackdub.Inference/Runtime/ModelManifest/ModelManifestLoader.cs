@@ -20,7 +20,7 @@ public static class ModelManifestLoader
             return new ModelManifestCatalog(ReadManifestArray(modelsElement, sourceName));
         }
 
-        return new ModelManifestCatalog([ReadManifest(rootElement, "$", sourceName)]);
+        return new ModelManifestCatalog([ModelRiskAcceptanceReader.Attach(ReadManifest(rootElement, "$", sourceName), rootElement, new("$", sourceName))]);
     }
 
     private static IReadOnlyList<ModelManifest> ReadManifestArray(JsonElement modelsElement, string sourceName)
@@ -34,7 +34,7 @@ public static class ModelManifestLoader
         int index = 0;
         foreach (JsonElement element in modelsElement.EnumerateArray())
         {
-            models.Add(ReadManifest(element, $"$.models[{index}]", sourceName));
+            models.Add(ModelRiskAcceptanceReader.Attach(ReadManifest(element, $"$.models[{index}]", sourceName), element, new($"$.models[{index}]", sourceName)));
             index++;
         }
 
