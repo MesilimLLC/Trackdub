@@ -24,13 +24,13 @@ todos:
     content: Fail incomplete source staging before upload and preserve previous reusable cache, including failed promotion recovery.
     status: completed
   - id: verify-index-tool
-    content: Implement bounded read-only source/index verifier with key, metadata, folder, status, size, timestamp and content-canary checks.
+    content: (Retired with sync) Bounded read-only source/index verifier with key, metadata, folder, status, size, timestamp and content-canary checks.
     status: completed
   - id: symbol-recovery
     content: Implement scoped literal-prefix fallback and test modified local function against live Cloudflare without global ranking changes.
     status: completed
   - id: verify
-    content: Resolve remaining Cloudflare capacity errors and pass full index verification; retain first-party ordering caveat.
+    content: Resolve remaining Cloudflare capacity errors and pass full index verification; retain first-party ordering caveat. Manual acceptance (2026-11-20): see Remaining limits.
     status: pending
   - id: docs-commit
     content: Publish original implementation and handoff in separate core/API commits.
@@ -103,8 +103,24 @@ and API task worktrees. No follow-up Worker deployment has occurred.
 ## Remaining limits
 
 - [ ] **Index readiness:** resolve 25 `workers_ai_out_of_capacity_error` items,
-  then require a clean full verifier run including its content canary. Do not
-  use the earlier 197-completed observation from before rebuilding as current.
+  then verify manually since the automated verifier was removed with the sync
+  retire. Acceptance, from `api.trackdub`:
+  `npx wrangler ai-search jobs list trackdub-docs` shows no active/changing
+  job and no error items; `npx wrangler ai-search get trackdub-docs` confirms
+  the 24h sync, trigram tokenizer and `is_first_party` existence boost; and
+  the content canary below returns in scope. Do not use the earlier
+  197-completed observation from before rebuilding as current. (Metadata,
+  chunk, size and last-seen checks the retired verifier performed are now
+  dashboard spot-checks on item status and metadata; the canary covers one
+  document only and same-size content freshness is not proven, see
+  Verification boundaries.)
+  Content canary: call the hosted `search_trackdub_docs` with query
+  `RegisterExecutionProviderLibrary` (the EP ABI pin doc
+  `docs/reference/tensorrt-rtx-ep-abi-plugin.md` is the expected first-party
+  hit) — a literal hit on that symbol in the returned text is the pass
+  criterion, because plain keyword search misses long code identifiers while
+  `symbol-fallback` recovers them. Check the dashboard item status/metadata
+  only to confirm the hit is the current indexed copy, not an outdated one.
 - **First-party preference:** uncached `runtime cache` still ranks an NVIDIA
   result first and Trackdub second after metadata recovery. Existence boost
   biases candidates before reranking; it is not a hard ordering guarantee.
@@ -120,5 +136,4 @@ and API task worktrees. No follow-up Worker deployment has occurred.
   it, or create one if none exists; apply `repo:*`, `area:*`, and `agent-owned`
   labels, and keep the issue In Progress while the remaining acceptance work is
   active. No cloud security scan or cloud code review was performed.
-
 Detailed commands and rebuild evidence: see `tools/docs-rag/SPEC.md` (hosted Worker ops; automated sync from Trackdub retired).

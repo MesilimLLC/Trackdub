@@ -114,10 +114,51 @@ npx wrangler ai-search jobs list trackdub-docs
 # Dashboard -> AI Search -> trackdub-docs -> Sync
 ```
 
-Adding a vendor page: add `[id, url]` under the vendor in
-`corpus.v1.json`, then refresh the hosted corpus manually. Adding a new scope (agent-visible filter): update
-`DOC_SCOPES`, `FOLDER`, and the `filterForScope` switch in
-`api.trackdub/src/docs-rag/scopes.ts`, then add a scope test row.
+Adding a vendor page — manual steps (no automated sync remains):
+
+1. Add `[id, url]` under the vendor in `corpus.v1.json` (a `{"id", "url"}`
+   object with a `gpu` block also works). This repo's manifest is the source
+   of truth; `tools/mcp-trackdub-gpu-docs` reads the same entries.
+2. Fetch the URL. Vendor pages are stored as extracted text, not HTML: keep
+   only the main content region (`article` preferred over `main` when both
+   exist), drop chrome (nav, headers/footers, sidebars, Sphinx `#` header
+   links, scripts/styles), and preserve in-content links as `[text](url)`.
+   Some vendors serve raw markdown or text (`.md` / GitHub blobs) — if the
+   body already reads as plain text, save it as-is. The old
+   `sync_corpus.py` `html_to_text` / `fetch_url` logic (deleted) is the
+   reference for the extraction rules.
+3. Normalize to `Source: <url>\n\n<text>\n`. If the UTF-8 payload exceeds
+   `corpus.v1.json` `maxBytes` (3,500,000), truncate to `maxBytes` — the
+   old staging did exactly this (byte-prefix, dropping a partial trailing
+   character).
+4. Upload to R2 bucket `trackdub-docs-corpus` at key
+   `<vendor prefix>/<source id>.md` (prefixes are e.g. `vendor/nvidia`,
+   `vendor/microsoft` — the `prefix` field on each entry in
+   `corpus.v1.json`). Content type `text/markdown; charset=utf-8` (`.json`
+   objects get `application/json`). Size must stay within `maxBytes`;
+   nothing else about the object is checked downstream.
+   Caveat: `wrangler r2 object put --header` is not implemented in
+   Wrangler 4.114.0 (documented limitation), so the CLI cannot set custom
+   metadata that way. Use the R2 Workers API (via `getPlatformProxy`, as
+   the deleted `upload_corpus.mjs` did) or an S3-compatible client that
+   sets custom metadata directly.
+5. Set metadata per this convention — the same rule the retired uploader
+   applied and the dashboard shows today:
+   - Key starts with `first-party/` → custom metadata `is_first_party: "true"`.
+   - Everywhere else (all vendor keys) → omit `is_first_party` entirely.
+   Never set it to `"false"` (the existence boost in section 3 would still
+   treat it as first-party). Changing the tokenizer or this schema requires
+   a full reindex.
+6. Index: from `api.trackdub`, `npx wrangler ai-search jobs list
+   trackdub-docs` (inspect first — a timeout may still have started the
+   job), then `npx wrangler ai-search jobs create trackdub-docs` only if
+   no job was created, or Dashboard → AI Search → `trackdub-docs` → Sync.
+   Verify the dashboard item status — an ended job does not prove the
+   index is current (section 3 preamble).
+
+Adding a new scope (agent-visible filter): update `DOC_SCOPES`, `FOLDER`, and
+the `filterForScope` switch in `api.trackdub/src/docs-rag/scopes.ts`, then
+add a scope test row.
 
 ## 4. Agent tools
 
