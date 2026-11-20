@@ -117,7 +117,7 @@ Update the following, and leave the dated handoffs alone:
 - `src/Trackdub.Inference/Runtime/Planning/StageRuntimeRequirements.cs` comments that cite "EP ABI 0.4.2/cu13, TensorRT-RTX 1.6.1". Rewrite them **only after** re-testing the claim on 1.7 (see 1.7 below). Otherwise keep the version in the comment as the date of the evidence.
 - `src/Trackdub.Inference.Onnx/OnnxExecutionSessionFactory.cs` and `tests/Trackdub.Inference.Tests/OnnxExecutionSessionFactoryTests.cs:1257` evidence comments: same rule.
 - GPU docs MCP: `tools/mcp-trackdub-gpu-docs/corpus/manifest.v0.json` (`epAbiVersion`, `trtRtxRuntimeVersion`, `releaseAssets`, `bundledWindowsLibs`, `pinWarning`, the v0.4.2 release-notes source → v0.5.0, and add the 1.7 release notes plus the v0.5.0 `technical-notes.md` as sources), `server.py` instructions, `README.md`. Re-ingest with `uv run trackdub-gpu-docs-ingest`.
-- Docs RAG: `tools/docs-rag/sync_corpus.py:340` pin sentence, `tools/docs-rag/SPEC.md`. Re-sync the R2 corpus.
+- Docs RAG: pin sentence in hosted corpus / `tools/docs-rag/SPEC.md` (automated sync from Trackdub retired).
 - The MCP server instructions themselves say "TRT-RTX 1.6.1". After re-ingest, confirm `search_trackdub_gpu_docs` answers with 1.7.
 
 Acceptance: `rg "tensorrt_rtx_1_6|onnxparser_rtx_1_6|1\.6\.1|0\.4\.2|v0\.4\.0"` hits only dated handoffs/audits, deliberate historical evidence comments, and test fixtures that intentionally model the *old* version (e.g. "1.6.1 → 1.7.x must invalidate").
