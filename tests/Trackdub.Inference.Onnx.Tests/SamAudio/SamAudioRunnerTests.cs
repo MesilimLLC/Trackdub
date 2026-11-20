@@ -110,8 +110,18 @@ public sealed class SamAudioRunnerTests
     [Fact]
     public void Runner_rejects_empty_or_ragged_channels()
     {
-        Assert.Throws<ArgumentException>(() => SamAudioSeparationRunner.Run([new float[0]], new FakeGraphs(), null, CancellationToken.None));
+        Assert.Throws<ArgumentException>(() => SamAudioSeparationRunner.Run([Array.Empty<float>()], new FakeGraphs(), null, CancellationToken.None));
         Assert.Throws<ArgumentException>(() => SamAudioSeparationRunner.Run([new float[10], new float[11]], new FakeGraphs(), null, CancellationToken.None));
+    }
+
+    [Fact]
+    public void Engine_can_be_built_by_a_container_that_registers_only_the_runtime_planner()
+    {
+        // A DI container fills a defaulted parameter when it has no registration for it, as the benchmark host does
+        // for IRuntimePlanningPreferences; without the default no public constructor is resolvable there.
+        System.Reflection.ConstructorInfo constructor = Assert.Single(typeof(SamAudioStemSeparationEngine).GetConstructors());
+
+        Assert.All(constructor.GetParameters().Skip(1), parameter => Assert.True(parameter.HasDefaultValue));
     }
 
     [Fact]

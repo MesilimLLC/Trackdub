@@ -21,7 +21,7 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
     private readonly IRuntimePlanner? runtimePlanner;
     private readonly IRuntimePlanningPreferences? runtimePlanningPreferences;
 
-    public SamAudioStemSeparationEngine(IRuntimePlanner runtimePlanner, IRuntimePlanningPreferences? runtimePlanningPreferences)
+    public SamAudioStemSeparationEngine(IRuntimePlanner runtimePlanner, IRuntimePlanningPreferences? runtimePlanningPreferences = null)
         : this(new SamAudioOnnxSeparator(), runtimePlanner, runtimePlanningPreferences)
     {
     }
