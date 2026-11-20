@@ -39,7 +39,7 @@ public sealed class SamAudioChunkedDecoderTests
 
     private static float[] Latent(int frames) =>
         [.. Enumerable.Range(0, frames * SamAudioModelConstants.LatentChannels)
-            .Select(i => i % SamAudioModelConstants.LatentChannels == 0 ? i / SamAudioModelConstants.LatentChannels + 1f : 0f)];
+            .Select(i => i % SamAudioModelConstants.LatentChannels == 0 ? (i / SamAudioModelConstants.LatentChannels) + 1f : 0f)];
 
     [Theory]
     [InlineData(40)]
