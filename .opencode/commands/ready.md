@@ -16,7 +16,7 @@ Grounding sources, in conflict order (source/tests > task instructions > documen
 - `src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json` — the bundled inventory.
 - `tools/ci/audit-bundled-model-manifest.py`, `tools/ci/validate-manifest-schema.py`, `tools/ci/verify-manifest-hashes.py`.
 - `AGENTS.md` "Model Governance".
-- `trackdub-docs-rag` MCP (`search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`) for provider wiring and pin policy. Spec: `tools/docs-rag/SPEC.md`.
+- `runtime/trt-rtx-ep.manifest.json` for pin policy and `docs/reference/windows-ml-stage-provider-matrix.md` for provider wiring.
 
 ## The readiness ladder
 

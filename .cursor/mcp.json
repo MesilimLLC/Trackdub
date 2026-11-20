@@ -3,12 +3,6 @@
     "nvidia-cuda-docs": {
       "url": "https://api.copilot.nsight.ngc.nvidia.com/mcp/cuda-docs"
     },
-    "trackdub-docs-rag": {
-      "url": "https://trackdub-docs-rag.trackdub.workers.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer ${env:DOCS_RAG_TOKEN}"
-      }
-    },
     "trackdub-gpu-docs": {
       "command": "uv",
       "args": [

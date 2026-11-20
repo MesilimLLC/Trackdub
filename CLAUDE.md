@@ -139,17 +139,16 @@ you picked.
 
 ## Documentation lookup routing
 
-Pick the source by the kind of question; do not default to the hosted RAG.
+Pick the source by the kind of question.
 
 | Question | Use |
 |---|---|
-| Trackdub / Trackdub-gated / api.trackdub docs, code, symbols you have a checkout of | Serena or `s.fs.search_for_pattern` on the checkout. It is exact and current; the RAG copy lags the last sync. |
-| Which EP ABI / CUDA / TensorRT-RTX version is pinned | `runtime/trt-rtx-ep.manifest.json`, or `list_corpus` on `trackdub-gpu-docs` (it checks the pin against the manifest). Never a generated RAG answer. |
+| Trackdub / Trackdub-gated / api.trackdub docs, code, symbols you have a checkout of | Serena or `s.fs.search_for_pattern` on the checkout. It is exact and current. |
+| Which EP ABI / CUDA / TensorRT-RTX version is pinned | `runtime/trt-rtx-ep.manifest.json`, or `list_corpus` on `trackdub-gpu-docs` (it checks the pin against the manifest). |
 | TensorRT-RTX, ORT plugin EP or Windows ML wiring, offline | `trackdub-gpu-docs` (`search_trackdub_gpu_docs`, `get_doc`). |
-| Vendor docs not on disk (Olive, Avalonia, ReactiveUI, Qwen, Whisper, LatentSync, AMD, Intel, Qualcomm), or "where is this documented" when the term to grep is unknown | `trackdub-docs-rag` `search_trackdub_docs`. |
-| Explanation synthesized across several docs | `ask_trackdub_docs`, then confirm versions, flags and symbols against the cited `hits[].key`. |
+| Vendor docs not on disk (Olive, Avalonia, ReactiveUI, Qwen, Whisper, LatentSync, AMD, Intel, Qualcomm) | The vendor's own documentation, via web search/fetch or Context7 for libraries. |
 
-A first-party RAG hit carries `repo`, `localPath` and `syncedCommit`. When you have that checkout, read `localPath` there instead of trusting the indexed text. Retrieval quality is measured by `tools/docs-eval` (`eval_gpu.py` offline, `eval_rag.mjs` against the Worker).
+Retrieval quality of `trackdub-gpu-docs` is measured by `tools/docs-eval/eval_gpu.py` (offline).
 
 ## GitHub stacked PRs
 

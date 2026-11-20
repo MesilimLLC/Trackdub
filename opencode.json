@@ -1,14 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "trackdub-docs-rag": {
-      "type": "remote",
-      "url": "https://trackdub-docs-rag.trackdub.workers.dev/mcp",
-      "oauth": false,
-      "headers": {
-        "Authorization": "Bearer {env:DOCS_RAG_TOKEN}"
-      }
-    },
     "nvidia-cuda-docs": {
       "type": "remote",
       "url": "https://api.copilot.nsight.ngc.nvidia.com/mcp/cuda-docs"

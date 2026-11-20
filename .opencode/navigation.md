@@ -119,7 +119,7 @@ Two further workflows are planned (`feature-change`, `release-and-pin`) but are 
 | External issue tracker | **opt-in**: use only when the user explicitly asks | n/a |
 | Avalonia desktop shell, UI, playback UX, mpv, subtitle pipeline | *out of scope* — use the gated repo system | `../Trackdub-gated/.opencode/` |
 | Third-party library docs (non-Trackdub) | **orchestrator** | Context7; verify retrieved docs against live code |
-| Trackdub implementation facts / pin policy / provider wiring | **orchestrator** | `trackdub-docs-rag` MCP; spec `tools/docs-rag/SPEC.md` |
+| Trackdub implementation facts / pin policy / provider wiring | **orchestrator** | checkout source/docs and `runtime/trt-rtx-ep.manifest.json` |
 
 ## Context allocation strategy
 

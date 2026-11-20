@@ -14,13 +14,6 @@
       "type": "http",
       "url": "https://api.copilot.nsight.ngc.nvidia.com/mcp/cuda-docs"
     },
-    "trackdub-docs-rag": {
-      "type": "http",
-      "url": "https://trackdub-docs-rag.trackdub.workers.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer ${DOCS_RAG_TOKEN}"
-      }
-    },
     "trackdub-gpu-docs": {
       "command": "uv",
       "args": [

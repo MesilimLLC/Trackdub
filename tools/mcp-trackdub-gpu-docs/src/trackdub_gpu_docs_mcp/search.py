@@ -63,8 +63,7 @@ def _file_stamp(path: Path) -> tuple[str, int] | None:
 def _signature() -> tuple:
     """Everything the built index depends on; any change to one of these rebuilds it."""
     repo_root = find_repo_root()
-    # gpu-vendor sources are read from corpus.v1.json, so edits to it must invalidate the index.
-    tracked = [MANIFEST_PATH, repo_root / "tools" / "docs-rag" / "corpus.v1.json", *_repo_file_paths(repo_root)]
+    tracked = [MANIFEST_PATH, *_repo_file_paths(repo_root)]
     stamps = [stamp for stamp in map(_file_stamp, tracked) if stamp]
     if CHUNKS_DIR.is_dir():
         stamps.extend((p.name, p.stat().st_mtime_ns) for p in sorted(CHUNKS_DIR.glob("*.txt")))

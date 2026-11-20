@@ -132,7 +132,7 @@ permission:
       <step>Level 2 (pipeline/inference/model work): `context/domain/inference-stack.md`, `context/standards/architecture-rules.md`, `context/domain/terminology.md`.</step>
       <step>Level 3 (process): `context/processes/adding-pipeline-stage.md`, `context/processes/submodule-pin-bump.md`, `context/processes/pr-lifecycle.md`.</step>
       <step>Level 3 (reporting): `context/standards/validation-gates.md`, `context/templates/evidence-report.md`.</step>
-      <step>For implementation facts, pin policy, provider wiring, and repo-specific operational guidance, prefer the `trackdub-docs-rag` MCP tools (`search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`; spec at `tools/docs-rag/SPEC.md`). Treat vendor hits as upstream reference, not pin policy.</step>
+      <step>For implementation facts, pin policy, provider wiring, and repo-specific operational guidance, read the checkout first (source, tests, `docs/`) and take pin versions from `runtime/trt-rtx-ep.manifest.json`; use `trackdub-gpu-docs` for offline TensorRT-RTX / ORT / Windows ML lookups. Treat vendor docs as upstream reference, not pin policy.</step>
       <step>For third-party libraries outside the corpus, retrieve upstream documentation with Context7 and verify it against live code. Context retrieval is handled in-house; do not route it to an undefined subagent.</step>
       <step>Do not load context the request does not need. Context is a budget, not a ritual.</step>
     </process>
@@ -216,7 +216,7 @@ permission:
     context/processes/submodule-pin-bump.md — pin bump fallout.
     context/processes/pr-lifecycle.md — branch, stack, CI, handoff.
   </level_3>
-  <external>docs/ at repo root for grounded specifics (architecture/, development/, operations/, decisions/, legal/MODEL_LICENSE_POLICY.md, benchmarks/benchmarkdotnet.md, specs/pipeline-readiness-spec.md). trackdub-docs-rag MCP for implementation facts. ../Trackdub-gated/.opencode/navigation.md for the desktop boundary.</external>
+  <external>docs/ at repo root for grounded specifics (architecture/, development/, operations/, decisions/, legal/MODEL_LICENSE_POLICY.md, benchmarks/benchmarkdotnet.md, specs/pipeline-readiness-spec.md). runtime/trt-rtx-ep.manifest.json for pin policy. ../Trackdub-gated/.opencode/navigation.md for the desktop boundary.</external>
 </context_allocation>
 
 <output_format>

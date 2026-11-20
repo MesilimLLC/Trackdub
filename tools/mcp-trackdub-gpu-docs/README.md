@@ -6,8 +6,7 @@
 
 ```text
 tools/mcp-trackdub-gpu-docs/
-  corpus/manifest.v0.json     # pin + local repo-file sources (EP ABI 0.5.0, win + linux)
-                              # remote pages come from tools/docs-rag/corpus.v1.json ("gpu" blocks)
+  corpus/manifest.v0.json     # pin + repo-file sources and allowlisted remote URLs (EP ABI 0.5.0, win + linux)
   src/trackdub_gpu_docs_mcp/  # FastMCP server + keyword search
   .data/chunks/               # ingested remote pages (gitignored)
   pyproject.toml

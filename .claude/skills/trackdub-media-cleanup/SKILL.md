@@ -27,7 +27,7 @@ Adapted from **Video Cleanup by Mehdi Ksibi**, distributed as a Claude plugin by
 ## Prerequisites and boundaries
 
 1. Read repository `AGENTS.md` and relevant subdirectory instructions. Source/tests win over stale docs.
-2. Prefer `trackdub-docs-rag` for repository guidance when connected; if unavailable, read the local source and docs and disclose the retrieval limitation rather than inventing results.
+2. Read the local source and docs for repository guidance; pin versions come from `runtime/trt-rtx-ep.manifest.json`.
 3. Run CLI help through `terminal` before relying on flags. From the public-core repository root, the portable source invocation is `dotnet run --project src/Trackdub.Cli --framework net10.0 -- <args>`. An installed `trackdub` executable is an alternative only after checking its help/version.
 4. .NET 10 and Trackdub's media/runtime prerequisites apply. Do not run the upstream Python setup, install pip dependencies, or add Python, Conda, Docker, or CUDA Toolkit as end-user dependencies.
 5. Provider registered != model downloaded != stage ran != stage succeeded. Inspect actual readiness, selected backend, fallback reason, and output artifacts.

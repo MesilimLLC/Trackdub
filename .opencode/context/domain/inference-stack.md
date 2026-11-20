@@ -55,7 +55,7 @@ python -c "import json;print(json.load(open('runtime/trt-rtx-ep.manifest.json'))
 dotnet list src/Trackdub.Inference.Onnx package                  # resolved graph
 ```
 
-Use `trackdub-gpu-docs` (local, offline) for TRT-RTX EP ABI facts, `nvidia-cuda-docs` for CUDA toolkit internals, and `trackdub-docs-rag` for Trackdub pin policy. Vendor docs are upstream reference, not Trackdub pin policy.
+Use `trackdub-gpu-docs` (local, offline) for TRT-RTX EP ABI facts, `nvidia-cuda-docs` for CUDA toolkit internals. Trackdub pin policy comes from `runtime/trt-rtx-ep.manifest.json`. Vendor docs are upstream reference, not Trackdub pin policy.
 
 ## Tooling directories
 
@@ -66,7 +66,6 @@ Use `trackdub-gpu-docs` (local, offline) for TRT-RTX EP ABI facts, `nvidia-cuda-
 | `tools/model-lab/` | graph-surgery scripts: `decompose-mha-qkv.py`, `decompose-microsoft-contrib-ops.py`, `decompose-whisper-mha.py`, `decompose-whisper-cross-attention.py` |
 | `tools/dev/model-conversion/` | per-model ONNX export/upload pipelines (whisper GenAI, Qwen text refinement, opus, latentsync) |
 | `tools/mcp-trackdub-gpu-docs/` | local FastMCP over the Trackdub GPU/TRT-RTX corpus, allowlist keyed to the pinned EP ABI |
-| `tools/docs-rag/` | corpus manifest (`corpus.v1.json`) for the hosted `trackdub-docs-rag` MCP; agent spec in `SPEC.md` |
 | `tools/quality-baseline/` | pre/post-decompose ASR quality baselines, `compare_transcripts.py` (WER/CER gates) |
 | `tools/separation-eval/` | separation evaluation assets |
 | `tools/models/` | starter-pack publish + download smoke |
@@ -130,10 +129,9 @@ From `.mcp.json`:
 |---|---|---|
 | `trackdub-gpu-docs` | stdio, `uv --directory tools/mcp-trackdub-gpu-docs run trackdub-gpu-docs-mcp` | offline TRT-RTX / EP ABI lookup; tools `list_corpus`, `search_trackdub_gpu_docs`, `get_doc`. **Disabled by default** in `.mcp.json` — enable before use. |
 | `nvidia-cuda-docs` | HTTP, NVIDIA endpoint | CUDA toolkit/driver internals outside the corpus |
-| `trackdub-docs-rag` | HTTP + bearer `${DOCS_RAG_TOKEN}` | Trackdub implementation facts, pin policy, provider wiring. Tools `search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`. **Disabled by default**; needs the token env var. |
 | `serena` | stdio | symbol-aware code navigation when installed and configured with the REPL interface |
 
-Prefer `trackdub-docs-rag` for Trackdub facts, Context7 for third-party libraries outside the corpus, and live code over both.
+Prefer the checkout and `runtime/trt-rtx-ep.manifest.json` for Trackdub facts, Context7 for third-party libraries outside the corpus, and live code over both.
 
 ## Related
 
