@@ -7906,7 +7906,7 @@
           "licensor's right to change terms",
           "unverified training-data provenance"
         ],
-        "owner": "Michael Anderson",
+        "owner": "project owner",
         "date": "2026-11-19"
       },
       "source_url": "https://huggingface.co/tonythethompson/sam-audio-small-onnx",
