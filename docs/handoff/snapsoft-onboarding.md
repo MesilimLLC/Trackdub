@@ -258,6 +258,14 @@ These are the intended steps for the `server` image on one EC2 GPU host. They ha
 No image build depends on the GPU: CI builds the `server` image on a GPU-less runner. Only the TensorRT engine
 warm in step 3 is tied to the GPU model and driver. Model seeding is hash-verified downloads and can run anywhere.
 
+`scripts/docker/prepare-gpu-worker-host.sh` runs steps 2 to 4 in one go once step 1 is done and the checkout is at
+the image's commit: it checks the host, pulls `TRACKDUB_IMAGE` (a `sha-<commit>-server` or `container-vX.Y.Z-server` tag, or a digest),
+seeds both POC model sets, runs the in-container GPU check, `providers list` and `trackdub doctor`, and
+hash-verifies every POC model, stopping at the first failure. Snapshot the AMI or the EBS volume after it prints
+`READY`. It skips the TensorRT warm unless `TRACKDUB_WARM_ENGINES=1`: the presets run every stage on CUDA, so
+jobs do not use the engines yet, and a volume without warmed engines is not tied to one GPU model. This has not
+been run on G6/G6e; a stubbed test (`scripts/docker/tests/prepare-gpu-worker-host.test.sh`) covers its control flow.
+
 **Step 1: host prerequisites (once per instance or AMI).**
 
 - Instance: G6 (L4) or G6e (L40S).
@@ -314,6 +322,11 @@ for m in $(cat docker/poc-server-models.txt docker/poc-server-zh-models.txt | gr
 done
 [ "$status" -eq 0 ] && echo "all POC models verified" || echo "model verification FAILED"
 ```
+
+`doctor` exits nonzero only when a row is `fail`. In the `server` image (`TRACKDUB_GPU_PROFILE=server`) the
+rows for components that profile never uses (desktop playback natives, the TensorRT-RTX plugin, MIGraphX and the
+OpenVINO catalog EP) report `pass` with a "Not used by the server GPU profile" note instead of `warn`, so any
+remaining `warn` row is worth reading.
 
 Do not run `models verify` without `--model-id` here; on a partial cache it exits 2 by design. The loop checks every
 model and reports a failure from any of them.

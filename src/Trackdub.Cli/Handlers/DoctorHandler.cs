@@ -51,11 +51,14 @@ internal static class DoctorHandler
             .ConfigureAwait(false);
         checks.Add(BuildPipelineReadinessCheck(readinessReport));
 
-        string overallStatus = ResolveOverallStatus(checks);
+        List<DoctorCheckRow> reportedChecks = ApplyGpuProfile(
+            checks,
+            Environment.GetEnvironmentVariable(GpuProfileEnvironmentVariable));
+        string overallStatus = ResolveOverallStatus(reportedChecks);
         var payload = new DoctorOutput
         {
             Status = overallStatus,
-            Checks = checks,
+            Checks = reportedChecks,
         };
 
         string json = JsonSerializer.Serialize(payload, CliJsonOptions.Default);
@@ -738,6 +741,41 @@ internal static class DoctorHandler
         };
     }
 
+    internal const string GpuProfileEnvironmentVariable = "TRACKDUB_GPU_PROFILE";
+
+    // The server container image (Dockerfile --target server) runs classic TensorRT + CUDA on NVIDIA datacenter
+    // GPUs only, so these rows describe components it never ships or uses and would otherwise always warn there.
+    private static readonly HashSet<string> s_rowsNotUsedByServerProfile = new(StringComparer.Ordinal)
+    {
+        "playback-natives",
+        "tensorrt-rtx-plugin",
+        "execution-provider-migraphx",
+        "execution-provider-openvino-catalog",
+    };
+
+    /// <summary>
+    /// Under the server GPU profile, reports warnings from rows the profile does not use as passing, with the
+    /// original detail kept. Failing rows and every other row are returned unchanged.
+    /// </summary>
+    internal static List<DoctorCheckRow> ApplyGpuProfile(IReadOnlyList<DoctorCheckRow> checks, string? gpuProfile)
+    {
+        if (!string.Equals(gpuProfile?.Trim(), "server", StringComparison.OrdinalIgnoreCase))
+        {
+            return [.. checks];
+        }
+
+        return checks
+            .Select(check => check.Status == "warn" && check.Id is not null && s_rowsNotUsedByServerProfile.Contains(check.Id)
+                ? new DoctorCheckRow
+                {
+                    Id = check.Id,
+                    Status = "pass",
+                    Message = $"Not used by the server GPU profile ({GpuProfileEnvironmentVariable}=server). {check.Message}",
+                }
+                : check)
+            .ToList();
+    }
+
     private static string ResolveOverallStatus(IReadOnlyList<DoctorCheckRow> checks)
     {
         if (checks.Any(check => check.Status == "fail"))
@@ -786,7 +824,7 @@ internal static class DoctorHandler
         public List<DoctorCheckRow>? Checks { get; init; }
     }
 
-    private sealed class DoctorCheckRow
+    internal sealed class DoctorCheckRow
     {
         public string? Id { get; init; }
         public string? Status { get; init; }
