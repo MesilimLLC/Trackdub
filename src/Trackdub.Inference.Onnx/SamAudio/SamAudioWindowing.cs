@@ -50,15 +50,16 @@ internal sealed class SamAudioCrossfade(WindowLayout layout)
         SamAudioCrossfade crossfade = new(layout);
         for (int k = 0; k < pieces.Count; k++)
         {
-            crossfade.Add(pieces[k], starts[k], new Edges(HasPrevious: k > 0, HasNext: k < pieces.Count - 1));
+            crossfade.Add(pieces[k], starts[k], k, pieces.Count);
         }
 
         return crossfade.Normalized();
     }
 
-    private void Add(float[] piece, int start, Edges edges)
+    /// <summary>Adds window <paramref name="index"/> of <paramref name="count"/>, so windows can be accumulated as they are produced.</summary>
+    public void Add(float[] piece, int start, int index, int count)
     {
-        float[] ramp = Ramp(piece.Length, edges);
+        float[] ramp = Ramp(piece.Length, new Edges(HasPrevious: index > 0, HasNext: index < count - 1));
         for (int i = 0; i < piece.Length; i++)
         {
             output[start + i] += piece[i] * ramp[i];
@@ -66,7 +67,7 @@ internal sealed class SamAudioCrossfade(WindowLayout layout)
         }
     }
 
-    private float[] Normalized()
+    public float[] Normalized()
     {
         for (int i = 0; i < output.Length; i++)
         {

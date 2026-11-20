@@ -50,6 +50,7 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
         IProgress<StemSeparationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        LastExecutionSummary = null;
         if (runtimePlanner is null)
         {
             throw new InvalidOperationException("SAM-Audio separation requires a planned runtime.");
@@ -79,6 +80,7 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(plan);
+        LastExecutionSummary = null;
         EnsurePlanReady(plan);
 
         string modelRootPath = ResolveModelRootPath(plan);
@@ -173,6 +175,7 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
             ["variant"] = plan.Variant ?? "default",
             ["chunk_count"] = separated.WindowCount.ToString(CultureInfo.InvariantCulture),
             ["bed"] = "native-residual",
+            ["raw_stems"] = "vocals,other",
         };
 
         foreach ((string key, string value) in separated.Metadata ?? new Dictionary<string, string>())

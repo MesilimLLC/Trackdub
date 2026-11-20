@@ -5,7 +5,9 @@ namespace Trackdub.Inference.Onnx.SamAudio;
 /// <summary>
 /// Separates every channel in overlapping 30 s windows and crossfades the windows back together. Work runs in three passes
 /// (encode every window, run the flow on every window, decode every window) so a caller that leases one graph at a time
-/// holds a single lease per pass instead of all three at once.
+/// holds a single lease per pass instead of all three at once. Windows are cut from the source on the fly and decoded
+/// windows are accumulated straight into the output, so memory stays near the size of the input and output rather than
+/// holding every window and piece as well.
 /// </summary>
 internal static class SamAudioSeparationRunner
 {
@@ -27,39 +29,12 @@ internal static class SamAudioSeparationRunner
         }
 
         WindowLayout layout = new(length, SamAudioModelConstants.WindowSamples, SamAudioModelConstants.OverlapSamples);
-        float[][] windows = CutWindows(channels, layout);
-        Passes passes = new(graphs, progress, cancellationToken, windows.Length * 3);
-
-        float[][] features = passes.Encode(windows);
-        float[][] latents = passes.Flow(features, new SamAudioRandom(Seed));
-        (float[][] speechPieces, float[][] bedPieces) = passes.Decode(latents, windows, new SamAudioRandom(Seed + 1));
-
-        return Join(speechPieces, bedPieces, layout, channels.Length);
-    }
-
-    /// <summary>Every window of every channel, channel-major: index = channel * windowCount + window.</summary>
-    private static float[][] CutWindows(float[][] channels, WindowLayout layout)
-    {
-        int[] starts = layout.Starts();
-        return
-        [
-            .. channels.SelectMany(channel => starts.Select(start =>
-                channel.AsSpan(start, Math.Min(layout.Window, layout.Length - start)).ToArray())),
-        ];
-    }
-
-    private static SamAudioSeparation Join(float[][] speechPieces, float[][] bedPieces, WindowLayout layout, int channelCount)
-    {
         int windowCount = layout.Starts().Length;
-        float[][] speech = new float[channelCount][];
-        float[][] bed = new float[channelCount][];
-        for (int c = 0; c < channelCount; c++)
-        {
-            speech[c] = SamAudioCrossfade.Join(speechPieces.Skip(c * windowCount).Take(windowCount).ToArray(), layout);
-            bed[c] = SamAudioCrossfade.Join(bedPieces.Skip(c * windowCount).Take(windowCount).ToArray(), layout);
-        }
+        Passes passes = new(graphs, progress, cancellationToken, channels.Length * windowCount * 3);
 
-        return new SamAudioSeparation(speech, bed, windowCount);
+        float[][] features = passes.Encode(channels, layout);
+        float[][] latents = passes.Flow(features, new SamAudioRandom(Seed));
+        return passes.Decode(latents, layout, new SamAudioRandom(Seed + 1));
     }
 
     private sealed class Passes(
@@ -70,44 +45,68 @@ internal static class SamAudioSeparationRunner
     {
         private int done;
 
-        public float[][] Encode(float[][] windows)
+        /// <summary>Features of every window, channel-major: index = channel * windowCount + window.</summary>
+        public float[][] Encode(float[][] channels, WindowLayout layout)
         {
             ReportStart();
-            return Each(windows, window => SamAudioWindowSeparator.Encode(window, graphs, cancellationToken));
+            int[] starts = layout.Starts();
+            float[][] features = new float[channels.Length * starts.Length][];
+            for (int i = 0; i < features.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                features[i] = SamAudioWindowSeparator.Encode(CutWindow(channels, layout, starts, i), graphs, cancellationToken);
+                ReportStep();
+            }
+
+            return features;
         }
 
-        public float[][] Flow(float[][] features, SamAudioRandom random) =>
-            Each(features, feature => SamAudioWindowSeparator.Flow(
-                feature,
-                random.Gaussian(feature.Length / SamAudioModelConstants.FeatureChannels * SamAudioModelConstants.LatentChannels),
-                graphs,
-                cancellationToken));
-
-        public (float[][] Speech, float[][] Bed) Decode(float[][] latents, float[][] windows, SamAudioRandom random)
+        public float[][] Flow(float[][] features, SamAudioRandom random)
         {
-            (float[] Speech, float[] Bed)[] decoded = new (float[], float[])[latents.Length];
+            float[][] latents = new float[features.Length][];
+            for (int i = 0; i < features.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int frames = features[i].Length / SamAudioModelConstants.FeatureChannels;
+                latents[i] = SamAudioWindowSeparator.Flow(
+                    features[i], random.Gaussian(frames * SamAudioModelConstants.LatentChannels), graphs, cancellationToken);
+                features[i] = [];
+                ReportStep();
+            }
+
+            return latents;
+        }
+
+        public SamAudioSeparation Decode(float[][] latents, WindowLayout layout, SamAudioRandom random)
+        {
+            int[] starts = layout.Starts();
+            int channelCount = latents.Length / starts.Length;
+            SamAudioCrossfade[] speech = [.. Enumerable.Range(0, channelCount).Select(_ => new SamAudioCrossfade(layout))];
+            SamAudioCrossfade[] bed = [.. Enumerable.Range(0, channelCount).Select(_ => new SamAudioCrossfade(layout))];
             for (int i = 0; i < latents.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                decoded[i] = SamAudioWindowSeparator.Decode(
-                    latents[i], new SamAudioDecodeRequest(windows[i].Length, random.WatermarkMessage()), graphs, cancellationToken);
+                (int channel, int window) = (i / starts.Length, i % starts.Length);
+                int windowLength = Math.Min(layout.Window, layout.Length - starts[window]);
+                (float[] windowSpeech, float[] windowBed) = SamAudioWindowSeparator.Decode(
+                    latents[i], new SamAudioDecodeRequest(windowLength, random.WatermarkMessage()), graphs, cancellationToken);
+                latents[i] = [];
+                speech[channel].Add(windowSpeech, starts[window], window, starts.Length);
+                bed[channel].Add(windowBed, starts[window], window, starts.Length);
                 ReportStep();
             }
 
-            return ([.. decoded.Select(d => d.Speech)], [.. decoded.Select(d => d.Bed)]);
+            return new SamAudioSeparation(
+                [.. speech.Select(static channel => channel.Normalized())],
+                [.. bed.Select(static channel => channel.Normalized())],
+                starts.Length);
         }
 
-        private float[][] Each(float[][] inputs, Func<float[], float[]> step)
+        private static float[] CutWindow(float[][] channels, WindowLayout layout, int[] starts, int index)
         {
-            float[][] outputs = new float[inputs.Length][];
-            for (int i = 0; i < inputs.Length; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                outputs[i] = step(inputs[i]);
-                ReportStep();
-            }
-
-            return outputs;
+            int channel = index / starts.Length;
+            int start = starts[index % starts.Length];
+            return channels[channel].AsSpan(start, Math.Min(layout.Window, layout.Length - start)).ToArray();
         }
 
         private void ReportStart() => progress?.Report(new StemSeparationProgress(0, totalSteps, 0d, 1d));

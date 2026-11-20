@@ -28,8 +28,8 @@ public sealed class SamAudioPlanningTests
 
     [Theory]
     [InlineData(true, 12288, true, "sam-audio")]
-    [InlineData(true, 8192, true, "sam-audio")]
-    [InlineData(true, 6144, true, "spleeter")]
+    [InlineData(true, 6144, true, "sam-audio")]
+    [InlineData(true, 4096, true, "spleeter")]
     [InlineData(false, 0, false, "spleeter")]
     [InlineData(true, 16384, false, "spleeter")]
     public void Hardware_that_cannot_run_sam_audio_falls_back_to_spleeter(bool hasGpu, long vramMb, bool nvidia, string expectedFamily)

@@ -103,7 +103,7 @@ public sealed class SamAudioRunnerTests
         string order = new([.. graphs.Calls]);
         int firstFlow = order.IndexOf('V');
         int firstDecode = order.IndexOf('D');
-        Assert.Equal(3, order.Count(c => c == 'E'));
+        Assert.Equal(3 * 6, order.Count(c => c == 'E')); // 3 windows x 6 encode chunks
         Assert.Equal(3 * 6, order.Count(c => c == 'D')); // 3 windows x 6 decode chunks
         Assert.True(order.LastIndexOf('E') < firstFlow);
         Assert.True(order.LastIndexOf('V') < firstDecode);

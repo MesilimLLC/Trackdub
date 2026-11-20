@@ -7890,7 +7890,7 @@
       ],
       "tier": "quality",
       "lane": "commercial",
-      "min_vram_mb": 8192,
+      "min_vram_mb": 6144,
       "license": "custom",
       "commercial_allowed": true,
       "redistribution_allowed": true,

@@ -11,7 +11,7 @@ internal static class SamAudioWindowSeparator
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(graphs);
-        return graphs.Encode(SamAudioPadding.PadToHop(window), cancellationToken);
+        return SamAudioChunkedEncoder.Encode(SamAudioPadding.PadToHop(window), graphs, cancellationToken);
     }
 
     /// <summary>Integrates the flow from the starting noise to the latent, <c>frames x 256</c>.</summary>
