@@ -40,11 +40,24 @@ public sealed record ModelManifest(
     bool? Deprecated = null,
     string? DeprecatedReason = null)
 {
-    public bool CommercialSafeMode => CommercialUseVerified;
+    public bool CommercialSafeMode => ModelRiskAcceptanceReader.IsCommercialSafe(CommercialUseVerified, RiskAcceptance);
+
+    public ModelRiskAcceptance? RiskAcceptance { get; init; }
 
     public IReadOnlyDictionary<string, string> DownloadFileHashes { get; init; } =
         DownloadFileHashes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
+
+/// <summary>
+/// Owner-recorded exception for a model whose licence grants commercial use but whose
+/// training-data provenance cannot be verified. It never substitutes for <c>commercial_use_verified</c>;
+/// see docs/legal/MODEL_LICENSE_POLICY.md.
+/// </summary>
+public sealed record ModelRiskAcceptance(
+    string DecisionRecord,
+    IReadOnlyList<string> AcceptedRisks,
+    string Owner,
+    string Date);
 
 public sealed record ModelOptimizationManifest(
     ModelOliveOptimizationProfile? Olive);
