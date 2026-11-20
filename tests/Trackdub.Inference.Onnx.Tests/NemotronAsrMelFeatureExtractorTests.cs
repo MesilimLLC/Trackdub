@@ -2,6 +2,9 @@ using Trackdub.Inference.Onnx.NemotronAsr;
 
 namespace Trackdub.Inference.Onnx.Tests;
 
+// Reads the process-wide filterbank build counter, so it must not overlap any other
+// class that constructs NemotronAsrMelFeatureExtractor (see MelGoldenTests).
+[Collection("NemotronMelFilterBankBuildCount")]
 public sealed class NemotronAsrMelFeatureExtractorTests
 {
     [Fact]
