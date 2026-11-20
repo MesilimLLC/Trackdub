@@ -1144,7 +1144,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
             }
             """);
 
-        return (BundledModelManifestRegistry.Load(manifestPath), storagePaths);
+        return (ClearedManifestRegistry.Load(manifestPath), storagePaths);
     }
 
     private (BundledModelManifestRegistry Registry, TrackdubStoragePaths StoragePaths, string ManifestRoot)
@@ -1196,7 +1196,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
             }
             """);
 
-        return (BundledModelManifestRegistry.Load(manifestPath), storagePaths, manifestRoot);
+        return (ClearedManifestRegistry.Load(manifestPath), storagePaths, manifestRoot);
     }
 
     private static string Sha256Hex(string value) =>
@@ -1251,7 +1251,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
             }
             """);
 
-        BundledModelManifestRegistry registry = BundledModelManifestRegistry.Load(manifestPath);
+        BundledModelManifestRegistry registry = ClearedManifestRegistry.Load(manifestPath);
         BundledModelManifestEntry entry = registry.Entries.Single(e => e.ModelId == "example/model");
         return (registry, storagePaths, entry.DefaultBenchmarkEntryPath);
     }
@@ -1311,7 +1311,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
             }
             """);
 
-        return (BundledModelManifestRegistry.Load(manifestPath), storagePaths);
+        return (ClearedManifestRegistry.Load(manifestPath), storagePaths);
     }
 
     private static BundledModelManifestRegistry LoadBundledRegistry()
@@ -1324,7 +1324,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
             "Runtime",
             "ModelManifest",
             "bundled-models.manifest.json");
-        return BundledModelManifestRegistry.Load(manifestPath);
+        return ClearedManifestRegistry.Load(manifestPath);
     }
 
     private BundledModelManifestRegistry LoadBundledRegistryWithFakeDownloadHash(string modelId, string benchmarkEntry)
@@ -1353,7 +1353,7 @@ public sealed class ModelDownloadOrchestratorTests : IDisposable
         model["sha256"] = Sha256Hex($"downloaded:{modelId}:{benchmarkEntry}");
         File.WriteAllText(testManifestPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
-        return BundledModelManifestRegistry.Load(testManifestPath);
+        return ClearedManifestRegistry.Load(testManifestPath);
     }
 
     private static string FindRepoRoot()

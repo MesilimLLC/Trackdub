@@ -50,13 +50,13 @@ public sealed class ModelDownloadOrchestrator(
         IProgress<ModelDownloadProgress>? progress,
         CancellationToken cancellationToken = default)
     {
-        BundledModelManifestEntry? entry = FindEntry(modelId);
-        if (entry is null)
+        ModelDownloadResult? refusal = TryResolveDownloadableEntry(modelId, out BundledModelManifestEntry? resolved);
+        if (refusal is not null)
         {
-            string notFoundReason = $"Model '{modelId}' not found in manifest.";
-            logger?.LogError($"Model download failed for '{modelId}': {notFoundReason}");
-            return new ModelDownloadResult(modelId, false, ModelCacheState.Missing, notFoundReason);
+            return refusal;
         }
+
+        BundledModelManifestEntry entry = resolved!;
 
         // Normalize to the canonical model id so state-change events and cache records
         // are keyed consistently even when the caller passed an alias.
@@ -439,6 +439,25 @@ public sealed class ModelDownloadOrchestrator(
         }
 
         return missing;
+    }
+
+    /// <summary>
+    /// Finds the manifest entry for <paramref name="modelId"/> or returns the refusal: not in the manifest, or not cleared for
+    /// commercial use (MODEL_LICENSE_POLICY.md, accepted-risk exception).
+    /// </summary>
+    private ModelDownloadResult? TryResolveDownloadableEntry(string modelId, out BundledModelManifestEntry? entry)
+    {
+        entry = FindEntry(modelId);
+        string? reason = entry is null
+            ? $"Model '{modelId}' not found in manifest."
+            : ModelDownloadManifestFiles.IsCommerciallyCleared(entry) ? null : ModelDownloadManifestFiles.DescribeGateRefusal(entry);
+        if (reason is null)
+        {
+            return null;
+        }
+
+        logger?.LogError($"Model download failed for '{modelId}': {reason}");
+        return new ModelDownloadResult(entry?.ModelId ?? modelId, false, ModelCacheState.Missing, reason);
     }
 
     private async Task<(string RelativePath, HashVerificationResult Result)> VerifyRequiredFilesAsync(

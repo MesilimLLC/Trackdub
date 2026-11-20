@@ -78,13 +78,24 @@ internal static class ModelDownloadManifestFiles
             .ToArray();
     }
 
+    /// <summary>
+    /// The commercial gate for download and model-manager paths: commercial use is allowed and the model is either
+    /// verified or carries a loader-validated owner risk acceptance (MODEL_LICENSE_POLICY.md, accepted-risk exception).
+    /// </summary>
+    public static bool IsCommerciallyCleared(BundledModelManifestEntry entry) =>
+        entry.CommercialAllowed && entry.CommercialSafeMode;
+
+    public static string DescribeGateRefusal(BundledModelManifestEntry entry) =>
+        $"Model '{entry.ModelId}' is not cleared for commercial use (it needs commercial_allowed with commercial_use_verified or a recorded risk_acceptance); it cannot be downloaded.";
+
     public static bool CanAutoDownloadAll(BundledModelManifestEntry entry) =>
+        IsCommerciallyCleared(entry) &&
         entry.RedistributionAllowed &&
         ResolveRequiredFiles(entry).All(relativePath => CanAutoDownloadFile(entry, relativePath));
 
     public static bool CanAutoDownloadFile(BundledModelManifestEntry entry, string relativePath) =>
-        TryResolveExternalDownloadSource(entry, relativePath, out _) ||
-        CanDownloadFromHuggingFace(entry);
+        IsCommerciallyCleared(entry) &&
+        (TryResolveExternalDownloadSource(entry, relativePath, out _) || CanDownloadFromHuggingFace(entry));
 
     public static bool CanDownloadFromHuggingFace(BundledModelManifestEntry entry) =>
         !entry.Revision.Equals(CacheInstalledRevision, StringComparison.OrdinalIgnoreCase) &&

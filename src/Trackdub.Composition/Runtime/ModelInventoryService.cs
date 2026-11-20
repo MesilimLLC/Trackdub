@@ -51,6 +51,32 @@ public sealed class ModelInventoryService(
         return BuildEntry(entry, cacheIndex, providerCapabilities);
     }
 
+    private static string? ResolveFailureReason(
+        BundledModelManifestEntry manifest,
+        ModelCacheState state,
+        LocalModelCacheRecord? cacheRecord,
+        bool canAutoDownload)
+    {
+        if (state == ModelCacheState.Corrupt)
+        {
+            return DescribeCorruption(manifest, cacheRecord);
+        }
+
+        if (state != ModelCacheState.Missing || canAutoDownload)
+        {
+            return null;
+        }
+
+        return ModelDownloadManifestFiles.IsCommerciallyCleared(manifest)
+            ? "No downloadable source configured for this model; install or import the model files into the local cache."
+            : ModelDownloadManifestFiles.DescribeGateRefusal(manifest);
+    }
+
+    private static string DescribeCorruption(BundledModelManifestEntry manifest, LocalModelCacheRecord? cacheRecord) =>
+        cacheRecord is not null && (cacheRecord.IntegrityFailed || HasManifestHashMismatch(manifest, cacheRecord))
+            ? "Model failed integrity verification; use repair or re-download."
+            : "Model files missing or corrupted on disk.";
+
     private ModelInventoryEntry BuildEntry(
         BundledModelManifestEntry manifest,
         Dictionary<string, LocalModelCacheRecord[]> cacheIndex,
@@ -61,13 +87,7 @@ public sealed class ModelInventoryService(
 
         ModelCacheState state = DetermineState(manifest, cacheRecord);
         bool canAutoDownload = ModelDownloadManifestFiles.CanAutoDownloadAll(manifest);
-        string? failureReason = state == ModelCacheState.Corrupt
-            ? cacheRecord!.IntegrityFailed || HasManifestHashMismatch(manifest, cacheRecord)
-                ? "Model failed integrity verification; use repair or re-download."
-                : "Model files missing or corrupted on disk."
-            : state == ModelCacheState.Missing && !canAutoDownload
-                ? "No downloadable source configured for this model; install or import the model files into the local cache."
-                : null;
+        string? failureReason = ResolveFailureReason(manifest, state, cacheRecord, canAutoDownload);
 
         long? fileSize = cacheRecord is not null && state is ModelCacheState.Installed or ModelCacheState.Ready
             ? TryGetFileSize(ResolveCachedBenchmarkEntryPath(manifest, cacheRecord))

@@ -686,7 +686,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             }
             """);
 
-        return BundledModelManifestRegistry.Load(manifestPath);
+        return ClearedManifestRegistry.Load(manifestPath);
     }
 
     private BundledModelManifestRegistry CreateRegistryWithSha256(string sha256, bool singleFile = false)
@@ -736,7 +736,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             }
             """);
 
-        return BundledModelManifestRegistry.Load(manifestPath);
+        return ClearedManifestRegistry.Load(manifestPath);
     }
 
     private BundledModelManifestRegistry CreateHushRegistry()
@@ -783,7 +783,7 @@ public sealed class RuntimeModelBootstrapServiceTests : IDisposable
             }
             """);
 
-        return BundledModelManifestRegistry.Load(manifestPath);
+        return ClearedManifestRegistry.Load(manifestPath);
     }
 
     private static StageRuntimePlan CreatePlan(

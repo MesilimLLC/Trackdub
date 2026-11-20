@@ -179,7 +179,7 @@ public sealed class ModelInventoryServiceTests : IDisposable
               ]
             }
             """);
-        BundledModelManifestRegistry registry = BundledModelManifestRegistry.Load(manifestPath);
+        BundledModelManifestRegistry registry = ClearedManifestRegistry.Load(manifestPath);
         var service = new ModelInventoryService(registry, new LocalModelCacheRecordStore(storagePaths), storagePaths);
 
         ModelInventoryEntry? entry = await service.GetByModelIdAsync(
@@ -636,7 +636,7 @@ public sealed class ModelInventoryServiceTests : IDisposable
             }
             """);
 
-        return (BundledModelManifestRegistry.Load(manifestPath), storagePaths);
+        return (ClearedManifestRegistry.Load(manifestPath), storagePaths);
     }
 
     [Fact]

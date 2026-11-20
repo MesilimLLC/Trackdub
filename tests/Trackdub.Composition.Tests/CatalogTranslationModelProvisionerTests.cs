@@ -207,6 +207,34 @@ public sealed class CatalogTranslationModelProvisionerTests
     }
 
     [Fact]
+    public async Task OpusAutoSelection_never_picks_a_risk_accepted_entry_over_a_verified_one()
+    {
+        // MODEL_LICENSE_POLICY.md: an accepted-risk model is opt-in and never selected automatically.
+        Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
+        var settings = new FakeStudioSettingsService();
+        await settings.SaveAsync(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }, CancellationToken.None);
+        var downloader = new Downloader();
+        var service = new CatalogTranslationModelProvisioner(new Catalog(), registry!, settings, downloader, new TrackdubStoragePaths(Path.GetTempPath()));
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.True(registry!.TryResolve("hf:onnx-community/opus-mt-xx-yy", out BundledModelManifestResolution? resolved));
+        registry.AddCatalogEntries(
+        [
+            resolved!.Entry with
+            {
+                ModelId = "onnx-community/opus-mt-xx-aaa-risk",
+                Aliases = ["hf:onnx-community/opus-mt-xx-aaa-risk"],
+                CommercialUseVerified = false,
+                RiskAcceptance = new ModelRiskAcceptance("record", ["a", "b", "c", "d"], "owner", "2026-11-19"),
+            },
+        ]);
+
+        string? alias = await service.EnsureAsync("xx", "yy", OpusMtAutoModel.Alias, CancellationToken.None);
+
+        Assert.Equal("hf:onnx-community/opus-mt-xx-yy", alias);
+        Assert.Equal("onnx-community/opus-mt-xx-yy", downloader.Selected);
+    }
+
+    [Fact]
     public async Task OpusAuto_WaitsForPendingRefreshWhenOnlyNonOpusCoversPair()
     {
         Assert.True(BundledModelManifestRegistry.TryLoadDefault(out var registry, out var error), error);
