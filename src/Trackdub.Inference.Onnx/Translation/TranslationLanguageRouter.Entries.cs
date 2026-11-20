@@ -8,13 +8,20 @@ public sealed partial class TranslationLanguageRouter
         TranslationRoutingContext context,
         RouteQuery query) =>
         context.DirectEntriesByPair.TryGetValue((query.SourceLanguage, query.TargetLanguage), out IReadOnlyList<BundledModelManifestEntry>? entries)
-            ? entries
+            ? [.. entries.Where(entry => IsAutomaticChoiceAllowed(entry, query))]
             : [];
 
     private static IEnumerable<BundledModelManifestEntry> GetPivotEntriesForPair(
         TranslationRoutingContext context,
         RouteQuery query) =>
-        context.PivotEntries.Where(entry => CoversLanguagePair(entry.LanguageCoverage, query));
+        context.PivotEntries.Where(entry => CoversLanguagePair(entry.LanguageCoverage, query) && IsAutomaticChoiceAllowed(entry, query));
+
+    /// <summary>
+    /// A risk-accepted model is only a candidate when the request names it by alias, whether it is installed or still to be
+    /// downloaded (MODEL_LICENSE_POLICY.md: an accepted-risk model is opt-in and never selected automatically).
+    /// </summary>
+    private static bool IsAutomaticChoiceAllowed(BundledModelManifestEntry entry, RouteQuery query) =>
+        entry.RiskAcceptance is null || entry.CommercialUseVerified || (query.HasPreferredModel && !query.IsOpusMtAuto);
 
     private static bool HasCapability(BundledModelManifestEntry entry, string capability) =>
         entry.Capabilities.Any(candidate => string.Equals(candidate, capability, StringComparison.OrdinalIgnoreCase));
