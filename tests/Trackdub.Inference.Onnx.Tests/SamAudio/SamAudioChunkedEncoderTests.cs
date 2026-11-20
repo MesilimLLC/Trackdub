@@ -4,7 +4,7 @@ namespace Trackdub.Inference.Onnx.Tests.SamAudio;
 
 public sealed class SamAudioChunkedEncoderTests
 {
-    private const int EdgeFrames = 3;
+    private const int EdgeFrames = 11;
 
     /// <summary>
     /// A pointwise stand-in encoder: channel 0 of a frame is the first sample of that frame, the rest are zero.
