@@ -69,7 +69,7 @@ and API task worktrees. No follow-up Worker deployment has occurred.
   or failed/empty vendor fetches abort before upload/reindex. Previous staging
   survives; `.staging.previous` retains the backup if promotion and rollback
   both fail. Intentional repo-only staging and existing size limits remain.
-- **Read-only verifier:** `tools/docs-rag/verify_index.mjs` compares complete
+- **Read-only verifier (removed with sync retire):** formerly `tools/docs-rag/verify_index.mjs` compared complete
   source/index inventories, unique keys, metadata flags and scope folders,
   status/errors, pending actions, chunks, sizes and last-seen timestamps. It
   refuses active/changing jobs, detects source changes and requires an uncached
@@ -121,5 +121,4 @@ and API task worktrees. No follow-up Worker deployment has occurred.
   labels, and keep the issue In Progress while the remaining acceptance work is
   active. No cloud security scan or cloud code review was performed.
 
-Detailed commands and rebuild evidence:
-[docs-rag handoff](../../tools/docs-rag/HANDOFF.md).
+Detailed commands and rebuild evidence: see `tools/docs-rag/SPEC.md` (hosted Worker ops; automated sync from Trackdub retired).
