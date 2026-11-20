@@ -203,13 +203,8 @@ public sealed record ModelInventoryEntry(
     IReadOnlyList<ModelLanguagePair>? LanguagePairs = null,
     bool RiskAccepted = false)
 {
-    public bool CommercialClearance => CommercialUseVerified || (RiskAccepted && IsRiskEligible);
-
-    // Mirrors RiskAcceptanceEligibility in Trackdub.Inference, which Domain cannot reference.
-    private static readonly HashSet<string> RiskEligibleLicences =
-        new(StringComparer.OrdinalIgnoreCase) { "custom", "NVIDIA-Open-Model-License", "OpenMDW-1.1", "openrail++" };
-
-    private bool IsRiskEligible => CommercialAllowed && RiskEligibleLicences.Contains(License);
+    // RiskAccepted is only set from a manifest that passed the loader's eligibility checks (ModelRiskAcceptanceReader).
+    public bool CommercialClearance => CommercialUseVerified || RiskAccepted;
 
     public IReadOnlyList<ModelOptimizedVariantInfo> OptimizedVariants { get; init; } = OptimizedVariants ?? [];
 

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Trackdub.Inference.Runtime.ModelManifest;
 
-public static partial class ModelManifestLoader
+public static class ModelManifestLoader
 {
     public static ModelManifestCatalog LoadCatalog(string manifestPath)
     {
@@ -20,7 +20,7 @@ public static partial class ModelManifestLoader
             return new ModelManifestCatalog(ReadManifestArray(modelsElement, sourceName));
         }
 
-        return new ModelManifestCatalog([ReadManifestWithRisk(rootElement, "$", sourceName)]);
+        return new ModelManifestCatalog([ModelRiskAcceptanceReader.Attach(ReadManifest(rootElement, "$", sourceName), rootElement, new("$", sourceName))]);
     }
 
     private static IReadOnlyList<ModelManifest> ReadManifestArray(JsonElement modelsElement, string sourceName)
@@ -34,7 +34,7 @@ public static partial class ModelManifestLoader
         int index = 0;
         foreach (JsonElement element in modelsElement.EnumerateArray())
         {
-            models.Add(ReadManifestWithRisk(element, $"$.models[{index}]", sourceName));
+            models.Add(ModelRiskAcceptanceReader.Attach(ReadManifest(element, $"$.models[{index}]", sourceName), element, new($"$.models[{index}]", sourceName)));
             index++;
         }
 

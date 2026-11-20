@@ -299,7 +299,9 @@ public sealed class BundledModelManifestRegistry
             ExpectedRuntime: model.ExpectedRuntime,
             Deprecated: model.Deprecated ?? false,
             DeprecatedReason: model.DeprecatedReason)
-        { RiskAccepted = model.RiskAccepted };
+        {
+            RiskAcceptance = model.RiskAcceptance
+        };
     }
 
     private static bool HasMatchingGovernance(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>
@@ -315,8 +317,7 @@ public sealed class BundledModelManifestRegistry
         existing.CommercialAllowed == incoming.CommercialAllowed &&
         existing.RedistributionAllowed == incoming.RedistributionAllowed &&
         existing.RequiresAttribution == incoming.RequiresAttribution &&
-        existing.RequiresUserConsent == incoming.RequiresUserConsent &&
-        existing.RiskAccepted == incoming.RiskAccepted;
+        existing.RequiresUserConsent == incoming.RequiresUserConsent;
 
     private static BundledModelManifestEntry MergeEntry(
         BundledModelManifestEntry existing,
@@ -328,6 +329,8 @@ public sealed class BundledModelManifestRegistry
             throw new InvalidOperationException(
                 $"Generated manifest '{incomingManifestPath}' cannot merge model '{incoming.ModelId}' because its governance metadata does not match the base entry.");
         }
+
+        ModelRiskAcceptanceReader.EnsureSameRiskAcceptance(existing, incoming, incomingManifestPath);
 
         if (!existing.RootDirectory.Equals(incoming.RootDirectory, StringComparison.OrdinalIgnoreCase))
         {
@@ -720,12 +723,9 @@ public sealed record BundledModelManifestEntry(
     string? CatalogPolicyVersion = null,
     IReadOnlyDictionary<string, string?>? TargetPrefixes = null)
 {
-    public bool RiskAccepted { get; init; }
+    public bool CommercialSafeMode => ModelRiskAcceptanceReader.IsCommercialSafe(CommercialUseVerified, RiskAcceptance);
 
-    // Mirrors ModelManifest.CommercialClearance so entries added from outside the loader cannot bypass eligibility.
-    public bool CommercialClearance => RiskAcceptanceEligibility.IsCleared(this);
-
-    public bool CommercialSafeMode => CommercialClearance;
+    public ModelRiskAcceptance? RiskAcceptance { get; init; }
 }
 
 public sealed record BundledModelManifestVariant(

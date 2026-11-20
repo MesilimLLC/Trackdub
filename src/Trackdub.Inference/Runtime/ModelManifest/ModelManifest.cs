@@ -38,26 +38,26 @@ public sealed record ModelManifest(
     int MinVramMb = 0,
     bool SupportsPartialOffload = false,
     bool? Deprecated = null,
-    string? DeprecatedReason = null,
-    ModelRiskAcceptance? RiskAcceptance = null)
+    string? DeprecatedReason = null)
 {
-    public bool RiskAccepted => RiskAcceptance is not null;
+    public bool CommercialSafeMode => ModelRiskAcceptanceReader.IsCommercialSafe(CommercialUseVerified, RiskAcceptance);
 
-    // The commercial clearance the product gates on: either verified, or an owner-accepted risk on a licence that
-    // explicitly grants commercial use (MODEL_LICENSE_POLICY.md, accepted-risk exception).
-    public bool CommercialClearance => RiskAcceptanceEligibility.IsCleared(this);
-
-    public bool CommercialSafeMode => CommercialClearance;
+    public ModelRiskAcceptance? RiskAcceptance { get; init; }
 
     public IReadOnlyDictionary<string, string> DownloadFileHashes { get; init; } =
         DownloadFileHashes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Owner-recorded exception for a model whose licence grants commercial use but whose
+/// training-data provenance cannot be verified. It never substitutes for <c>commercial_use_verified</c>;
+/// see docs/legal/MODEL_LICENSE_POLICY.md.
+/// </summary>
 public sealed record ModelRiskAcceptance(
     string DecisionRecord,
-    string AcceptedBy,
-    string AcceptedOn,
-    IReadOnlyList<string> AcceptedRisks);
+    IReadOnlyList<string> AcceptedRisks,
+    string Owner,
+    string Date);
 
 public sealed record ModelOptimizationManifest(
     ModelOliveOptimizationProfile? Olive);

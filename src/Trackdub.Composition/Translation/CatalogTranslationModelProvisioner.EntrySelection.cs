@@ -36,7 +36,7 @@ public sealed partial class CatalogTranslationModelProvisioner
     private IEnumerable<BundledModelManifestEntry> BuildCandidates(
         ILookup<string, LocalModelCacheRecord> cacheByModelId) =>
         registry.Entries
-            .Where(entry => entry.Task == "translation" && entry.CommercialAllowed && entry.CommercialClearance)
+            .Where(entry => entry.Task == "translation" && entry.CommercialAllowed && entry.CommercialSafeMode)
             .OrderBy(entry => IsUsableInstalled(entry, cacheByModelId) ? 0 : 1)
             .ThenBy(entry => entry.LanguageCoverage.LanguagePairs.Count == 1 ? 0 : 1)
             .ThenBy(entry => entry.SourceUrl.Contains("/onnx-community/", StringComparison.Ordinal) ? 0 : 1)

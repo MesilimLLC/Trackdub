@@ -25,7 +25,7 @@ public sealed partial class TranslationLanguageRouter
 
     private static bool IsDownloadableEntry(BundledModelManifestEntry entry, RouteQuery query)
     {
-        if (!entry.CommercialAllowed || !entry.CommercialClearance)
+        if (!entry.CommercialAllowed || !entry.CommercialSafeMode)
         {
             return false;
         }
@@ -55,7 +55,7 @@ public sealed partial class TranslationLanguageRouter
             return false;
         }
 
-        bool commerciallyUsable = candidate.CommercialAllowed && candidate.CommercialClearance;
+        bool commerciallyUsable = candidate.CommercialAllowed && candidate.CommercialSafeMode;
         bool hasDownloadFiles = candidate.DownloadFiles.Count > 0 || candidate.Variants.Any(variant => variant.DownloadFiles.Count > 0);
         return commerciallyUsable && hasDownloadFiles;
     }

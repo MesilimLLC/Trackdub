@@ -315,7 +315,7 @@ public sealed class StarterPackApplyService(
                 return $"Required model '{modelId}' is not in the bundled manifest.";
             }
 
-            if (!manifestEntry.CommercialClearance)
+            if (!manifestEntry.CommercialSafeMode)
             {
                 string alias = manifestEntry.Aliases.FirstOrDefault() ?? modelId;
                 return $"License review needed: {alias} is not commercial-use verified.";

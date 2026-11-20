@@ -33,7 +33,7 @@ public sealed partial class CatalogTranslationModelProvisioner
         registry.Entries.Any(entry =>
             entry.Task == "translation" &&
             entry.CommercialAllowed &&
-            entry.CommercialClearance &&
+            entry.CommercialSafeMode &&
             string.Equals(entry.EngineFamily, "opus-mt", StringComparison.OrdinalIgnoreCase) &&
             entry.LanguageCoverage.LanguagePairs.Any(pair =>
                 pair.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) &&
