@@ -20,20 +20,21 @@ internal static class SamAudioStemOutputs
         return mono;
     }
 
-    public static async Task WriteAsync(StemSeparationRequest request, float[] speech, float[] bed, CancellationToken cancellationToken)
+    /// <summary>Speech is written mono; the bed keeps one channel per input channel, so a stereo source gives a stereo bed.</summary>
+    public static async Task WriteAsync(StemSeparationRequest request, float[] speech, float[][] bed, CancellationToken cancellationToken)
     {
         int rate = SamAudioModelConstants.SampleRate;
         await WaveAudioWriter.WriteMonoPcm16Async(request.VocalsOutputPath, speech, rate, cancellationToken).ConfigureAwait(false);
-        await WaveAudioWriter.WriteMonoPcm16Async(request.AmbianceOutputPath, bed, rate, cancellationToken).ConfigureAwait(false);
+        await WaveAudioWriter.WritePcm16Async(request.AmbianceOutputPath, bed, rate, cancellationToken).ConfigureAwait(false);
 
         // The bed is not split into music and effects: the music path carries the whole bed, as Spleeter's does.
         if (!string.IsNullOrWhiteSpace(request.MusicOutputPath))
         {
-            await WaveAudioWriter.WriteMonoPcm16Async(request.MusicOutputPath, bed, rate, cancellationToken).ConfigureAwait(false);
+            await WaveAudioWriter.WritePcm16Async(request.MusicOutputPath, bed, rate, cancellationToken).ConfigureAwait(false);
         }
 
         DeleteIfExists(request.SoundEffectsOutputPath);
-        await WriteRawStemAsync(request, "vocals", speech, cancellationToken).ConfigureAwait(false);
+        await WriteRawStemAsync(request, "vocals", [speech], cancellationToken).ConfigureAwait(false);
         await WriteRawStemAsync(request, "other", bed, cancellationToken).ConfigureAwait(false);
     }
 
@@ -49,9 +50,9 @@ internal static class SamAudioStemOutputs
         }
     }
 
-    private static Task WriteRawStemAsync(StemSeparationRequest request, string stem, float[] samples, CancellationToken cancellationToken) =>
+    private static Task WriteRawStemAsync(StemSeparationRequest request, string stem, float[][] channels, CancellationToken cancellationToken) =>
         request.RawStemOutputPaths is not null && request.RawStemOutputPaths.TryGetValue(stem, out string? path)
-            ? WaveAudioWriter.WriteMonoPcm16Async(path, samples, SamAudioModelConstants.SampleRate, cancellationToken)
+            ? WaveAudioWriter.WritePcm16Async(path, channels, SamAudioModelConstants.SampleRate, cancellationToken)
             : Task.CompletedTask;
 
     private static void DeleteIfExists(string? path)

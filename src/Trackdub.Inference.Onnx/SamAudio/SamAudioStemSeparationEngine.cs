@@ -11,7 +11,7 @@ namespace Trackdub.Inference.Onnx.SamAudio;
 
 /// <summary>
 /// Speech/bed separation with SAM-Audio small. Speech is the model's text-prompted target; the bed is its own residual
-/// output, not mix-minus-speech. Output stems are mono at the model's 48 kHz.
+/// output, not mix-minus-speech. Speech is mono and the bed keeps the source's channels (stereo for a stereo source), at the model's 48 kHz.
 /// </summary>
 public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter, IStageRuntimeExecutionReporter
 {
@@ -159,8 +159,7 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
     private static async Task WriteOutputsAsync(StemSeparationRequest request, SamAudioSeparation separated, CancellationToken cancellationToken)
     {
         float[] speech = SamAudioStemOutputs.DownmixToMono(separated.Speech);
-        float[] bed = SamAudioStemOutputs.DownmixToMono(separated.Bed);
-        await SamAudioStemOutputs.WriteAsync(request, speech, bed, cancellationToken).ConfigureAwait(false);
+        await SamAudioStemOutputs.WriteAsync(request, speech, separated.Bed, cancellationToken).ConfigureAwait(false);
     }
 
     private static Dictionary<string, string> BuildMetadata(StageRuntimePlan plan, string modelRootPath, SamAudioSeparation separated)
