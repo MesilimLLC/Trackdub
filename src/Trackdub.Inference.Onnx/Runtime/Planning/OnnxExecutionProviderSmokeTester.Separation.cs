@@ -10,6 +10,7 @@ using Trackdub.Inference.Onnx.ParakeetTdt;
 using Trackdub.Inference.Onnx.CosyVoice;
 using Trackdub.Inference.Onnx.Pool;
 using Trackdub.Inference.Onnx.SortFormer;
+using Trackdub.Inference.Onnx.SamAudio;
 using Trackdub.Inference.Onnx.Spleeter;
 using Trackdub.Inference.Onnx.Whisper;
 using Microsoft.ML.OnnxRuntime;
@@ -44,6 +45,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
     /// </summary>
     private static string ResolveSeparationPoolFamily(string? engineFamily, string modelId, string modelPath)
     {
+        if (SamAudioModelConstants.EngineFamilyName.Equals(engineFamily, StringComparison.OrdinalIgnoreCase))
+        {
+            return SamAudioGraphInfo.PoolKey(SamAudioGraph.Flow);
+        }
+
         string name = $"{modelId} {Path.GetFileNameWithoutExtension(modelPath)} {engineFamily}";
         if (name.Contains("vocals", StringComparison.OrdinalIgnoreCase))
         {
@@ -83,6 +89,11 @@ public sealed partial class OnnxExecutionProviderSmokeTester : IExecutionProvide
 
     private static InputSet CreateSeparationInputs(InferenceSession session)
     {
+        if (SamAudioSmokeInputs.Matches(session))
+        {
+            return new InputSet(SamAudioSmokeInputs.Create());
+        }
+
         (string inputName, NodeMetadata metadata) = session.InputMetadata.First();
         int[] dimensions = ResolveSeparationSmokeInputDimensions(metadata.Dimensions);
         int elementCount = dimensions.Aggregate(1, static (product, dimension) => checked(product * dimension));

@@ -4,21 +4,17 @@ using Trackdub.Inference.Onnx.Pool;
 
 namespace Trackdub.Inference.Onnx.SamAudio;
 
-/// <summary>The exported SAM-Audio graphs run through ONNX Runtime sessions leased by the caller.</summary>
-internal sealed class OrtSamAudioGraphs(
-    InferenceSession encoder,
-    InferenceSession dit,
-    InferenceSession decoder,
-    SamAudioPrompt prompt) : ISamAudioGraphs
+/// <summary>The exported SAM-Audio graphs run through ONNX Runtime sessions the caller opens on demand, one graph at a time.</summary>
+internal sealed class OrtSamAudioGraphs(Func<SamAudioGraph, InferenceSession> open, SamAudioPrompt prompt) : ISamAudioGraphs
 {
     public float[] Encode(float[] paddedWave, CancellationToken cancellationToken) =>
-        RunSingle(encoder, cancellationToken, Input("wav", paddedWave, 1, 1, paddedWave.Length));
+        RunSingle(open(SamAudioGraph.Encoder), cancellationToken, Input("wav", paddedWave, 1, 1, paddedWave.Length));
 
     public float[] Velocity(float time, float[] noisy, float[] features, CancellationToken cancellationToken)
     {
         int frames = noisy.Length / SamAudioModelConstants.LatentChannels;
         return RunSingle(
-            dit,
+            open(SamAudioGraph.Flow),
             cancellationToken,
             Input("noisy", noisy, 1, frames, SamAudioModelConstants.LatentChannels),
             Input("features", features, 1, frames, SamAudioModelConstants.FeatureChannels),
@@ -29,7 +25,7 @@ internal sealed class OrtSamAudioGraphs(
     public (float[] Target, float[] Residual) Decode(float[] latent, int frames, float[] message, CancellationToken cancellationToken)
     {
         float[] both = RunSingle(
-            decoder,
+            open(SamAudioGraph.Decoder),
             cancellationToken,
             Input("latent", latent, 1, frames, SamAudioModelConstants.LatentChannels),
             Input("message", message, 2, SamAudioModelConstants.WatermarkBits));

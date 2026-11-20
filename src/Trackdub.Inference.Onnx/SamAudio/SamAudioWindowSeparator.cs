@@ -1,44 +1,57 @@
 namespace Trackdub.Inference.Onnx.SamAudio;
 
-/// <summary>Separates one mono window (up to the 30 s training length) into speech and the residual bed.</summary>
+/// <summary>
+/// One window (up to the 30 s training length) separated into speech and the residual bed, in the three steps the
+/// runner schedules across all windows so that only one graph needs to be loaded at a time.
+/// </summary>
 internal static class SamAudioWindowSeparator
 {
-    public static (float[] Speech, float[] Bed) Separate(
-        float[] window,
-        ISamAudioGraphs graphs,
-        SamAudioRandom random,
-        CancellationToken cancellationToken)
+    /// <summary>Codec features of the window, padded to the codec hop, as <c>frames x 128</c>.</summary>
+    public static float[] Encode(float[] window, ISamAudioGraphs graphs, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(window);
-        ArgumentNullException.ThrowIfNull(random);
-
-        int frames = SamAudioPadding.FrameCount(SamAudioPadding.PadToHop(window).Length);
-        SamAudioFlowInputs inputs = new(random.Gaussian(frames * SamAudioModelConstants.LatentChannels), random.WatermarkMessage());
-        return Separate(window, graphs, inputs, cancellationToken);
+        ArgumentNullException.ThrowIfNull(graphs);
+        return graphs.Encode(SamAudioPadding.PadToHop(window), cancellationToken);
     }
 
-    /// <summary>Separation with explicit flow inputs (the seeded overload draws them).</summary>
+    /// <summary>Integrates the flow from the starting noise to the latent, <c>frames x 256</c>.</summary>
+    public static float[] Flow(float[] features, float[] noise, ISamAudioGraphs graphs, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(features);
+        ArgumentNullException.ThrowIfNull(noise);
+        ArgumentNullException.ThrowIfNull(graphs);
+        return SamAudioOdeSolver.Midpoint(
+            noise,
+            SamAudioModelConstants.OdeSteps,
+            (time, noisy) => graphs.Velocity(time, noisy, features, cancellationToken));
+    }
+
+    /// <summary>Decodes the latent to speech and bed waves cropped to the request's window length.</summary>
+    public static (float[] Speech, float[] Bed) Decode(
+        float[] latent,
+        SamAudioDecodeRequest request,
+        ISamAudioGraphs graphs,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(latent);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(graphs);
+        int frames = latent.Length / SamAudioModelConstants.LatentChannels;
+        (float[] target, float[] residual) = graphs.Decode(latent, frames, request.WatermarkMessage, cancellationToken);
+        return (Crop(target, request.Length), Crop(residual, request.Length));
+    }
+
+    /// <summary>All three steps for one window with explicit flow inputs; the runner uses the steps separately.</summary>
     internal static (float[] Speech, float[] Bed) Separate(
         float[] window,
         ISamAudioGraphs graphs,
         SamAudioFlowInputs inputs,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(window);
-        ArgumentNullException.ThrowIfNull(graphs);
         ArgumentNullException.ThrowIfNull(inputs);
-
-        float[] padded = SamAudioPadding.PadToHop(window);
-        int frames = SamAudioPadding.FrameCount(padded.Length);
-        float[] features = graphs.Encode(padded, cancellationToken);
-
-        float[] latent = SamAudioOdeSolver.Midpoint(
-            inputs.Noise,
-            SamAudioModelConstants.OdeSteps,
-            (time, noisy) => graphs.Velocity(time, noisy, features, cancellationToken));
-
-        (float[] target, float[] residual) = graphs.Decode(latent, frames, inputs.WatermarkMessage, cancellationToken);
-        return (Crop(target, window.Length), Crop(residual, window.Length));
+        float[] features = Encode(window, graphs, cancellationToken);
+        float[] latent = Flow(features, inputs.Noise, graphs, cancellationToken);
+        return Decode(latent, new SamAudioDecodeRequest(window.Length, inputs.WatermarkMessage), graphs, cancellationToken);
     }
 
     private static float[] Crop(float[] decoded, int length)
@@ -52,3 +65,6 @@ internal static class SamAudioWindowSeparator
         return decoded.Length == length ? decoded : decoded.AsSpan(0, length).ToArray();
     }
 }
+
+/// <summary>What the decode step needs besides the latent: the window's true length and the watermark message.</summary>
+internal sealed record SamAudioDecodeRequest(int Length, float[] WatermarkMessage);

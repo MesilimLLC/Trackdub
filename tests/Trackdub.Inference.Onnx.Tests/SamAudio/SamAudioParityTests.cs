@@ -24,7 +24,15 @@ public sealed class SamAudioParityTests
         using InferenceSession encoder = Open(modelDir!, SamAudioModelConstants.EncoderFileName);
         using InferenceSession dit = Open(modelDir!, SamAudioModelConstants.DitFileName);
         using InferenceSession decoder = Open(modelDir!, SamAudioModelConstants.DecoderFileName);
-        OrtSamAudioGraphs graphs = new(encoder, dit, decoder, SamAudioPrompt.Load(modelDir!));
+        Assert.True(SamAudioSmokeInputs.Matches(dit));
+        using (dit.Run(SamAudioSmokeInputs.Create()))
+        {
+            // The warmup smoke inputs are accepted by the real flow graph.
+        }
+
+        OrtSamAudioGraphs graphs = new(
+            graph => graph switch { SamAudioGraph.Encoder => encoder, SamAudioGraph.Flow => dit, _ => decoder },
+            SamAudioPrompt.Load(modelDir!));
 
         (float[] speech, float[] bed) = SamAudioWindowSeparator.Separate(
             Read(fixtureDir!, "wave"),
