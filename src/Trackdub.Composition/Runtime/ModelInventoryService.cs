@@ -59,9 +59,7 @@ public sealed class ModelInventoryService(
     {
         if (state == ModelCacheState.Corrupt)
         {
-            return cacheRecord!.IntegrityFailed || HasManifestHashMismatch(manifest, cacheRecord)
-                ? "Model failed integrity verification; use repair or re-download."
-                : "Model files missing or corrupted on disk.";
+            return DescribeCorruption(manifest, cacheRecord);
         }
 
         if (state != ModelCacheState.Missing || canAutoDownload)
@@ -73,6 +71,11 @@ public sealed class ModelInventoryService(
             ? "No downloadable source configured for this model; install or import the model files into the local cache."
             : ModelDownloadManifestFiles.DescribeGateRefusal(manifest);
     }
+
+    private static string DescribeCorruption(BundledModelManifestEntry manifest, LocalModelCacheRecord? cacheRecord) =>
+        cacheRecord is not null && (cacheRecord.IntegrityFailed || HasManifestHashMismatch(manifest, cacheRecord))
+            ? "Model failed integrity verification; use repair or re-download."
+            : "Model files missing or corrupted on disk.";
 
     private ModelInventoryEntry BuildEntry(
         BundledModelManifestEntry manifest,
