@@ -6,13 +6,19 @@ internal static class WaveAudioWriter
 {
     private const int HeaderBytes = 44;
 
-    public static async Task WriteMonoPcm16Async(
+    public static Task WriteMonoPcm16Async(string path, float[] samples, int sampleRate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        return WritePcm16Async(path, [samples], sampleRate, cancellationToken);
+    }
+
+    /// <summary>Writes one array per channel as interleaved 16-bit PCM.</summary>
+    public static async Task WritePcm16Async(
         string path,
-        float[] samples,
+        float[][] channels,
         int sampleRate,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(samples);
         if (sampleRate <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(sampleRate), "Sample rate must be positive.");
@@ -25,15 +31,24 @@ internal static class WaveAudioWriter
             Directory.CreateDirectory(directory);
         }
 
-        byte[] bytes = EncodeMonoPcm16(samples, sampleRate);
+        byte[] bytes = EncodePcm16(channels, sampleRate);
         await File.WriteAllBytesAsync(fullPath, bytes, cancellationToken).ConfigureAwait(false);
     }
 
-    internal static byte[] EncodeMonoPcm16(float[] samples, int sampleRate)
+    internal static byte[] EncodeMonoPcm16(float[] samples, int sampleRate) => EncodePcm16([samples], sampleRate);
+
+    internal static byte[] EncodePcm16(float[][] channelSamples, int sampleRate)
     {
-        const ushort channels = 1;
+        ArgumentNullException.ThrowIfNull(channelSamples);
+        if (channelSamples.Length == 0 || channelSamples.Any(channel => channel.Length != channelSamples[0].Length))
+        {
+            throw new ArgumentException("Channels must be non-empty and equal in length.", nameof(channelSamples));
+        }
+
+        ushort channels = checked((ushort)channelSamples.Length);
         const ushort bitsPerSample = 16;
-        int dataBytes = checked(samples.Length * sizeof(short));
+        int frames = channelSamples[0].Length;
+        int dataBytes = checked(frames * channels * sizeof(short));
         byte[] wav = new byte[HeaderBytes + dataBytes];
         Span<byte> span = wav;
 
@@ -46,17 +61,20 @@ internal static class WaveAudioWriter
         BinaryPrimitives.WriteUInt16LittleEndian(span[22..], channels);
         BinaryPrimitives.WriteInt32LittleEndian(span[24..], sampleRate);
         BinaryPrimitives.WriteInt32LittleEndian(span[28..], sampleRate * channels * bitsPerSample / 8);
-        BinaryPrimitives.WriteUInt16LittleEndian(span[32..], channels * bitsPerSample / 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[32..], (ushort)(channels * bitsPerSample / 8));
         BinaryPrimitives.WriteUInt16LittleEndian(span[34..], bitsPerSample);
         "data"u8.CopyTo(span[36..]);
         BinaryPrimitives.WriteInt32LittleEndian(span[40..], dataBytes);
 
         Span<byte> data = span[HeaderBytes..];
-        for (int i = 0; i < samples.Length; i++)
+        for (int i = 0; i < frames; i++)
         {
-            float clamped = Math.Clamp(samples[i], -1f, 1f);
-            short pcm = (short)Math.Clamp(clamped * 32767f, short.MinValue, short.MaxValue);
-            BinaryPrimitives.WriteInt16LittleEndian(data[(i * sizeof(short))..], pcm);
+            for (int c = 0; c < channels; c++)
+            {
+                float clamped = Math.Clamp(channelSamples[c][i], -1f, 1f);
+                short pcm = (short)Math.Clamp(clamped * 32767f, short.MinValue, short.MaxValue);
+                BinaryPrimitives.WriteInt16LittleEndian(data[(((i * channels) + c) * sizeof(short))..], pcm);
+            }
         }
 
         return wav;

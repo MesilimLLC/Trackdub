@@ -7879,6 +7879,96 @@
         "tokenizer.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/tokenizer.json",
         "tokenizer_config.json": "https://huggingface.co/tonythethompson/Qwen3-4B-translation-onnx/resolve/e7319aa0276a2766d038714372b4c5f00973a480/tokenizer_config.json"
       }
+    },
+    {
+      "model_id": "tonythethompson/sam-audio-small-onnx",
+      "display_name": "SAM-Audio small (ONNX)",
+      "task": "separation",
+      "engine_family": "sam-audio",
+      "capabilities": [
+        "speech-music-sfx-separation"
+      ],
+      "tier": "quality",
+      "lane": "commercial",
+      "min_vram_mb": 6144,
+      "license": "custom",
+      "commercial_allowed": true,
+      "redistribution_allowed": true,
+      "requires_attribution": true,
+      "requires_user_consent": false,
+      "voice_cloning": false,
+      "commercial_use_verified": false,
+      "risk_acceptance": {
+        "decision_record": "docs/legal/MODEL_LICENSE_POLICY.md, accepted-risk exception (owner decision 2026-11-19, PR #655)",
+        "accepted_risks": [
+          "licence indemnity to the licensor",
+          "termination and deletion on licence end",
+          "licensor's right to change terms",
+          "unverified training-data provenance"
+        ],
+        "owner": "project owner",
+        "date": "2026-11-19"
+      },
+      "source_url": "https://huggingface.co/tonythethompson/sam-audio-small-onnx",
+      "revision": "8741c36ed6a9775607723d7e74e192ddee96edb2",
+      "sha256": "2295a3a618e52474374501d3f801702074b7c95143b38fc5a10970b470b4b170",
+      "aliases": [
+        "sam-audio",
+        "sam-audio-small-onnx"
+      ],
+      "root_path": "../../../../models/sam-audio-small-onnx",
+      "benchmark_entry": "dit_step.onnx",
+      "download_files": [
+        "LICENSE",
+        "codec_decoder.onnx",
+        "codec_encoder.onnx",
+        "codec_encoder.onnx.data",
+        "dit_step.onnx",
+        "dit_step.onnx.data",
+        "prompt_speech.bin",
+        "sam_audio_onnx.json",
+        "text_encoder.onnx",
+        "text_encoder.onnx.data",
+        "tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json"
+      ],
+      "download_file_sources": {
+        "LICENSE": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/LICENSE",
+        "codec_decoder.onnx": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/codec_decoder.onnx",
+        "codec_encoder.onnx": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/codec_encoder.onnx",
+        "codec_encoder.onnx.data": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/codec_encoder.onnx.data",
+        "dit_step.onnx": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/dit_step.onnx",
+        "dit_step.onnx.data": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/dit_step.onnx.data",
+        "prompt_speech.bin": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/prompt_speech.bin",
+        "sam_audio_onnx.json": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/sam_audio_onnx.json",
+        "text_encoder.onnx": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/text_encoder.onnx",
+        "text_encoder.onnx.data": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/text_encoder.onnx.data",
+        "tokenizer/tokenizer.json": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json": "https://huggingface.co/tonythethompson/sam-audio-small-onnx/resolve/8741c36ed6a9775607723d7e74e192ddee96edb2/tokenizer/tokenizer_config.json"
+      },
+      "download_file_hashes": {
+        "LICENSE": "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be",
+        "codec_decoder.onnx": "f674a003b3ea088d46821fd497141043f2b21b1a36f4f198e506f75b4eaa6dd4",
+        "codec_encoder.onnx": "561dc7efa2d77f2603a44ed987d0e6b73e667016684d6cd0ce2e3a15a2622df5",
+        "codec_encoder.onnx.data": "ece6188ccb29fcfda4b910b318ae9634a6eb526df8df0269b8775d190df40d82",
+        "dit_step.onnx": "2295a3a618e52474374501d3f801702074b7c95143b38fc5a10970b470b4b170",
+        "dit_step.onnx.data": "4007801ebf897540d2e7cf726a026dbde301b012179fc67d0cfbf7c6927629fa",
+        "prompt_speech.bin": "87f5aff9b52fe67a8b02975a89bafb6932eb5fe039a8bbd35e995291665b6edb",
+        "sam_audio_onnx.json": "c0a0d90566bf3db75eb6eaf0972919f7b41033a79205f58659efc4fecfdec1d0",
+        "text_encoder.onnx": "6f63ad232fba3e3b3a186548d40c09747d8f1b374c52f681787f1ceb94d51c7d",
+        "text_encoder.onnx.data": "1ba4b4b64b002fac0347bfd4db57169feee42df4e631b9cd8a50d9265f53fcf8",
+        "tokenizer/tokenizer.json": "2432e8aa83414a69884a5cbd54a68f528c042d1f30780affbefcbb85091f022e",
+        "tokenizer/tokenizer_config.json": "5a22da374f374c24e53ed5cf630969f136c01a6fbd40a15c38e82b82f0ecde5f"
+      },
+      "hash_verification": {
+        "mode": "required"
+      },
+      "variants": [
+        {
+          "alias": "default",
+          "entry_path": "dit_step.onnx"
+        }
+      ]
     }
   ]
 }

@@ -81,7 +81,7 @@ public sealed partial class RuntimePlanner : IRuntimePlanner
         }
 
         IReadOnlyDictionary<string, IReadOnlyList<LocalModelCacheRecord>> cacheIndex = await cacheIndexBuilder.BuildAsync(cancellationToken).ConfigureAwait(false);
-        (RankedManifestEntry[] planEntries, StageRuntimePlan? blockedPlan) = SelectPlanEntries(request, requirements);
+        (RankedManifestEntry[] planEntries, StageRuntimePlan? blockedPlan) = SelectPlanEntries(request, requirements, snapshot.HardwareProfile);
         if (blockedPlan is not null)
         {
             return blockedPlan;
@@ -188,7 +188,8 @@ public sealed partial class RuntimePlanner : IRuntimePlanner
     /// </summary>
     private (RankedManifestEntry[] PlanEntries, StageRuntimePlan? BlockedPlan) SelectPlanEntries(
         StageRuntimePlanningRequest request,
-        StageRuntimeRequirements requirements)
+        StageRuntimeRequirements requirements,
+        HardwareProfile hardware)
     {
         RankedManifestEntry[] rankedEntries = rankingStrategy.RankEntries(request, requirements);
         if (rankedEntries.Length == 0)
@@ -216,6 +217,7 @@ public sealed partial class RuntimePlanner : IRuntimePlanner
             }
         }
 
+        rankedEntries = RuntimePlannerRankingStrategy.FilterEntriesTheHardwareCanRun(request, requirements, hardware, rankedEntries);
         return (RuntimePlannerRankingStrategy.FilterTopRankedEntriesIfRequired(requirements, rankedEntries), null);
     }
 

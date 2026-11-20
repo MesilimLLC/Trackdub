@@ -222,6 +222,39 @@ public sealed class StemSeparationStageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_RecordsEachStemsOwnChannelCountWhenTheEngineReportsOne()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            var artifactStore = new FakeArtifactStore(directory);
+            (MediaAsset mediaAsset, ProjectArtifact sourceArtifact) = SeedSource(artifactStore, directory);
+            var handler = new StemSeparationStageHandler(
+                new RecordingStemSeparationEngine("sam-audio", "sam-audio-small", writeMusic: true, writeSfx: false, rawStemNames: ["vocals", "other"])
+                {
+                    StemChannelCounts = new Dictionary<string, int> { ["ambiance"] = 2, ["music"] = 2 },
+                },
+                artifactStore,
+                new FakeFileFingerprintService(),
+                new FakeMediaAssetRepository(),
+                new FakeProjectStageRunStore());
+
+            StemSeparationStageResult result = await handler.HandleAsync(
+                new StemSeparationStageRequest(mediaAsset.ProjectId, mediaAsset, sourceArtifact, ExistingArtifacts: []),
+                progress: null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                [1, 2, 2],
+                new[] { result.VocalsArtifact, result.AmbianceArtifact, result.MusicArtifact! }.Select(static artifact => artifact.ChannelCount));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task HandleAsync_RemovesStaleStemTempDirectoriesAndPreservesFreshOrUnrelatedDirectories()
     {
         string directory = CreateTempDirectory();
@@ -692,6 +725,8 @@ public sealed class StemSeparationStageHandlerTests
     {
         private readonly IReadOnlyList<string> reportedRawStemNames = reportedRawStemNames ?? rawStemNames;
 
+        public IReadOnlyDictionary<string, int>? StemChannelCounts { get; init; }
+
         public async Task<StemSeparationResult> SeparateAsync(
             StemSeparationRequest request,
             IProgress<StemSeparationProgress>? progress,
@@ -724,7 +759,10 @@ public sealed class StemSeparationStageHandlerTests
                     ["engine_family"] = engineFamily,
                     ["model"] = model,
                     ["raw_stems"] = string.Join(',', reportedRawStemNames)
-                });
+                })
+            {
+                StemChannelCounts = StemChannelCounts,
+            };
         }
     }
 

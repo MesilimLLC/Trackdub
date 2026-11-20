@@ -13,7 +13,8 @@ public sealed record StageRuntimeRequirements(
     IReadOnlyDictionary<string, IReadOnlyList<ExecutionProviderKind>>? AllowedProvidersByEngineFamily = null,
     IReadOnlyList<string>? AllowedEngineFamilies = null,
     IReadOnlyList<string>? RequiredCapabilities = null,
-    bool PreferTopRankedModelUntilReady = false);
+    bool PreferTopRankedModelUntilReady = false,
+    IReadOnlyList<string>? NvidiaOnlyAutomaticEngineFamilies = null);
 
 internal static class Milestone5PlanningPolicy
 {
@@ -168,12 +169,21 @@ internal static class StageRuntimeRequirementsCatalog
             [RuntimeStage.Separation] = new(
                 RuntimeStage.Separation,
                 ModelTask.Separation,
-                ["spleeter"],
+                // SAM-Audio is preferred where the hardware meets its min_vram_mb; Spleeter is the fallback.
+                ["sam-audio", "spleeter"],
                 DefaultOnnxStageAllowedProviders,
                 ["default"],
                 ["default"],
-                AllowedEngineFamilies: ["spleeter"],
-                PreferTopRankedModelUntilReady: true),
+                // SAM-Audio is verified on CUDA (and CPU) only; TensorRT, TensorRT RTX and the other providers are untested for
+                // its attention-heavy flow graph, so they are not planned for it.
+                AllowedProvidersByEngineFamily: new Dictionary<string, IReadOnlyList<ExecutionProviderKind>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["sam-audio"] = [ExecutionProviderKind.Cuda, ExecutionProviderKind.Cpu],
+                },
+                AllowedEngineFamilies: ["sam-audio", "spleeter"],
+                PreferTopRankedModelUntilReady: true,
+                // SAM-Audio's graphs are verified on NVIDIA/CUDA only, so other GPUs keep Spleeter unless SAM is named.
+                NvidiaOnlyAutomaticEngineFamilies: ["sam-audio"]),
             [RuntimeStage.OverlapRescue] = new(
                 RuntimeStage.OverlapRescue,
                 ModelTask.OverlapRescue,

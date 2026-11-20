@@ -1812,7 +1812,7 @@ public sealed class ModelManifestLoaderTests
 
         ModelManifestCatalog catalog = ModelManifestLoader.LoadCatalog(manifestPath);
 
-        string[] supportedSeparationEngineFamilies = ["spleeter"];
+        string[] supportedSeparationEngineFamilies = ["spleeter", "sam-audio"];
 
         Assert.All(
             catalog.Models.Where(manifest => manifest.Task is ModelTask.Separation),
