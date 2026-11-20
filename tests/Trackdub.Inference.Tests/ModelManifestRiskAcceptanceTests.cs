@@ -23,6 +23,7 @@ public sealed class ModelManifestRiskAcceptanceTests
     [InlineData("custom", true, ValidSha256, "risk_acceptance")]
     [InlineData("mit", false, ValidSha256, "custom")]
     [InlineData("custom", false, "", "sha256")]
+    [InlineData("custom", false, "not-a-hash", "sha256")]
     public void LoadCatalog_RejectsInvalidRiskAcceptance(string license, bool verified, string sha256, string expectedText)
     {
         ModelManifestValidationException exception = Assert.Throws<ModelManifestValidationException>(
@@ -41,6 +42,17 @@ public sealed class ModelManifestRiskAcceptanceTests
 
         Assert.Contains("$.models[0].risk_acceptance", exception.Message, StringComparison.Ordinal);
         Assert.Contains("decision_record", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadCatalog_RejectsIncompleteAcceptedRisks()
+    {
+        string json = RiskManifest("custom", verified: false, ValidSha256, withRisk: true)
+            .Replace("\"unverified training-data provenance\"", "\"something else\"", StringComparison.Ordinal);
+
+        ModelManifestValidationException exception = Assert.Throws<ModelManifestValidationException>(() => Load(json));
+
+        Assert.Contains("unverified training-data provenance", exception.Message, StringComparison.Ordinal);
     }
 
     private static ModelManifestCatalog Load(string json)
@@ -64,9 +76,14 @@ public sealed class ModelManifestRiskAcceptanceTests
               ,
                   "risk_acceptance": {
                     "decision_record": "owner decision 2026-11-19",
-                    "accepted_by": "owner",
-                    "accepted_on": "2026-11-19",
-                    "accepted_risks": [ "licence indemnity", "unverified training data" ]
+                    "owner": "owner",
+                    "date": "2026-11-19",
+                    "accepted_risks": [
+                      "licence indemnity to the licensor",
+                      "termination and deletion on licence end",
+                      "Licensor's right to change terms",
+                      "unverified training-data provenance"
+                    ]
                   }
               """
             : string.Empty;

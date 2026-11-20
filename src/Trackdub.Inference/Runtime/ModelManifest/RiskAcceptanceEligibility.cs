@@ -14,5 +14,8 @@ public static class RiskAcceptanceEligibility
         commercialAllowed && redistributionAllowed && IsHashedCustomLicence(license, sha256);
 
     private static bool IsHashedCustomLicence(string license, string? sha256) =>
-        license.Equals("custom", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(sha256);
+        license.Equals("custom", StringComparison.OrdinalIgnoreCase) && IsSha256Digest(sha256);
+
+    private static bool IsSha256Digest(string? sha256) =>
+        sha256 is { Length: 64 } && sha256.All(Uri.IsHexDigit);
 }

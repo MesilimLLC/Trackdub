@@ -7,6 +7,15 @@ public static partial class ModelManifestLoader
 {
     private readonly record struct RiskTerms(bool CommercialUseVerified, bool Eligible);
 
+    // The four risks MODEL_LICENSE_POLICY.md requires the record to list, matched case-insensitively after trimming.
+    private static readonly string[] RequiredAcceptedRisks =
+    [
+        "licence indemnity to the licensor",
+        "termination and deletion on licence end",
+        "licensor's right to change terms",
+        "unverified training-data provenance",
+    ];
+
     private static ModelManifest ReadManifestWithRisk(JsonElement element, string path, string sourceName)
     {
         ModelManifest manifest = ReadManifest(element, path, sourceName);
@@ -19,7 +28,7 @@ public static partial class ModelManifestLoader
         manifest.License == ModelLicenseKind.Custom &&
         manifest.CommercialAllowed &&
         manifest.RedistributionAllowed &&
-        !string.IsNullOrWhiteSpace(manifest.Sha256);
+        manifest.Sha256 is { } sha256 && IsValidSha256(sha256);
 
     private static void EnsureRiskAcceptanceAllowed(RiskTerms terms, string path, string sourceName)
     {
@@ -32,7 +41,7 @@ public static partial class ModelManifestLoader
         if (!terms.Eligible)
         {
             throw new ModelManifestValidationException(
-                $"Manifest '{sourceName}' entry '{path}' sets 'risk_acceptance', which needs a 'custom' licence, commercial_allowed and redistribution_allowed true, and a sha256.");
+                $"Manifest '{sourceName}' entry '{path}' sets 'risk_acceptance', which needs a 'custom' licence, commercial_allowed and redistribution_allowed true, and a valid sha256.");
         }
     }
 
@@ -54,16 +63,22 @@ public static partial class ModelManifestLoader
 
         string riskPath = $"{path}.risk_acceptance";
         IReadOnlyList<string> risks = ReadStringArray(value, "accepted_risks", riskPath, sourceName);
-        if (risks.Count == 0)
+        string[] missing = MissingAcceptedRisks(risks);
+        if (missing.Length > 0)
         {
             throw new ModelManifestValidationException(
-                $"Manifest '{sourceName}' entry '{path}' risk_acceptance must list at least one accepted risk.");
+                $"Manifest '{sourceName}' field '{riskPath}.accepted_risks' is missing required risks: {string.Join("; ", missing)}.");
         }
 
         return new ModelRiskAcceptance(
             ReadRequiredString(value, "decision_record", riskPath, sourceName),
-            ReadRequiredString(value, "accepted_by", riskPath, sourceName),
-            ReadRequiredString(value, "accepted_on", riskPath, sourceName),
+            ReadRequiredString(value, "owner", riskPath, sourceName),
+            ReadRequiredString(value, "date", riskPath, sourceName),
             risks);
     }
+
+    private static string[] MissingAcceptedRisks(IReadOnlyList<string> risks) =>
+        RequiredAcceptedRisks
+            .Where(required => !risks.Any(risk => string.Equals(risk.Trim(), required, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
 }

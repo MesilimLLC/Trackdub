@@ -298,7 +298,8 @@ public sealed class BundledModelManifestRegistry
             ProviderId: model.ProviderId,
             ExpectedRuntime: model.ExpectedRuntime,
             Deprecated: model.Deprecated ?? false,
-            DeprecatedReason: model.DeprecatedReason) { RiskAccepted = model.RiskAccepted };
+            DeprecatedReason: model.DeprecatedReason)
+        { RiskAccepted = model.RiskAccepted };
     }
 
     private static bool HasMatchingGovernance(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>

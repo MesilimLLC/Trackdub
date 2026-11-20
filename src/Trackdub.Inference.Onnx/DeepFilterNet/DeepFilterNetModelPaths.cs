@@ -78,7 +78,8 @@ public sealed record DeepFilterNetModelPaths(
             Path.Join(root, "erb_dec.onnx"),
             Path.Join(root, "df_dec.onnx"),
             entry.CommercialAllowed,
-            entry.CommercialUseVerified) { RiskAccepted = entry.RiskAccepted };
+            entry.CommercialUseVerified)
+        { RiskAccepted = entry.RiskAccepted };
     }
 
     public bool IsCommercialSafe => CommercialAllowed && (CommercialUseVerified || RiskAccepted);

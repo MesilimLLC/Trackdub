@@ -99,11 +99,11 @@
           "type": "object",
           "description": "Owner-accepted risk for a custom commercial licence with unverified training-data provenance (MODEL_LICENSE_POLICY.md, accepted-risk exception). Requires commercial_allowed, redistribution_allowed and sha256; commercial_use_verified must stay false.",
           "additionalProperties": false,
-          "required": ["decision_record", "accepted_by", "accepted_on", "accepted_risks"],
+          "required": ["decision_record", "owner", "date", "accepted_risks"],
           "properties": {
             "decision_record": { "type": "string", "minLength": 1 },
-            "accepted_by": { "type": "string", "minLength": 1 },
-            "accepted_on": { "type": "string", "minLength": 1 },
+            "owner": { "type": "string", "minLength": 1 },
+            "date": { "type": "string", "minLength": 1 },
             "accepted_risks": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
           }
         },
