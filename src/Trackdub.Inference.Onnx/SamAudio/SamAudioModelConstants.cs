@@ -26,6 +26,12 @@ internal static class SamAudioModelConstants
     /// <summary>Training clip length; longer input is separated in overlapping windows of this size.</summary>
     public const double WindowSeconds = 30.0;
 
+    /// <summary>Codec decode chunk, in latent frames (6 s). A whole 30 s window does not decode on a 12 GB GPU (cuDNN fails).</summary>
+    public const int DecodeChunkFrames = 150;
+
+    /// <summary>Overlap between decode chunks, in latent frames (0.5 s), crossfaded; 65 dB agreement with a full decode.</summary>
+    public const int DecodeOverlapFrames = 25;
+
     public const double OverlapSeconds = 5.0;
 
     public const string EncoderFileName = "codec_encoder.onnx";

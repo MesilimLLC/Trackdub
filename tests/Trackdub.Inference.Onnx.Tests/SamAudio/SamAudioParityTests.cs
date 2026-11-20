@@ -12,14 +12,24 @@ public sealed class SamAudioParityTests
 {
     private const double MinimumSnrDb = 60;
 
+    // Chunk edges differ slightly from a single full decode (measured 65 dB on codec latents); require comfortably inaudible.
+    private const double ChunkedMinimumSnrDb = 50;
+
     [Fact]
-    public void Real_graphs_reproduce_the_python_onnx_reference()
+    public void Real_graphs_reproduce_the_python_onnx_reference() => AssertMatchesReference(suffix: string.Empty, MinimumSnrDb);
+
+    /// <summary>10 s is 250 latent frames, so this goes through the chunked decoder; the reference is a full decode.</summary>
+    [Fact]
+    public void Chunked_decoding_matches_the_full_decode_reference() => AssertMatchesReference("-10s", ChunkedMinimumSnrDb);
+
+    private static void AssertMatchesReference(string suffix, double minimumSnrDb)
     {
         string? modelDir = Environment.GetEnvironmentVariable("TRACKDUB_SAM_AUDIO_ONNX_PATH");
         string? fixtureDir = Environment.GetEnvironmentVariable("TRACKDUB_SAM_AUDIO_PARITY_PATH");
         Assert.SkipWhen(
             string.IsNullOrWhiteSpace(modelDir) || string.IsNullOrWhiteSpace(fixtureDir),
             "Set TRACKDUB_SAM_AUDIO_ONNX_PATH and TRACKDUB_SAM_AUDIO_PARITY_PATH to run the SAM-Audio parity test.");
+        Assert.SkipUnless(File.Exists(Path.Join(fixtureDir, $"wave{suffix}.f32")), $"Fixture 'wave{suffix}.f32' is not present.");
 
         using InferenceSession encoder = Open(modelDir!, SamAudioModelConstants.EncoderFileName);
         using InferenceSession dit = Open(modelDir!, SamAudioModelConstants.DitFileName);
@@ -35,13 +45,13 @@ public sealed class SamAudioParityTests
             SamAudioPrompt.Load(modelDir!));
 
         (float[] speech, float[] bed) = SamAudioWindowSeparator.Separate(
-            Read(fixtureDir!, "wave"),
+            Read(fixtureDir!, $"wave{suffix}"),
             graphs,
-            new SamAudioFlowInputs(Read(fixtureDir!, "noise"), Read(fixtureDir!, "message")),
+            new SamAudioFlowInputs(Read(fixtureDir!, $"noise{suffix}"), Read(fixtureDir!, $"message{suffix}")),
             CancellationToken.None);
 
-        Assert.InRange(SnrDb(Read(fixtureDir!, "target"), speech), MinimumSnrDb, double.MaxValue);
-        Assert.InRange(SnrDb(Read(fixtureDir!, "residual"), bed), MinimumSnrDb, double.MaxValue);
+        Assert.InRange(SnrDb(Read(fixtureDir!, $"target{suffix}"), speech), minimumSnrDb, double.MaxValue);
+        Assert.InRange(SnrDb(Read(fixtureDir!, $"residual{suffix}"), bed), minimumSnrDb, double.MaxValue);
     }
 
     private static InferenceSession Open(string modelDir, string fileName) =>

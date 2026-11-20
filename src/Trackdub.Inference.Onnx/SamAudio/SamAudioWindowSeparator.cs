@@ -36,8 +36,7 @@ internal static class SamAudioWindowSeparator
         ArgumentNullException.ThrowIfNull(latent);
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(graphs);
-        int frames = latent.Length / SamAudioModelConstants.LatentChannels;
-        (float[] target, float[] residual) = graphs.Decode(latent, frames, request.WatermarkMessage, cancellationToken);
+        (float[] target, float[] residual) = SamAudioChunkedDecoder.Decode(latent, request.WatermarkMessage, graphs, cancellationToken);
         return (Crop(target, request.Length), Crop(residual, request.Length));
     }
 

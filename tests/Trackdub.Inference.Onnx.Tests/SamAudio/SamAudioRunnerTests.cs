@@ -81,7 +81,7 @@ public sealed class SamAudioRunnerTests
         SamAudioSeparation result = SamAudioSeparationRunner.Run(channels, graphs, new Progress(reports.Add), CancellationToken.None);
 
         Assert.Equal(3, result.WindowCount);
-        Assert.Equal(6, graphs.Decodes);
+        Assert.Equal(6 * 6, graphs.Decodes); // 2 channels x 3 windows x 6 decode chunks per 30 s window
         Assert.Equal(2, result.Speech.Length);
         Assert.All(result.Speech, speech => Assert.All(speech.Where((_, i) => i % 9973 == 0), v => Assert.Equal(1f, v, 1e-5f)));
         Assert.All(result.Bed, bed => Assert.All(bed.Where((_, i) => i % 9973 == 0), v => Assert.Equal(0.5f, v, 1e-5f)));
@@ -104,7 +104,7 @@ public sealed class SamAudioRunnerTests
         int firstFlow = order.IndexOf('V');
         int firstDecode = order.IndexOf('D');
         Assert.Equal(3, order.Count(c => c == 'E'));
-        Assert.Equal(3, order.Count(c => c == 'D'));
+        Assert.Equal(3 * 6, order.Count(c => c == 'D')); // 3 windows x 6 decode chunks
         Assert.True(order.LastIndexOf('E') < firstFlow);
         Assert.True(order.LastIndexOf('V') < firstDecode);
     }
