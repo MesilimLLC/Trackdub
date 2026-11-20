@@ -31,6 +31,18 @@ public sealed class ModelManifestRiskAcceptanceTests
         Assert.Contains(expectedText, exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void LoadCatalog_NamesRiskAcceptancePathForMissingField()
+    {
+        string json = RiskManifest("custom", verified: false, ValidSha256, withRisk: true)
+            .Replace("\"decision_record\": \"owner decision 2026-11-19\",", string.Empty, StringComparison.Ordinal);
+
+        ModelManifestValidationException exception = Assert.Throws<ModelManifestValidationException>(() => Load(json));
+
+        Assert.Contains("$.models[0].risk_acceptance", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("decision_record", exception.Message, StringComparison.Ordinal);
+    }
+
     private static ModelManifestCatalog Load(string json)
     {
         string manifestPath = Path.Join(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");

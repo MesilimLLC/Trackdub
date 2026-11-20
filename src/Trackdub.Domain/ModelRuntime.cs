@@ -203,7 +203,9 @@ public sealed record ModelInventoryEntry(
     IReadOnlyList<ModelLanguagePair>? LanguagePairs = null,
     bool RiskAccepted = false)
 {
-    public bool CommercialClearance => CommercialUseVerified || RiskAccepted;
+    public bool CommercialClearance => CommercialUseVerified || (RiskAccepted && IsRiskEligible);
+
+    private bool IsRiskEligible => CommercialAllowed && License.Equals("custom", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<ModelOptimizedVariantInfo> OptimizedVariants { get; init; } = OptimizedVariants ?? [];
 

@@ -32,8 +32,13 @@ public static class LipSynthesisInventoryGate
         entry is { CommercialAllowed: true };
 
     /// <summary>Engine maturity is not fully verified for commercial shipping yet.</summary>
+    /// <remarks>
+    /// Keyed to verification, not to CommercialClearance: a risk-accepted entry keeps the experimental opt-in, because
+    /// the engine (LatentSyncOnnxLipSynthesisEngine) still reports itself experimental for non-commercial lanes and
+    /// this inventory has no lane to check.
+    /// </remarks>
     public static bool IsExperimentalEngine(ModelInventoryEntry? entry) =>
-        entry is not { CommercialAllowed: true, CommercialClearance: true };
+        entry is not { CommercialAllowed: true, CommercialUseVerified: true };
 
     /// <summary>UI stage Run is explicit opt-in for experimental engines.</summary>
     public static bool AllowExperimentalExecution(ModelInventoryEntry? entry) =>

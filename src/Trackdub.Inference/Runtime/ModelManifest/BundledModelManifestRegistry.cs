@@ -721,7 +721,8 @@ public sealed record BundledModelManifestEntry(
 {
     public bool RiskAccepted { get; init; }
 
-    public bool CommercialClearance => CommercialUseVerified || RiskAccepted;
+    // Mirrors ModelManifest.CommercialClearance so entries added from outside the loader cannot bypass eligibility.
+    public bool CommercialClearance => RiskAcceptanceEligibility.IsCleared(this);
 
     public bool CommercialSafeMode => CommercialClearance;
 }

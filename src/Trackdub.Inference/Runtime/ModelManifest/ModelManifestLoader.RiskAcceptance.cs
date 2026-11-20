@@ -52,7 +52,8 @@ public static partial class ModelManifestLoader
                 $"Manifest '{sourceName}' entry '{path}' field 'risk_acceptance' must be an object.");
         }
 
-        IReadOnlyList<string> risks = ReadStringArray(value, "accepted_risks", path, sourceName);
+        string riskPath = $"{path}.risk_acceptance";
+        IReadOnlyList<string> risks = ReadStringArray(value, "accepted_risks", riskPath, sourceName);
         if (risks.Count == 0)
         {
             throw new ModelManifestValidationException(
@@ -60,9 +61,9 @@ public static partial class ModelManifestLoader
         }
 
         return new ModelRiskAcceptance(
-            ReadRequiredString(value, "decision_record", path, sourceName),
-            ReadRequiredString(value, "accepted_by", path, sourceName),
-            ReadRequiredString(value, "accepted_on", path, sourceName),
+            ReadRequiredString(value, "decision_record", riskPath, sourceName),
+            ReadRequiredString(value, "accepted_by", riskPath, sourceName),
+            ReadRequiredString(value, "accepted_on", riskPath, sourceName),
             risks);
     }
 }
