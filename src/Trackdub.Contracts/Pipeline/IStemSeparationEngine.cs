@@ -21,7 +21,7 @@ public sealed record StemSeparationRequest(
     bool RequirePreferredExecutionProvider = false,
     string? PreferredModelVariantAlias = null);
 
-public sealed record StemSeparationResult(
+public sealed partial record StemSeparationResult(
     double DurationSeconds,
     int SampleRate,
     int ChannelCount,

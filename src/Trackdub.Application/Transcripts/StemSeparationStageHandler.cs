@@ -415,7 +415,7 @@ public sealed class StemSeparationStageHandler(
             fingerprint.SizeBytes,
             result.DurationSeconds,
             result.SampleRate,
-            result.ChannelCount,
+            result.ChannelCountOf(StemProvenanceName(kind)),
             DateTimeOffset.UtcNow,
             StageRunId: stageRun.Id,
             Provenance: BuildStemProvenance(ResolveBaseProvenance(result, kind), result.Metadata));

@@ -101,7 +101,15 @@ public sealed class SamAudioStemSeparationEngine : IStemSeparationEngineAdapter,
                 metadata.TryGetValue("selected_provider", out string? selected) ? selected : FormatProvider(plan),
                 metadata.TryGetValue("bootstrap_detail", out string? detail) ? detail : "SAM-Audio ONNX separation completed.");
 
-            return new StemSeparationResult(durationSeconds, SamAudioModelConstants.SampleRate, ChannelCount: 1, metadata);
+            // Speech is mono; the bed keeps the source's channels, so the stems differ in layout.
+            return new StemSeparationResult(durationSeconds, SamAudioModelConstants.SampleRate, ChannelCount: 1, metadata)
+            {
+                StemChannelCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+                {
+                    ["ambiance"] = separated.Bed.Length,
+                    ["music"] = separated.Bed.Length,
+                },
+            };
         }
         catch (OperationCanceledException)
         {
