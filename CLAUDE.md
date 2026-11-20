@@ -144,7 +144,7 @@ Pick the source by the kind of question.
 | Question | Use |
 |---|---|
 | Trackdub / Trackdub-gated / api.trackdub docs, code, symbols you have a checkout of | Serena or `s.fs.search_for_pattern` on the checkout. It is exact and current. |
-| Which EP ABI / CUDA / TensorRT-RTX version is pinned | `runtime/trt-rtx-ep.manifest.json`, or `list_corpus` on `trackdub-gpu-docs` (it checks the pin against the manifest). |
+| Which EP ABI / CUDA / TensorRT-RTX version is pinned | `runtime/trt-rtx-ep.manifest.json` (the TensorRT-RTX runtime version is only there; `list_corpus` on `trackdub-gpu-docs` checks just the EP ABI and CUDA variant against it). |
 | TensorRT-RTX, ORT plugin EP or Windows ML wiring, offline | `trackdub-gpu-docs` (`search_trackdub_gpu_docs`, `get_doc`). |
 | Vendor docs not on disk (Olive, Avalonia, ReactiveUI, Qwen, Whisper, LatentSync, AMD, Intel, Qualcomm) | The vendor's own documentation, via web search/fetch or Context7 for libraries. |
 

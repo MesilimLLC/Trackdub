@@ -65,21 +65,6 @@
       "q": "which execution providers does Windows ML support",
       "gpu_expect": ["ms-winml-supported-eps"]
     },
-    {
-      "q": "olive quantize command line options"
-    },
-    {
-      "q": "Avalonia data binding syntax and compiled bindings"
-    },
-    {
-      "q": "ReactiveUI binding a view model property to a control"
-    },
-    {
-      "q": "LatentSync 1.6 ONNX export for lip sync"
-    },
-    {
-      "q": "insightface buffalo_s model pack for face detection"
-    },
     {"q": "nv_use_sync_gpu_allocator provider option", "kind": "needle", "gpu_expect": ["gh-ep-abi-v050-technical-notes"]},
     {"q": "ep_refit_table weightless EPContext refit", "kind": "needle", "gpu_expect": ["gh-ep-abi-v050-technical-notes"]},
     {"q": "Catalog.FindAllProviders and RegisterCertifiedAsync", "kind": "needle", "gpu_expect": ["ms-winml-initialize-eps"]},

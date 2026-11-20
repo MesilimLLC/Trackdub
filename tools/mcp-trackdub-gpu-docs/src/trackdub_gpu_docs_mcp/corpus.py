@@ -47,9 +47,13 @@ def find_repo_root(start: Path | None = None) -> Path:
     )
 
 
-@lru_cache(maxsize=1)
-def load_manifest() -> dict[str, Any]:
+@lru_cache(maxsize=2)
+def _read_manifest(stamp: int) -> dict[str, Any]:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def load_manifest() -> dict[str, Any]:
+    return _read_manifest(MANIFEST_PATH.stat().st_mtime_ns)
 
 
 def load_sources() -> list[CorpusSource]:

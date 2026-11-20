@@ -132,7 +132,7 @@ permission:
       <step>Level 2 (pipeline/inference/model work): `context/domain/inference-stack.md`, `context/standards/architecture-rules.md`, `context/domain/terminology.md`.</step>
       <step>Level 3 (process): `context/processes/adding-pipeline-stage.md`, `context/processes/submodule-pin-bump.md`, `context/processes/pr-lifecycle.md`.</step>
       <step>Level 3 (reporting): `context/standards/validation-gates.md`, `context/templates/evidence-report.md`.</step>
-      <step>For implementation facts, pin policy, provider wiring, and repo-specific operational guidance, read the checkout first (source, tests, `docs/`) and take pin versions from `runtime/trt-rtx-ep.manifest.json`; use `trackdub-gpu-docs` for offline TensorRT-RTX / ORT / Windows ML lookups. Treat vendor docs as upstream reference, not pin policy.</step>
+      <step>For implementation facts, pin policy, provider wiring, and repo-specific operational guidance, read the checkout first (source, tests, `docs/`) and take TensorRT-RTX / EP ABI pins from `runtime/trt-rtx-ep.manifest.json` and the ONNX Runtime pin from `Directory.Packages.props`; use `trackdub-gpu-docs` for offline TensorRT-RTX / ORT / Windows ML lookups. Treat vendor docs as upstream reference, not pin policy.</step>
       <step>For third-party libraries outside the corpus, retrieve upstream documentation with Context7 and verify it against live code. Context retrieval is handled in-house; do not route it to an undefined subagent.</step>
       <step>Do not load context the request does not need. Context is a budget, not a ritual.</step>
     </process>
