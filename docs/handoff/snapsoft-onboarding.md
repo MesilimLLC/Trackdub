@@ -259,7 +259,7 @@ No image build depends on the GPU: CI builds the `server` image on a GPU-less ru
 warm in step 3 is tied to the GPU model and driver. Model seeding is hash-verified downloads and can run anywhere.
 
 `scripts/docker/prepare-gpu-worker-host.sh` runs steps 2 to 4 in one go once step 1 is done and the checkout is at
-the image's commit: it checks the host, pulls `TRACKDUB_IMAGE` (an immutable `sha-<commit>-server` tag or digest),
+the image's commit: it checks the host, pulls `TRACKDUB_IMAGE` (a `sha-<commit>-server` or `container-vX.Y.Z-server` tag, or a digest),
 seeds both POC model sets, runs the in-container GPU check, `providers list` and `trackdub doctor`, and
 hash-verifies every POC model, stopping at the first failure. Snapshot the AMI or the EBS volume after it prints
 `READY`. It skips the TensorRT warm unless `TRACKDUB_WARM_ENGINES=1`: the presets run every stage on CUDA, so

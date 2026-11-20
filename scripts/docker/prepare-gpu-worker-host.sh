@@ -53,8 +53,9 @@ owner="$(stat -c '%u' "$DATA_ROOT")"
 step "2/5 Worker image"
 image="${TRACKDUB_IMAGE:-}"
 [[ -n "$image" ]] || fail "Set TRACKDUB_IMAGE to the server image, for example ghcr.io/mesilimllc/trackdub:sha-<commit>-server."
-if [[ "$image" != *@sha256:* && "$image" != *:sha-*-server && "${TRACKDUB_ALLOW_MUTABLE_IMAGE:-}" != 1 ]]; then
-  fail "TRACKDUB_IMAGE=$image is a moving tag. Pin sha-<commit>-server or a digest so the snapshot matches one build, or set TRACKDUB_ALLOW_MUTABLE_IMAGE=1."
+if [[ "$image" != *@sha256:* && "$image" != *:sha-*-server && "$image" != *:container-v*-server \
+  && "${TRACKDUB_ALLOW_MUTABLE_IMAGE:-}" != 1 ]]; then
+  fail "TRACKDUB_IMAGE=$image is a moving tag. Pin sha-<commit>-server, container-vX.Y.Z-server or a digest so the snapshot matches one build, or set TRACKDUB_ALLOW_MUTABLE_IMAGE=1."
 fi
 export TRACKDUB_IMAGE="$image"
 mkdir -p "$REPO_ROOT/docker/input"

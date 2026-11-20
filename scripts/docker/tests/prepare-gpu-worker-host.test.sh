@@ -76,6 +76,9 @@ grep -q 'Engines: warmed for this GPU and driver only' "$TEST_ROOT/output"
 TRACKDUB_IMAGE=ghcr.io/mesilimllc/trackdub:main-server expect_failure 'moving tag' 'is a moving tag'
 ! grep -q ' pull ' "$TEST_LOG"
 TRACKDUB_IMAGE='' expect_failure 'missing image' 'Set TRACKDUB_IMAGE'
+# A release tag names one build, so it is accepted without the mutable-image opt-in.
+TRACKDUB_IMAGE=ghcr.io/mesilimllc/trackdub:container-v0.1.0-server run || { cat "$TEST_ROOT/output" >&2; exit 1; }
+grep -q '^READY: ghcr.io/mesilimllc/trackdub:container-v0.1.0-server$' "$TEST_ROOT/output"
 FAKE_DATA_UID=0 expect_failure 'data root ownership' 'not 10001'
 ! grep -q ' pull ' "$TEST_LOG"
 FAKE_RUNTIMES='{"runc":{}}' expect_failure 'nvidia runtime' 'no nvidia runtime'
