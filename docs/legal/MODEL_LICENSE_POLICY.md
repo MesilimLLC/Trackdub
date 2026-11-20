@@ -110,7 +110,11 @@ Rules:
     `commercial_allowed`, `redistribution_allowed` and a pinned `sha256` hold,
     and `commercial_use_verified` is false. Translation routing and
     provisioning, lip-synthesis, starter packs, DeepFilterNet and the model
-    inventory now gate on that combination. The download and model-manager
-    selection paths still key on `commercial_allowed` and `can_auto_download`
-    and do not check the gate, so no entry may be added to the bundled
-    manifest or the downloadable catalog until they enforce it.
+    inventory now gate on that combination. The model download orchestrator
+    refuses any model that is not `commercial_allowed` and either verified or
+    risk-accepted, and the model inventory, runtime bootstrap status and the
+    CLI and TUI download-all lists only offer auto-download for models that
+    pass the same check. Importing a model file by hand is not gated, and the
+    runtime planner still allows an explicitly requested alias outside its
+    automatic ranking; an accepted-risk model is therefore opt-in and never
+    selected automatically.
