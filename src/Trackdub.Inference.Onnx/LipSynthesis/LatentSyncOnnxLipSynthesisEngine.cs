@@ -483,6 +483,6 @@ public sealed class LatentSyncOnnxLipSynthesisEngine(
 
     internal static bool IsExperimentalFromEntry(BundledModelManifestEntry entry) =>
         entry.Lane != ModelLane.Commercial
-        || !entry.CommercialUseVerified
+        || !entry.CommercialSafeMode
         || !entry.CommercialAllowed;
 }

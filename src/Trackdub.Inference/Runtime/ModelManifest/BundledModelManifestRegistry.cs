@@ -304,21 +304,27 @@ public sealed class BundledModelManifestRegistry
         };
     }
 
+    private static bool HasMatchingGovernance(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>
+        existing.Task.Equals(incoming.Task, StringComparison.OrdinalIgnoreCase) &&
+        existing.EngineFamily.Equals(incoming.EngineFamily, StringComparison.OrdinalIgnoreCase) &&
+        existing.Lane == incoming.Lane &&
+        HasMatchingLicensing(existing, incoming) &&
+        existing.VoiceCloning == incoming.VoiceCloning &&
+        existing.Deprecated == incoming.Deprecated;
+
+    private static bool HasMatchingLicensing(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>
+        existing.License.Equals(incoming.License, StringComparison.OrdinalIgnoreCase) &&
+        existing.CommercialAllowed == incoming.CommercialAllowed &&
+        existing.RedistributionAllowed == incoming.RedistributionAllowed &&
+        existing.RequiresAttribution == incoming.RequiresAttribution &&
+        existing.RequiresUserConsent == incoming.RequiresUserConsent;
+
     private static BundledModelManifestEntry MergeEntry(
         BundledModelManifestEntry existing,
         BundledModelManifestEntry incoming,
         string incomingManifestPath)
     {
-        if (!existing.Task.Equals(incoming.Task, StringComparison.OrdinalIgnoreCase) ||
-            !existing.EngineFamily.Equals(incoming.EngineFamily, StringComparison.OrdinalIgnoreCase) ||
-            existing.Lane != incoming.Lane ||
-            !existing.License.Equals(incoming.License, StringComparison.OrdinalIgnoreCase) ||
-            existing.CommercialAllowed != incoming.CommercialAllowed ||
-            existing.RedistributionAllowed != incoming.RedistributionAllowed ||
-            existing.RequiresAttribution != incoming.RequiresAttribution ||
-            existing.RequiresUserConsent != incoming.RequiresUserConsent ||
-            existing.VoiceCloning != incoming.VoiceCloning ||
-            existing.Deprecated != incoming.Deprecated)
+        if (!HasMatchingGovernance(existing, incoming))
         {
             throw new InvalidOperationException(
                 $"Generated manifest '{incomingManifestPath}' cannot merge model '{incoming.ModelId}' because its governance metadata does not match the base entry.");

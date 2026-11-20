@@ -200,8 +200,12 @@ public sealed record ModelInventoryEntry(
     ModelOptimizationAvailability? OptimizationAvailability = null,
     IReadOnlyList<ModelOptimizedVariantInfo>? OptimizedVariants = null,
     IReadOnlyList<string>? Aliases = null,
-    IReadOnlyList<ModelLanguagePair>? LanguagePairs = null)
+    IReadOnlyList<ModelLanguagePair>? LanguagePairs = null,
+    bool RiskAccepted = false)
 {
+    // RiskAccepted is only set from a manifest that passed the loader's eligibility checks (ModelRiskAcceptanceReader).
+    public bool CommercialClearance => CommercialUseVerified || RiskAccepted;
+
     public IReadOnlyList<ModelOptimizedVariantInfo> OptimizedVariants { get; init; } = OptimizedVariants ?? [];
 
     public IReadOnlyList<string> Aliases { get; init; } = Aliases ?? [];

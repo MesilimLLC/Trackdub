@@ -96,6 +96,7 @@ public sealed class ModelInventoryService(
             License: manifest.License,
             CommercialAllowed: manifest.CommercialAllowed,
             CommercialUseVerified: manifest.CommercialUseVerified,
+            RiskAccepted: manifest.RiskAcceptance is not null,
             State: state,
             FileSizeBytes: fileSize,
             CachedAtUtc: cacheRecord?.CachedAtUtc,
