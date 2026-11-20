@@ -1,3 +1,4 @@
+using Trackdub.Domain;
 using Trackdub.Inference.Runtime.ModelManifest;
 
 namespace Trackdub.Inference.Runtime.Planning;
@@ -158,6 +159,37 @@ internal sealed class RuntimePlannerRankingStrategy(BundledModelManifestRegistry
             .Where(candidate => ManifestEntryMatchesPreferredAlias(candidate.Entry, preferredModelAlias))
             .ToArray();
     }
+
+    /// <summary>
+    /// Drops entries the machine cannot run automatically: the declared <c>min_vram_mb</c> is not met (no GPU, or less
+    /// dedicated VRAM), or the engine family is verified on NVIDIA only and the GPU is not NVIDIA. An automatic choice then
+    /// falls back to the next-ranked model. A request that names a model by alias is honoured as asked, and if no entry
+    /// would remain the ranking is kept rather than leaving the stage with nothing to plan.
+    /// </summary>
+    public static RankedManifestEntry[] FilterEntriesTheHardwareCanRun(
+        StageRuntimePlanningRequest request,
+        StageRuntimeRequirements requirements,
+        HardwareProfile hardware,
+        RankedManifestEntry[] rankedEntries)
+    {
+        if (request.NormalizedPreferredModelAlias is not null)
+        {
+            return rankedEntries;
+        }
+
+        RankedManifestEntry[] runnable =
+            [.. rankedEntries.Where(candidate => CanRunAutomatically(candidate.Entry, requirements, hardware))];
+        return runnable.Length > 0 ? runnable : rankedEntries;
+    }
+
+    private static bool CanRunAutomatically(BundledModelManifestEntry entry, StageRuntimeRequirements requirements, HardwareProfile hardware) =>
+        MeetsMinimumVram(entry, hardware) && (!RequiresNvidia(entry, requirements) || hardware.NvidiaGpuArchitecture != NvidiaGpuArchitectureBucket.Unknown);
+
+    private static bool MeetsMinimumVram(BundledModelManifestEntry entry, HardwareProfile hardware) =>
+        entry.MinVramMb <= 0 || (hardware.HasGpu && hardware.DedicatedVramMb >= entry.MinVramMb);
+
+    private static bool RequiresNvidia(BundledModelManifestEntry entry, StageRuntimeRequirements requirements) =>
+        requirements.NvidiaOnlyAutomaticEngineFamilies?.Contains(entry.EngineFamily, StringComparer.OrdinalIgnoreCase) == true;
 
     public static RankedManifestEntry[] FilterTopRankedEntriesIfRequired(
         StageRuntimeRequirements requirements,
