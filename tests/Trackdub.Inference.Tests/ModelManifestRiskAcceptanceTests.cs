@@ -7,11 +7,13 @@ public sealed class ModelManifestRiskAcceptanceTests
     private const string ValidSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void LoadCatalog_GrantsClearanceOnlyWithRiskAcceptance(bool withRisk)
+    [InlineData("custom", true)]
+    [InlineData("custom", false)]
+    [InlineData("NVIDIA-Open-Model-License", true)]
+    [InlineData("openrail++", true)]
+    public void LoadCatalog_GrantsClearanceOnlyWithRiskAcceptance(string license, bool withRisk)
     {
-        ModelManifest manifest = Assert.Single(Load(RiskManifest("custom", verified: false, ValidSha256, withRisk)).Models);
+        ModelManifest manifest = Assert.Single(Load(RiskManifest(license, verified: false, ValidSha256, withRisk)).Models);
 
         Assert.Equal(withRisk, manifest.RiskAccepted);
         Assert.Equal(withRisk, manifest.CommercialClearance);

@@ -205,7 +205,11 @@ public sealed record ModelInventoryEntry(
 {
     public bool CommercialClearance => CommercialUseVerified || (RiskAccepted && IsRiskEligible);
 
-    private bool IsRiskEligible => CommercialAllowed && License.Equals("custom", StringComparison.OrdinalIgnoreCase);
+    // Mirrors RiskAcceptanceEligibility in Trackdub.Inference, which Domain cannot reference.
+    private static readonly HashSet<string> RiskEligibleLicences =
+        new(StringComparer.OrdinalIgnoreCase) { "custom", "NVIDIA-Open-Model-License", "OpenMDW-1.1", "openrail++" };
+
+    private bool IsRiskEligible => CommercialAllowed && RiskEligibleLicences.Contains(License);
 
     public IReadOnlyList<ModelOptimizedVariantInfo> OptimizedVariants { get; init; } = OptimizedVariants ?? [];
 

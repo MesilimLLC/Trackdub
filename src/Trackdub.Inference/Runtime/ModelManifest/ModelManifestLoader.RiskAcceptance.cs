@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Trackdub.Inference.Runtime.ModelManifest;
 
-// Owner-accepted risk for custom commercial licences (MODEL_LICENSE_POLICY.md, accepted-risk exception).
+// Owner-accepted risk for commercial licences with unverified provenance (MODEL_LICENSE_POLICY.md, accepted-risk exception).
 public static partial class ModelManifestLoader
 {
     private readonly record struct RiskTerms(bool CommercialUseVerified, bool Eligible);
@@ -25,10 +25,7 @@ public static partial class ModelManifestLoader
     }
 
     private static bool IsRiskAcceptanceEligible(ModelManifest manifest) =>
-        manifest.License == ModelLicenseKind.Custom &&
-        manifest.CommercialAllowed &&
-        manifest.RedistributionAllowed &&
-        manifest.Sha256 is { } sha256 && IsValidSha256(sha256);
+        RiskAcceptanceEligibility.IsEligible(manifest);
 
     private static void EnsureRiskAcceptanceAllowed(RiskTerms terms, string path, string sourceName)
     {
@@ -41,7 +38,7 @@ public static partial class ModelManifestLoader
         if (!terms.Eligible)
         {
             throw new ModelManifestValidationException(
-                $"Manifest '{sourceName}' entry '{path}' sets 'risk_acceptance', which needs a 'custom' licence, commercial_allowed and redistribution_allowed true, and a valid sha256.");
+                $"Manifest '{sourceName}' entry '{path}' sets 'risk_acceptance', which needs a licence of {RiskAcceptanceEligibility.EligibleLicenceList}, commercial_allowed and redistribution_allowed true, and a valid sha256.");
         }
     }
 

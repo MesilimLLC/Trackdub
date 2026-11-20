@@ -43,12 +43,9 @@ public sealed record ModelManifest(
 {
     public bool RiskAccepted => RiskAcceptance is not null;
 
-    // The commercial clearance the product gates on: either verified, or an owner-accepted risk on a custom
-    // licence that explicitly grants commercial use (MODEL_LICENSE_POLICY.md, accepted-risk exception).
-    public bool CommercialClearance =>
-        CommercialUseVerified ||
-        (RiskAccepted && CommercialAllowed && RedistributionAllowed &&
-         License == ModelLicenseKind.Custom && !string.IsNullOrWhiteSpace(Sha256));
+    // The commercial clearance the product gates on: either verified, or an owner-accepted risk on a licence that
+    // explicitly grants commercial use (MODEL_LICENSE_POLICY.md, accepted-risk exception).
+    public bool CommercialClearance => RiskAcceptanceEligibility.IsCleared(this);
 
     public bool CommercialSafeMode => CommercialClearance;
 
