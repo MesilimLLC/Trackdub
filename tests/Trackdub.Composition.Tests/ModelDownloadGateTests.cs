@@ -56,7 +56,7 @@ public sealed class ModelDownloadGateTests : IDisposable
         ModelDownloadResult result = await orchestrator.DownloadAsync("example/model", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(refused, result.FailureReason?.Contains(RefusalText, StringComparison.Ordinal) ?? false);
-        Assert.True(!refused || ((CountingDownloader)downloader).Calls == 0);
+        Assert.Equal(refused, ((CountingDownloader)downloader).Calls == 0);
     }
 
     [Theory]

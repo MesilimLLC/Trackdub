@@ -80,6 +80,34 @@ public sealed partial class TranslationLanguageRouterTests
     }
 
     [Fact]
+    public async Task ResolveRouteAsync_NeverAutoSelectsARiskAcceptedModelButHonoursItsAlias()
+    {
+        // MODEL_LICENSE_POLICY.md: an accepted-risk model is opt-in and never selected automatically.
+        using var workspace = CreateWorkspace();
+        BundledModelManifestRegistry registry = workspace.WriteManifest(
+            CreateTranslationSpec("test/opus-mt-en-es", ["en-es"], "manifest-models/opus-en-es"));
+        registry.AddCatalogEntries([registry.Entries.Single() with
+        {
+            ModelId = "test/opus-mt-en-it-risk",
+            Aliases = ["en-it-risk"],
+            LanguageCoverage = new ModelLanguageCoverage([], [], [new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("en", "it")]),
+            CommercialAllowed = true,
+            CommercialUseVerified = false,
+            RiskAcceptance = new ModelRiskAcceptance("record", ["a", "b", "c", "d"], "owner", "2026-11-19"),
+            DownloadFiles = ["onnx/encoder_model.onnx"]
+        }]);
+        var router = CreateRouter(
+            registry,
+            new RouterSettings(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }));
+
+        TranslationRouteSelection automatic = await router.ResolveRouteAsync("en", "it", CancellationToken.None);
+        TranslationRouteSelection explicitAlias = await router.ResolveRouteAsync("en", "it", CancellationToken.None, preferredModelAlias: "en-it-risk");
+
+        Assert.NotEqual(TranslationPreparationStatus.DownloadRequired, automatic.Status);
+        AssertDownloadRequired(explicitAlias, "test/opus-mt-en-it-risk");
+    }
+
+    [Fact]
     public void WriteManifest_WhenDirectTranslationPairsAreMissing_ThrowsValidationException()
     {
         using var workspace = CreateWorkspace();

@@ -116,5 +116,7 @@ Rules:
     CLI and TUI download-all lists only offer auto-download for models that
     pass the same check. Importing a model file by hand is not gated, and the
     runtime planner still allows an explicitly requested alias outside its
-    automatic ranking; an accepted-risk model is therefore opt-in and never
-    selected automatically.
+    automatic ranking. Automatic choices (the planner's ranking, the default
+    Opus translation pick and the translation router when no model is named)
+    consider only verified models, so an accepted-risk model is opt-in by
+    explicit alias and never selected automatically.
