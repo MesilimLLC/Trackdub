@@ -437,15 +437,19 @@ public sealed class StemSeparationStageHandler(
         return $"{baseProvenance};{string.Join(';', entries)}";
     }
 
-    // Stems from any engine other than Hush are labelled Spleeter, the current separator.
+    // Stems from any engine other than Hush or SAM-Audio are labelled Spleeter, the default separator.
     private static string ResolveBaseProvenance(StemSeparationResult result, ArtifactKind kind)
     {
         string engine = TryGetMetadataValue(result, "model", out string? model) &&
                         model.Equals("hush-dialogue", StringComparison.OrdinalIgnoreCase)
             ? "hush-dialogue"
-            : "spleeter";
+            : IsSamAudio(result) ? "sam-audio" : "spleeter";
         return $"generated-{engine}-{StemProvenanceName(kind)}";
     }
+
+    private static bool IsSamAudio(StemSeparationResult result) =>
+        TryGetMetadataValue(result, "engine_family", out string? family) &&
+        family.Equals("sam-audio", StringComparison.OrdinalIgnoreCase);
 
     private static string StemProvenanceName(ArtifactKind kind) =>
         kind switch

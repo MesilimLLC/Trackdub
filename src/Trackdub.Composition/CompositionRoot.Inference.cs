@@ -59,6 +59,7 @@ using Trackdub.Inference.Onnx.Dnnl;
 using Trackdub.Inference.Onnx.Chatterbox;
 using Trackdub.Inference.Onnx.CosyVoice;
 using Trackdub.Inference.Onnx.SepFormer;
+using Trackdub.Inference.Onnx.SamAudio;
 using Trackdub.Inference.Onnx.Spleeter;
 using Trackdub.Inference.Onnx.Kokoro;
 using Trackdub.Inference.Onnx.Qwen3Tts;
@@ -250,6 +251,8 @@ public static partial class CompositionRoot
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IAudioTranscriptionEngineAdapter, ParakeetTdtOnnxAudioTranscriptionEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ISpeakerDiarizationEngineAdapter, SortFormerDiarizationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStemSeparationEngineAdapter, SpleeterStemSeparationEngine>());
+        // Opt-in only: planned when a request names the sam-audio alias, never by automatic ranking.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IStemSeparationEngineAdapter, SamAudioStemSeparationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IOverlapRescueEngineAdapter, SepFormerOverlapRescueEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, OpusMtTranslationEngine>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ITranslationEngineAdapter, MadladTranslationEngine>());
