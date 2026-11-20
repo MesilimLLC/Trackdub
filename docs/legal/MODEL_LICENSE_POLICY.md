@@ -108,7 +108,9 @@ Rules:
     `commercial_use_verified || risk_acceptance`, and the loader rejects
     `risk_acceptance` unless the licence is commercial-capable,
     `commercial_allowed`, `redistribution_allowed` and a pinned `sha256` hold,
-    and `commercial_use_verified` is false. The download, inventory and
-    model-manager paths still key on `commercial_use_verified` alone, so they
-    stay closed to accepted-risk entries until each is extended; no entry may
-    be added to the bundled manifest before that.
+    and `commercial_use_verified` is false. Translation routing and
+    provisioning, lip-synthesis, starter packs, DeepFilterNet and the model
+    inventory now gate on that combination. The download and model-manager
+    selection paths still key on `commercial_allowed` and `can_auto_download`
+    and do not check the gate, so no entry may be added to the bundled
+    manifest or the downloadable catalog until they enforce it.
