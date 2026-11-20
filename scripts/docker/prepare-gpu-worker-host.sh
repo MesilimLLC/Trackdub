@@ -20,6 +20,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 DATA_ROOT="${TRACKDUB_DATA_ROOT:-/mnt/trackdub-data}"
+export TRACKDUB_DATA_ROOT="$DATA_ROOT"
 DOCTOR_TIMEOUT="${TRACKDUB_DOCTOR_TIMEOUT:-600}"
 CONTAINER_UID=10001
 

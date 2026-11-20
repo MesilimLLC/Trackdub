@@ -15,5 +15,5 @@ services:
       target: server
     volumes:
       - type: bind
-        source: /mnt/trackdub-data
+        source: "${TRACKDUB_DATA_ROOT:-/mnt/trackdub-data}"
         target: /data

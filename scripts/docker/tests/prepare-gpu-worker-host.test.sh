@@ -6,6 +6,9 @@ TEST_ROOT="$(mktemp -d)"
 cleanup() { rm -rf -- "$TEST_ROOT"; }
 trap cleanup EXIT
 
+# Real docker CLI, if present, for offline `compose config` checks. The stub below shadows it on PATH.
+REAL_DOCKER="$(command -v docker || true)"
+
 # Run the real host preparation script with inert docker, nvidia-smi and stat. No Docker daemon or GPU is used.
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/data"
 cat > "$TEST_ROOT/bin/docker" <<'MOCK'
@@ -91,5 +94,21 @@ FAKE_DOCTOR_STATUS=none FAKE_DOCTOR_EXIT=125 expect_failure 'compose failure' 't
 
 TRACKDUB_IMAGE=ghcr.io/mesilimllc/trackdub:main-server TRACKDUB_ALLOW_MUTABLE_IMAGE=1 run \
   || { cat "$TEST_ROOT/output" >&2; exit 1; }
+
+# The EBS mount must reach the container's /data, both by default and when TRACKDUB_DATA_ROOT is set.
+if [[ -n "$REAL_DOCKER" ]] && "$REAL_DOCKER" compose version >/dev/null 2>&1; then
+  compose_source() {
+    (cd "$REPO_ROOT" && env TRACKDUB_IMAGE="$TRACKDUB_IMAGE" "$@" "$REAL_DOCKER" compose \
+      -f docker-compose.yml -f docker-compose.aws.yml config --format json) \
+      | python3 -c 'import json, sys
+volumes = json.load(sys.stdin)["services"]["trackdub"]["volumes"]
+print(next(v["source"] for v in volumes if v["target"] == "/data"))'
+  }
+  test "$(compose_source env -u TRACKDUB_DATA_ROOT)" = /mnt/trackdub-data
+  test "$(compose_source env TRACKDUB_DATA_ROOT="$TEST_ROOT/data")" = "$TEST_ROOT/data"
+  echo "compose /data bind source follows TRACKDUB_DATA_ROOT"
+else
+  echo "docker compose not installed; skipping the /data bind source check" >&2
+fi
 
 echo "prepare-gpu-worker-host tests passed"
