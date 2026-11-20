@@ -12,6 +12,10 @@ namespace Trackdub.Inference.Onnx.Tests;
 //   GENERATE_MEL_GOLDENS=1 dotnet test --filter MelGoldenGenerator
 // Analytic expectations (HTK mel centers, silence floors) are computed independently
 // in this file and are not derived from the golden file.
+//
+// Shares a collection with NemotronAsrMelFeatureExtractorTests because the Nemotron tests
+// here construct extractors, which bumps the static filterbank build counter that test asserts on.
+[Collection("NemotronMelFilterBankBuildCount")]
 public sealed class MelGoldenTests
 {
     private const int SampleRate = 16_000;
