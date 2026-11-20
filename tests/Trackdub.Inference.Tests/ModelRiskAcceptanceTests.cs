@@ -76,6 +76,20 @@ public sealed class ModelRiskAcceptanceTests
     public void Incomplete_block_is_rejected(string block) =>
         AssertRejected(new Entry { Block = $"\"risk_acceptance\": {block}," }, "risk_acceptance");
 
+    [Fact]
+    public void Merge_comparison_accepts_identical_records_and_rejects_changed_or_missing_ones()
+    {
+        ModelRiskAcceptance baseRecord = new("record", ["a", "b"], "owner", "2026-11-19");
+
+        Assert.True(ModelRiskAcceptanceReader.SameAcceptance(null, null));
+        Assert.True(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, new("record", ["a", "b"], "owner", "2026-11-19")));
+        Assert.False(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, null));
+        Assert.False(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, baseRecord with { Owner = "someone" }));
+        Assert.False(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, baseRecord with { Date = "2026-11-20" }));
+        Assert.False(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, baseRecord with { DecisionRecord = "other" }));
+        Assert.False(ModelRiskAcceptanceReader.SameAcceptance(baseRecord, baseRecord with { AcceptedRisks = ["a"] }));
+    }
+
     private static void AssertRejected(Entry entry, string expected)
     {
         string path = WriteManifest(entry);

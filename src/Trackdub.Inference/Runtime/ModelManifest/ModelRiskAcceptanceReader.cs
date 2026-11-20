@@ -41,12 +41,18 @@ internal static class ModelRiskAcceptanceReader
         BundledModelManifestEntry incoming,
         string incomingManifestPath)
     {
-        if ((existing.RiskAcceptance is null) != (incoming.RiskAcceptance is null))
+        if (!SameAcceptance(existing.RiskAcceptance, incoming.RiskAcceptance))
         {
             throw new InvalidOperationException(
                 $"Generated manifest '{incomingManifestPath}' cannot merge model '{incoming.ModelId}' because its risk_acceptance does not match the base entry.");
         }
     }
+
+    internal static bool SameAcceptance(ModelRiskAcceptance? left, ModelRiskAcceptance? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : (left.DecisionRecord, left.Owner, left.Date) == (right.DecisionRecord, right.Owner, right.Date) &&
+              left.AcceptedRisks.SequenceEqual(right.AcceptedRisks, StringComparer.Ordinal);
 
     private static ModelRiskAcceptance Read(JsonElement block, ManifestLocation location)
     {
