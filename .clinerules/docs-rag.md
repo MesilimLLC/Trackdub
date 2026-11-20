@@ -2,7 +2,7 @@
 
 Hosted MCP server `trackdub-docs-rag` answering "how does X actually work at
 Trackdub" from first-party docs + pin-accurate vendor docs. Spec:
-`tools/docs-rag/SPEC.md`. Corpus: ~380 docs, Cloudflare AI Search over R2. Kept current by `.github/workflows/docs-rag-sync.yml`.
+`tools/docs-rag/SPEC.md`. Corpus: Cloudflare AI Search over R2 (no automated sync from this repo; see SPEC).
 
 Tools: `search_trackdub_docs`, `ask_trackdub_docs`, `get_trackdub_doc`.
 

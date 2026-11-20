@@ -4,7 +4,7 @@ Version: 1.4 (2026-10-01)
 Status: Live
 Endpoint: `https://trackdub-docs-rag.trackdub.workers.dev`
 Owner: Tony Thompson
-Code: `api.trackdub/src/docs-rag/` (Worker), `Trackdub/tools/docs-rag/` (ingest)
+Code: `api.trackdub/src/docs-rag/` (Worker), `Trackdub/tools/docs-rag/corpus.v1.json` (manifest)
 
 ## 1. What it is
 
@@ -50,7 +50,7 @@ R2 bucket `trackdub-docs-corpus` contains **197 uploaded documents**. Instance
 `trackdub-docs` indexes them with `@cf/qwen/qwen3-embedding-0.6b`, hybrid search
 and reranking, 24h scheduled sync, and a job request after successful uploads.
 An uploaded object or ended job does not prove the index is current; inspect
-item status and metadata as well. See [HANDOFF.md](HANDOFF.md) for dated verification.
+item status and metadata in the Cloudflare dashboard when needed.
 
 ### Instance settings
 
@@ -96,77 +96,69 @@ whisper (genai+onnx), qwen (asr/instruct/tts), phi-genai, kokoro, chatterbox,
 cosyvoice, opus-mt, madlad, nemotron-asr, sortformer, spleeter, silero-vad,
 kokoro/qwen3-tts (HF cards), olive recipes. **Known thin spots**: Silero VAD
 upstream wiki, DeepFilterNet3, SepFormer, CosyVoice/Chatterbox HF cards
-(401-anonymous), LatentSync. Add to `corpus.v1.json` `vendors` + sync.
+(401-anonymous), LatentSync. Add to `corpus.v1.json` `vendors` and refresh the hosted corpus manually.
 
 ### Keeping it fresh
 
-From the Trackdub repo root:
+The Trackdub repo no longer ships automated corpus ingest (the former
+`.github/workflows/docs-rag-sync.yml` and `sync_corpus.py` tooling were removed).
+`corpus.v1.json` remains the manifest of intended sources for agents and for
+`tools/mcp-trackdub-gpu-docs`. Refreshing the live R2 bucket and AI Search index
+is manual ops in `api.trackdub` / Cloudflare when Tony chooses to run it.
 
-```bash
-python tools/docs-rag/sync_corpus.py --upload          # fetch + upload + request reindex
-python tools/docs-rag/sync_corpus.py --upload --prune  # also delete bucket objects absent from staging
-python tools/docs-rag/sync_corpus.py --skip-fetch --upload  # repo files only + request reindex
-python tools/docs-rag/sync_corpus.py --reuse-staging --upload  # cached tree + request reindex
-```
-
-Uploads list the bucket once and skip a document whose stored size, MD5 `etag`,
-content type and custom metadata already match, so a small change re-embeds a few
-documents instead of the corpus. Re-embedding everything at once overruns Workers
-AI capacity and leaves items `outdated`.
-
-`--prune` deletes objects, so it needs a tree that is both complete and freshly
-uploaded. It is refused with `--skip-fetch`, whose repo-only tree would delete
-every vendor document; with `--reuse-staging`, because resending a cache certifies
-nothing about the current sources; and without `--upload`, because deletions run
-only after that same run's uploads succeed. Deletions take their keys from the
-list pass that drove the skips. Objects already indexed from a deleted key stay
-retrievable until the next reindex.
-
-Uploads use a temporary remote R2 binding through installed Wrangler's
-`getPlatformProxy`, with metadata attached through the R2 Workers API.
-Wrangler 4.114.0 does not implement the `r2 object put --header` option
-shown in AI Search documentation. The helper disposes its proxy and temporary
-configuration after each run; no persistent service or new credentials are needed.
-
-Automatic reindex runs only after all staged objects upload successfully.
-Refresh builds a candidate snapshot and promotes it only after required source
-staging succeeds. Missing/empty repositories and failed/empty vendor fetches exit
-nonzero without upload or reindex, preserving the previous reusable snapshot.
-`--skip-fetch` intentionally creates a repo-only snapshot; existing size limits
-still apply. `--reuse-staging` resends a cache, not a fresh source inventory.
-Upload or job-request failure exits nonzero. Job creation is asynchronous;
-verify completion separately. A timeout can occur after the job has started,
-so inspect jobs before retrying the request:
+To inspect or trigger indexing from `api.trackdub`:
 
 ```bash
 cd ../api.trackdub
 npx wrangler ai-search jobs list trackdub-docs
-# Only if no job was created:
-npx wrangler ai-search jobs create trackdub-docs
+# Dashboard -> AI Search -> trackdub-docs -> Sync
 ```
 
-From core, `node tools/docs-rag/verify_index.mjs --account <account-id> --api-root ../api.trackdub`
-performs bounded read-only source/index verification. It checks unique keys, item
-status, source/index first-party flags, indexed scope folders, chunks, sizes and
-last-seen time, refuses active or changing jobs, and requires an uncached
-canonical-symbol content canary. It does not equate job completion with metadata
-readiness or prove every chunk's bytes.
-See [README](README.md#verify-indexing-separately) for exit semantics and limits.
+Adding a vendor page — manual steps (no automated sync remains):
 
-Wrangler uses `CLOUDFLARE_API_TOKEN` or its existing OAuth login, not
-`AI_SEARCH_API_TOKEN`. Unset stale `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_API_KEY`
-overrides in the calling shell when using OAuth. No environment settings or
-credentials are changed by the sync script.
+1. Add `[id, url]` under the vendor in `corpus.v1.json` (a `{"id", "url"}`
+   object with a `gpu` block also works). This repo's manifest is the source
+   of truth; `tools/mcp-trackdub-gpu-docs` reads the same entries.
+2. Fetch the URL. Vendor pages are stored as extracted text, not HTML: keep
+   only the main content region (`article` preferred over `main` when both
+   exist), drop chrome (nav, headers/footers, sidebars, Sphinx `#` header
+   links, scripts/styles), and preserve in-content links as `[text](url)`.
+   Some vendors serve raw markdown or text (`.md` / GitHub blobs) — if the
+   body already reads as plain text, save it as-is. The old
+   `sync_corpus.py` `html_to_text` / `fetch_url` logic (deleted) is the
+   reference for the extraction rules.
+3. Normalize to `Source: <url>\n\n<text>\n`. If the UTF-8 payload exceeds
+   `corpus.v1.json` `maxBytes` (3,500,000), truncate to `maxBytes` — the
+   old staging did exactly this (byte-prefix, dropping a partial trailing
+   character).
+4. Upload to R2 bucket `trackdub-docs-corpus` at key
+   `<vendor prefix>/<source id>.md` (prefixes are e.g. `vendor/nvidia`,
+   `vendor/microsoft` — the `prefix` field on each entry in
+   `corpus.v1.json`). Content type `text/markdown; charset=utf-8` (`.json`
+   objects get `application/json`). Size must stay within `maxBytes`;
+   nothing else about the object is checked downstream.
+   Caveat: `wrangler r2 object put --header` is not implemented in
+   Wrangler 4.114.0 (documented limitation), so the CLI cannot set custom
+   metadata that way. Use the R2 Workers API (via `getPlatformProxy`, as
+   the deleted `upload_corpus.mjs` did) or an S3-compatible client that
+   sets custom metadata directly.
+5. Set metadata per this convention — the same rule the retired uploader
+   applied and the dashboard shows today:
+   - Key starts with `first-party/` → custom metadata `is_first_party: "true"`.
+   - Everywhere else (all vendor keys) → omit `is_first_party` entirely.
+   Never set it to `"false"` (the existence boost in section 3 would still
+   treat it as first-party). Changing the tokenizer or this schema requires
+   a full reindex.
+6. Index: from `api.trackdub`, `npx wrangler ai-search jobs list
+   trackdub-docs` (inspect first — a timeout may still have started the
+   job), then `npx wrangler ai-search jobs create trackdub-docs` only if
+   no job was created, or Dashboard → AI Search → `trackdub-docs` → Sync.
+   Verify the dashboard item status — an ended job does not prove the
+   index is current (section 3 preamble).
 
-Adding a vendor page: add `[id, url]` under the vendor in
-`corpus.v1.json`, run sync. Adding a new scope (agent-visible filter): update
-`DOC_SCOPES`, `FOLDER`, and the `filterForScope` switch in
-`api.trackdub/src/docs-rag/scopes.ts`, then add a scope test row.
-
-Windows notes: the script invokes Wrangler via
-`node node_modules/wrangler/bin/wrangler.js` (the `.bin` shim is POSIX-only).
-Child output streams directly to the terminal without Python decoding;
-use `PYTHONUTF8=1` for Python's own output.
+Adding a new scope (agent-visible filter): update `DOC_SCOPES`, `FOLDER`, and
+the `filterForScope` switch in `api.trackdub/src/docs-rag/scopes.ts`, then
+add a scope test row.
 
 ## 4. Agent tools
 
@@ -334,9 +326,6 @@ cd api.trackdub && npm run deploy:docs-rag
 # Health check
 curl https://trackdub-docs-rag.trackdub.workers.dev/health
 
-# Refresh corpus + automatically request reindex (from Trackdub)
-python tools/docs-rag/sync_corpus.py --upload
-
 # Inspect index state (from api.trackdub)
 npx wrangler ai-search get trackdub-docs
 npx wrangler ai-search jobs list trackdub-docs
@@ -355,13 +344,10 @@ npx wrangler ai-search jobs list trackdub-docs
 | `AI Search REST 401` in Worker logs | `AI_SEARCH_API_TOKEN` rotated/expired | Create token w/ AI Search Edit+Run, `wrangler secret put` |
 | `AutoRAGNotFoundError` | Instance name mismatch | `AI_SEARCH_INSTANCE` var must equal dashboard name |
 | Model 404 on `ask` | Model retired | `npx wrangler ai models`, update `AI_SEARCH_MODEL` |
-| Upload `WinError 193` | POSIX `.bin` shim | Fixed in script (uses `node wrangler.js`); if regressed, see section 3 |
-| Upload `UnicodeDecodeError` | cp1252 locale | Child output is inherited; run with `PYTHONUTF8=1` for Python output |
 | Reindex request HTTP 524 | Cloudflare timed out before acknowledging the request | Check `jobs list` and job logs first; the job may already have started |
 
 ## 9. Related docs in the repos
 
-- `Trackdub/tools/docs-rag/README.md` — short setup/usage
 - `Trackdub/tools/mcp-trackdub-gpu-docs/README.md` — the local v0 MCP
 - `Trackdub/docs/reference/tensorrt-rtx-ep-abi-plugin.md` — the pin this corpus is keyed to (EP ABI 0.5.0 win + linux, cu13, TRT-RTX 1.7.1)
 - `Trackdub-gated/docs/audits/2026-09-19-four-repo-audit/` — corpus includes this audit set
