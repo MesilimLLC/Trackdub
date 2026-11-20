@@ -141,7 +141,7 @@ product carries tiered features, activation, and support.
 | `Trackdub.Cloud` | Cloud job contracts, cloud presets, media validation, `IJobScheduler` seam |
 | `Trackdub.Cloud.Aws` | DynamoDB job store and S3 artifact store |
 | CPU job API (`src/`, ASP.NET) | Cognito-authenticated job API for the earlier AWS-only stack; not part of the SnapSoft POC path. See [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) §11.11 |
-| `Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (`Dockerfile.cloud-worker`) |
+| `Trackdub.CloudJobAdapter` | One-shot worker wrapper around the CLI (`Dockerfile.cloud-worker`) for the earlier AWS-only stack; not the SnapSoft POC worker, which runs the published `server` image |
 | `Trackdub.Licensing` | Neutral license validation mechanisms |
 | `Trackdub.Benchmarks` | Performance benchmarks |
 | `Trackdub.Benchmarks.DevHost` | Development host for the benchmark harness |
