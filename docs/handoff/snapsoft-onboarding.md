@@ -323,6 +323,11 @@ done
 [ "$status" -eq 0 ] && echo "all POC models verified" || echo "model verification FAILED"
 ```
 
+`doctor` exits nonzero only when a row is `fail`. In the `server` image (`TRACKDUB_GPU_PROFILE=server`) the
+rows for components that profile never uses (desktop playback natives, the TensorRT-RTX plugin, MIGraphX and the
+OpenVINO catalog EP) report `pass` with a "Not used by the server GPU profile" note instead of `warn`, so any
+remaining `warn` row is worth reading.
+
 Do not run `models verify` without `--model-id` here; on a partial cache it exits 2 by design. The loop checks every
 model and reports a failure from any of them.
 
