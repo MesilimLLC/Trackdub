@@ -79,6 +79,43 @@ public sealed partial class TranslationLanguageRouterTests
         AssertDownloadRequired(explicitAlias, "test/opus-mt-en-es");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveRouteAsync_NeverAutoRoutesARiskAcceptedModelButHonoursItsAlias(bool installed)
+    {
+        // MODEL_LICENSE_POLICY.md: an accepted-risk model is opt-in and never selected automatically, whether it still has
+        // to be downloaded or was installed through an explicit opt-in.
+        using var workspace = CreateWorkspace();
+        BundledModelManifestRegistry registry = workspace.WriteManifest(
+            CreateTranslationSpec("test/opus-mt-en-es", ["en-es"], "manifest-models/opus-en-es"));
+        registry.AddCatalogEntries([registry.Entries.Single() with
+        {
+            ModelId = "test/opus-mt-en-it-risk",
+            Aliases = ["en-it-risk"],
+            LanguageCoverage = new ModelLanguageCoverage([], [], [new Trackdub.Inference.Runtime.ModelManifest.ModelLanguagePair("en", "it")]),
+            CommercialAllowed = true,
+            CommercialUseVerified = false,
+            RiskAcceptance = new ModelRiskAcceptance("record", ["a", "b", "c", "d"], "owner", "2026-11-19"),
+            DownloadFiles = ["onnx/encoder_model.onnx"]
+        }]);
+        string cacheRoot = workspace.CreateCacheRoot("test/opus-mt-en-it-risk");
+        workspace.WriteOpusCacheFiles(cacheRoot);
+        (string ModelId, string RootPath)[] cached = installed ? [("test/opus-mt-en-it-risk", cacheRoot)] : [];
+        var router = CreateRouter(
+            registry,
+            new RouterSettings(StudioSettings.Default with { OfflineMode = false, AutoDownloadTranslationModels = true }),
+            cached);
+
+        TranslationRouteSelection automatic = await router.ResolveRouteAsync("en", "it", CancellationToken.None);
+        TranslationRouteSelection explicitAlias = await router.ResolveRouteAsync("en", "it", CancellationToken.None, preferredModelAlias: "en-it-risk");
+
+        Assert.NotEqual(TranslationPreparationStatus.DownloadRequired, automatic.Status);
+        Assert.NotEqual("test/opus-mt-en-it-risk", automatic.ModelId);
+        Assert.Equal("test/opus-mt-en-it-risk", explicitAlias.ModelId);
+        Assert.Equal(installed, explicitAlias.IsAvailable);
+    }
+
     [Fact]
     public void WriteManifest_WhenDirectTranslationPairsAreMissing_ThrowsValidationException()
     {

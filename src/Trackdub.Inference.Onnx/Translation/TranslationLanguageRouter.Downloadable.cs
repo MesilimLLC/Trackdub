@@ -23,9 +23,17 @@ public sealed partial class TranslationLanguageRouter
         return IsDownloadableEntry(entry, query);
     }
 
+    /// <summary>
+    /// A verified commercial model may be chosen automatically; a risk-accepted one only when the request names it by alias
+    /// (MODEL_LICENSE_POLICY.md: an accepted-risk model is opt-in and never selected automatically).
+    /// </summary>
+    private static bool IsCommerciallyEligible(BundledModelManifestEntry entry, RouteQuery query) =>
+        entry.CommercialAllowed &&
+        (entry.CommercialUseVerified || (entry.CommercialSafeMode && query.HasPreferredModel && !query.IsOpusMtAuto));
+
     private static bool IsDownloadableEntry(BundledModelManifestEntry entry, RouteQuery query)
     {
-        if (!entry.CommercialAllowed || !entry.CommercialSafeMode)
+        if (!IsCommerciallyEligible(entry, query))
         {
             return false;
         }

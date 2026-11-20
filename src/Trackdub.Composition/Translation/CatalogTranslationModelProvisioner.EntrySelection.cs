@@ -16,7 +16,8 @@ public sealed partial class CatalogTranslationModelProvisioner
         IEnumerable<BundledModelManifestEntry> candidates = BuildCandidates(cacheByModelId);
         if (string.IsNullOrWhiteSpace(effectiveAlias))
         {
-            return FindDefaultOpusEntry(candidates, sourceLanguage, targetLanguage);
+            // Automatic choice only among verified models: a risk-accepted model is opt-in by explicit alias.
+            return FindDefaultOpusEntry(candidates.Where(static entry => entry.CommercialUseVerified), sourceLanguage, targetLanguage);
         }
 
         return FindAliasedEntry(candidates, effectiveAlias);
