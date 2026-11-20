@@ -298,24 +298,31 @@ public sealed class BundledModelManifestRegistry
             ProviderId: model.ProviderId,
             ExpectedRuntime: model.ExpectedRuntime,
             Deprecated: model.Deprecated ?? false,
-            DeprecatedReason: model.DeprecatedReason);
+            DeprecatedReason: model.DeprecatedReason) { RiskAccepted = model.RiskAccepted };
     }
+
+    private static bool HasMatchingGovernance(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>
+        existing.Task.Equals(incoming.Task, StringComparison.OrdinalIgnoreCase) &&
+        existing.EngineFamily.Equals(incoming.EngineFamily, StringComparison.OrdinalIgnoreCase) &&
+        existing.Lane == incoming.Lane &&
+        HasMatchingLicensing(existing, incoming) &&
+        existing.VoiceCloning == incoming.VoiceCloning &&
+        existing.Deprecated == incoming.Deprecated;
+
+    private static bool HasMatchingLicensing(BundledModelManifestEntry existing, BundledModelManifestEntry incoming) =>
+        existing.License.Equals(incoming.License, StringComparison.OrdinalIgnoreCase) &&
+        existing.CommercialAllowed == incoming.CommercialAllowed &&
+        existing.RedistributionAllowed == incoming.RedistributionAllowed &&
+        existing.RequiresAttribution == incoming.RequiresAttribution &&
+        existing.RequiresUserConsent == incoming.RequiresUserConsent &&
+        existing.RiskAccepted == incoming.RiskAccepted;
 
     private static BundledModelManifestEntry MergeEntry(
         BundledModelManifestEntry existing,
         BundledModelManifestEntry incoming,
         string incomingManifestPath)
     {
-        if (!existing.Task.Equals(incoming.Task, StringComparison.OrdinalIgnoreCase) ||
-            !existing.EngineFamily.Equals(incoming.EngineFamily, StringComparison.OrdinalIgnoreCase) ||
-            existing.Lane != incoming.Lane ||
-            !existing.License.Equals(incoming.License, StringComparison.OrdinalIgnoreCase) ||
-            existing.CommercialAllowed != incoming.CommercialAllowed ||
-            existing.RedistributionAllowed != incoming.RedistributionAllowed ||
-            existing.RequiresAttribution != incoming.RequiresAttribution ||
-            existing.RequiresUserConsent != incoming.RequiresUserConsent ||
-            existing.VoiceCloning != incoming.VoiceCloning ||
-            existing.Deprecated != incoming.Deprecated)
+        if (!HasMatchingGovernance(existing, incoming))
         {
             throw new InvalidOperationException(
                 $"Generated manifest '{incomingManifestPath}' cannot merge model '{incoming.ModelId}' because its governance metadata does not match the base entry.");
@@ -712,7 +719,11 @@ public sealed record BundledModelManifestEntry(
     string? CatalogPolicyVersion = null,
     IReadOnlyDictionary<string, string?>? TargetPrefixes = null)
 {
-    public bool CommercialSafeMode => CommercialUseVerified;
+    public bool RiskAccepted { get; init; }
+
+    public bool CommercialClearance => CommercialUseVerified || RiskAccepted;
+
+    public bool CommercialSafeMode => CommercialClearance;
 }
 
 public sealed record BundledModelManifestVariant(

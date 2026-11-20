@@ -350,7 +350,7 @@ public sealed class StarterPackPresentationService(
         {
             BundledModelManifestEntry? entry = manifestRegistry.Entries
                 .FirstOrDefault(candidate => candidate.ModelId.Equals(modelId, StringComparison.OrdinalIgnoreCase));
-            return entry is null || !entry.CommercialUseVerified;
+            return entry is null || !entry.CommercialClearance;
         });
 
     private static string BuildModelManifestSafetyBlockMessage(
@@ -366,7 +366,7 @@ public sealed class StarterPackPresentationService(
                 return $"Required model '{modelId}' is not in the bundled manifest.";
             }
 
-            if (!entry.CommercialUseVerified)
+            if (!entry.CommercialClearance)
             {
                 string alias = entry.Aliases.FirstOrDefault() ?? modelId;
                 return $"License review needed: {alias} is not commercial-use verified.";

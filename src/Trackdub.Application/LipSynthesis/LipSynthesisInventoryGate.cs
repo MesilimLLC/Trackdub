@@ -33,7 +33,7 @@ public static class LipSynthesisInventoryGate
 
     /// <summary>Engine maturity is not fully verified for commercial shipping yet.</summary>
     public static bool IsExperimentalEngine(ModelInventoryEntry? entry) =>
-        entry is not { CommercialAllowed: true, CommercialUseVerified: true };
+        entry is not { CommercialAllowed: true, CommercialClearance: true };
 
     /// <summary>UI stage Run is explicit opt-in for experimental engines.</summary>
     public static bool AllowExperimentalExecution(ModelInventoryEntry? entry) =>

@@ -38,13 +38,29 @@ public sealed record ModelManifest(
     int MinVramMb = 0,
     bool SupportsPartialOffload = false,
     bool? Deprecated = null,
-    string? DeprecatedReason = null)
+    string? DeprecatedReason = null,
+    ModelRiskAcceptance? RiskAcceptance = null)
 {
-    public bool CommercialSafeMode => CommercialUseVerified;
+    public bool RiskAccepted => RiskAcceptance is not null;
+
+    // The commercial clearance the product gates on: either verified, or an owner-accepted risk on a custom
+    // licence that explicitly grants commercial use (MODEL_LICENSE_POLICY.md, accepted-risk exception).
+    public bool CommercialClearance =>
+        CommercialUseVerified ||
+        (RiskAccepted && CommercialAllowed && RedistributionAllowed &&
+         License == ModelLicenseKind.Custom && !string.IsNullOrWhiteSpace(Sha256));
+
+    public bool CommercialSafeMode => CommercialClearance;
 
     public IReadOnlyDictionary<string, string> DownloadFileHashes { get; init; } =
         DownloadFileHashes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
+
+public sealed record ModelRiskAcceptance(
+    string DecisionRecord,
+    string AcceptedBy,
+    string AcceptedOn,
+    IReadOnlyList<string> AcceptedRisks);
 
 public sealed record ModelOptimizationManifest(
     ModelOliveOptimizationProfile? Olive);

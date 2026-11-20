@@ -27,6 +27,8 @@ public sealed record DeepFilterNetModelPaths(
     bool CommercialAllowed,
     bool CommercialUseVerified)
 {
+    public bool RiskAccepted { get; init; }
+
     private const string EngineAlias = "deepfilternet3";
 
     public static DeepFilterNetModelPaths? TryResolve(BundledModelManifestRegistry? registry) =>
@@ -76,10 +78,10 @@ public sealed record DeepFilterNetModelPaths(
             Path.Join(root, "erb_dec.onnx"),
             Path.Join(root, "df_dec.onnx"),
             entry.CommercialAllowed,
-            entry.CommercialUseVerified);
+            entry.CommercialUseVerified) { RiskAccepted = entry.RiskAccepted };
     }
 
-    public bool IsCommercialSafe => CommercialAllowed && CommercialUseVerified;
+    public bool IsCommercialSafe => CommercialAllowed && (CommercialUseVerified || RiskAccepted);
 
     public bool AllFilesExist() =>
         File.Exists(EncPath) && File.Exists(ErbDecPath) && File.Exists(DfDecPath);
