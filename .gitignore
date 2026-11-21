@@ -330,3 +330,4 @@ qodana.sarif.json
 /.agents/skills/stripe-pay
 /.agents/skills/stripe-projects
 /.agents/skills/upgrade-stripe
+/.atx
