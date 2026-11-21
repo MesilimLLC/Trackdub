@@ -1,0 +1,84 @@
+using System.Text.RegularExpressions;
+
+namespace Trackdub.Application.Transcripts;
+
+/// <summary>
+/// Removes spoken fillers ("uh", "um", ...) from English source text before machine translation.
+/// The transcript itself keeps them; only the text sent to the translation engine changes.
+/// </summary>
+/// <remarks>
+/// Fillers carry no meaning to translate, lengthen the dubbed speech, and can push a greedy decoder
+/// into repeating them: MADLAD turned "thing uh out there ... uh ... uh" into hundreds of "ah".
+/// </remarks>
+public static partial class SpokenFillerFilter
+{
+    public static string StripForTranslation(string text, string? sourceLanguage)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !IsEnglish(sourceLanguage))
+        {
+            return text;
+        }
+
+        string stripped = CleanupFillerMatches(text);
+        if (!HasMeaningfulContent(stripped))
+        {
+            return text;
+        }
+
+        return RestoreLeadingCase(text, stripped);
+    }
+
+    private static string CleanupFillerMatches(string text)
+    {
+        string stripped = FillerPattern().Replace(text, " ");
+        stripped = SpaceBeforePunctuation().Replace(stripped, "$1");
+        stripped = RepeatedSpace().Replace(stripped, " ").Trim();
+        return LeadingPunctuation().Replace(stripped, string.Empty);
+    }
+
+    private static string RestoreLeadingCase(string originalText, string stripped) =>
+        StartsWithCapital(originalText) ? Capitalize(stripped) : stripped;
+
+    private static bool StartsWithCapital(string text)
+    {
+        string trimmed = text.TrimStart();
+        return trimmed.Length > 0 && char.IsUpper(trimmed[0]);
+    }
+
+    private static string Capitalize(string text) =>
+        char.IsLower(text[0]) ? char.ToUpperInvariant(text[0]) + text[1..] : text;
+
+    private static bool HasMeaningfulContent(string text)
+    {
+        foreach (char c in text)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsEnglish(string? language) =>
+        language is not null &&
+        (language.Equals("en", StringComparison.OrdinalIgnoreCase) ||
+         language.StartsWith("en-", StringComparison.OrdinalIgnoreCase) ||
+         language.StartsWith("en_", StringComparison.OrdinalIgnoreCase));
+
+    // A filler is a whole word, optionally followed by the comma a transcriber puts after it.
+    // \b alone still matches beside a hyphen, so lookarounds reject hyphen-connected forms such
+    // as "uh-uh". "err"/"ER" are excluded as ambiguous real words; only "erm"/"errm" are fillers.
+    [GeneratedRegex(@"(?<!-)\b(?:u+h+|u+m+|uhm+|e+r+m+|a+h+|h+m+|m+h*m+)\b(?!-),?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FillerPattern();
+
+    [GeneratedRegex(@"\s+([,.;:!?])")]
+    private static partial Regex SpaceBeforePunctuation();
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex RepeatedSpace();
+
+    [GeneratedRegex(@"^[,.;:]\s*")]
+    private static partial Regex LeadingPunctuation();
+}

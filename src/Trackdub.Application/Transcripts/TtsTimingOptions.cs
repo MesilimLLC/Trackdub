@@ -18,6 +18,13 @@ public sealed record TtsTimingOptions(
         EnableRubberbandStretch: false,
         RubberbandStretchThreshold: 0.15d);
 
+    /// <summary>
+    /// When true, a take that overruns its segment by more than <see cref="AutoStretchMaxOverrun"/> is
+    /// still compressed by that limit. Off by default: interactive projects leave such takes untouched
+    /// and flag them for a manual stretch, which works from the unstretched take.
+    /// </summary>
+    public bool AutoStretchToLimit { get; init; }
+
     public TtsTimingOptions Normalize() =>
         this with
         {

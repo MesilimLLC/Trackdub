@@ -19,7 +19,16 @@ public sealed record DurationAnalysisResult(
     TtsDurationSeverity Severity,
     bool IsStretchable,
     bool AutoStretchEligible,
-    bool HasSpeedLimitWarning);
+    bool HasSpeedLimitWarning)
+{
+    /// <summary>
+    /// Tempo the TTS stage applies automatically, or null for none. A take within
+    /// <see cref="TtsTimingOptions.AutoStretchMaxOverrun"/> is fitted to its segment exactly. With
+    /// <see cref="TtsTimingOptions.AutoStretchToLimit"/>, a longer one is compressed by the limit, so it
+    /// overruns less instead of not being touched at all.
+    /// </summary>
+    public double? AutoStretchTempoRatio { get; init; }
+}
 
 public sealed class DurationAnalysisService
 {
@@ -57,6 +66,15 @@ public sealed class DurationAnalysisService
                                    overrunRatio > 0d &&
                                    overrunRatio <= normalizedOptions.AutoStretchMaxOverrun;
 
+        double? autoStretchTempoRatio = autoStretchEligible
+            ? tempoRatio
+            : normalizedOptions.AutoStretchToLimit &&
+              isStretchable &&
+              overrunRatio > normalizedOptions.AutoStretchMaxOverrun &&
+              normalizedOptions.AutoStretchMaxOverrun > 0d
+                ? 1d + normalizedOptions.AutoStretchMaxOverrun
+                : null;
+
         return new DurationAnalysisResult(
             originalDurationSeconds,
             ttsDurationSeconds,
@@ -66,7 +84,10 @@ public sealed class DurationAnalysisService
             ResolveSeverity(overrunRatio, normalizedOptions),
             isStretchable,
             autoStretchEligible,
-            tempoRatio > normalizedOptions.SpeedLimitWarningRatio);
+            tempoRatio > normalizedOptions.SpeedLimitWarningRatio)
+        {
+            AutoStretchTempoRatio = autoStretchTempoRatio
+        };
     }
 
     private static TtsDurationSeverity ResolveSeverity(double overrunRatio, TtsTimingOptions options)

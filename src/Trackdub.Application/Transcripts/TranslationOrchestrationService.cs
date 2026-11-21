@@ -417,7 +417,7 @@ public sealed partial class TranslationOrchestrationService(
                 segment.SegmentIndex,
                 segment.StartSeconds,
                 segment.EndSeconds,
-                segment.Text))
+                SpokenFillerFilter.StripForTranslation(segment.Text, input.SourceLanguage)))
             .ToArray();
         IReadOnlyList<TranslationGlossaryHint> glossaryHints = glossaryTermMatcher.BuildHints(
             input.SourceLanguage,
@@ -839,7 +839,7 @@ public sealed partial class TranslationOrchestrationService(
                         context.SourceSegment.SegmentIndex,
                         context.SourceSegment.StartSeconds,
                         context.SourceSegment.EndSeconds,
-                        context.SourceSegment.Text)
+                        SpokenFillerFilter.StripForTranslation(context.SourceSegment.Text, context.SourceLanguage))
                 ],
                 PreferredModelAlias: context.Request.PreferredModelAlias,
                 PreferredExecutionProvider: context.Request.PreferredExecutionProvider?.ToString(),

@@ -91,6 +91,19 @@ internal static class PocServerZhPreset
     internal static IReadOnlyDictionary<string, string> Variants => PocServerQualityPreset.Variants;
 }
 
+/// <summary>
+/// English-to-Spanish preset for the server profile that does not use Kokoro. Kokoro runs in the Windows-only
+/// inference worker, which the Linux server image does not ship, so this preset uses the quality-tier Qwen3-TTS
+/// route instead. Host qualification and voice quality are separate acceptance steps.
+/// </summary>
+internal static class PocServerEsQwenPreset
+{
+    internal const string Name = "poc-server-es-qwen-v1";
+    internal static PipelinePreset Create() => PocServerQualityPreset.Create() with { TargetLanguage = "es" };
+    internal static IReadOnlyDictionary<string, string> Providers => PocServerQualityPreset.Providers;
+    internal static IReadOnlyDictionary<string, string> Variants => PocServerQualityPreset.Variants;
+}
+
 /// <summary>Built-in preset lookup shared by single-run and batch execution.</summary>
 internal static class PocPresets
 {
@@ -121,6 +134,14 @@ internal static class PocPresets
             preset = PocServerZhPreset.Create();
             providers = PocServerZhPreset.Providers;
             variants = PocServerZhPreset.Variants;
+            return true;
+        }
+
+        if (string.Equals(name, PocServerEsQwenPreset.Name, StringComparison.Ordinal))
+        {
+            preset = PocServerEsQwenPreset.Create();
+            providers = PocServerEsQwenPreset.Providers;
+            variants = PocServerEsQwenPreset.Variants;
             return true;
         }
 

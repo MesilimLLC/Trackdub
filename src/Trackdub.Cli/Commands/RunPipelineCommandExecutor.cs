@@ -53,6 +53,7 @@ internal sealed class PipelineRunState
     public bool NoTtsRubberbandStretch;
     public double? TtsRubberbandThreshold;
     public double? TtsAutoStretchMaxOverrun;
+    public bool TtsAutoStretchToLimit;
 }
 
 internal sealed record BatchExecutionContext(
@@ -132,6 +133,7 @@ internal static class RunPipelineCommandExecutor
         state.NoTtsRubberbandStretch = parseResult.GetValue(options.NoTtsRubberbandStretch);
         state.TtsRubberbandThreshold = parseResult.GetValue(options.TtsRubberbandThreshold);
         state.TtsAutoStretchMaxOverrun = parseResult.GetValue(options.TtsAutoStretchMaxOverrun);
+        state.TtsAutoStretchToLimit = parseResult.GetValue(options.TtsAutoStretchToLimit);
     }
 
     private static void ParseBatchInputs(ParseResult parseResult, PipelineCommandOptions options, PipelineRunState state)
@@ -333,6 +335,7 @@ internal static class RunPipelineCommandExecutor
             state.NoTtsRubberbandStretch,
             state.TtsRubberbandThreshold,
             state.TtsAutoStretchMaxOverrun,
+            state.TtsAutoStretchToLimit,
             cancellationToken).ConfigureAwait(false);
         if (timingExitCode != Program.ExitSuccess)
         {
@@ -686,6 +689,7 @@ internal static class RunPipelineCommandExecutor
                     state.TtsRubberbandStretch, state.NoTtsRubberbandStretch, state.TtsRubberbandThreshold,
                     state.TtsAutoStretchMaxOverrun) with
                 {
+                    TtsAutoStretchToLimit = state.TtsAutoStretchToLimit,
                     ResultFile = state.ResultFile,
                     ProgressFile = state.ProgressFile,
                     ExecutionProviderPreferences = presetProviders,

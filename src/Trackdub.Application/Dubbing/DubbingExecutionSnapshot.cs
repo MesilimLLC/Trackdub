@@ -157,10 +157,15 @@ internal static class DubbingExecutionSnapshot
                 snapshot["TtsTiming.AutoStretchMaxOverrun"] =
                     autoStretchMaxOverrun.ToString("G17", CultureInfo.InvariantCulture);
             }
+
+            if (ttsTiming.AutoStretchToLimit is true)
+            {
+                snapshot["TtsTiming.AutoStretchToLimit"] = bool.TrueString;
+            }
         }
 
         snapshot[TtsTimingResumeIdentity.SnapshotKey] =
-            TtsTimingResumeIdentity.Normalize(ttsTiming?.AutoStretchMaxOverrun);
+            TtsTimingResumeIdentity.Normalize(ttsTiming?.AutoStretchMaxOverrun, ttsTiming?.AutoStretchToLimit is true);
     }
 
     /// <summary>

@@ -53,7 +53,8 @@ For en→es: `--target-language es --preset poc-server-v1 --voice SPEAKER_00:ef_
 Pipeline flags go through `--pipeline-args`, for example `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"`.
 
 Options: `--instance-type` (`g6.xlarge`, `g6.2xlarge`, `g6e.xlarge`, `g6e.2xlarge`; default `g6e.xlarge`),
-`--max-minutes`, `--ami`, `--dry-run` (renders and prints the plan, uploads and launches nothing).
+`--max-minutes`, `--vram-budget-mb` (session pool VRAM admission budget; defaults to 30000 on `g6.*`, see Known
+failures), `--ami`, `--dry-run` (renders and prints the plan, uploads and launches nothing).
 
 The launcher uploads clips to `s3://<bucket>/runs/<run-id>/input/`, then tries each subnet until one has capacity.
 Clip filenames must be unique.
@@ -82,6 +83,7 @@ suggested fix where one is known.
 | `FAILED at input: could not download` | S3 read failed | Check the object exists under `input/`, rerun the launch for that clip |
 | `UPLOAD FAILED` | Results could not reach S3 after 3 tries | Results are only on the instance; the data volume is deleted at termination. Open an incident before relaunching |
 | `NO RESULT` | The pipeline exited before writing `result.json` | Read `run.log` and the clip's `progress.jsonl` |
+| `STALLED in stage 'tts'` on `g6.*` with GPU at 0% | Session pool admission budget (85% of the L4's 23 GB) is below the Qwen3-TTS reservation estimate; the wait never ends | The launcher sets `--vram-budget-mb 30000` on `g6.*` by default. If you overrode it, raise it again |
 | Launcher: `No subnet had capacity` | No g6/g6e capacity in the three zones | Retry later, or use another instance type |
 
 The export overrun is still open. The 0.35 setting in the first retry still left a 4.9 s overrun on the test clip.
