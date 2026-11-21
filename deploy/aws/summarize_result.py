@@ -14,20 +14,33 @@ OVERRUN_HINT = (
 
 
 def summarize(text, exit_code):
+    data = _parse(text, exit_code)
+    if isinstance(data, str):
+        return data
+    failed = _failed_stages(data)
+    if failed:
+        return _failed_stage_verdict(failed[0])
+    if exit_code == 0 and data.get("status") == "succeeded":
+        return "OK"
+    return f"FAILED (exit {exit_code}): {data.get('status') or 'no stage outcome recorded'}"
+
+
+def _parse(text, exit_code):
+    """Return the parsed object, or the verdict line when there is no usable result."""
     if text is None:
         return f"NO RESULT: result.json was not written (exit {exit_code})"
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         return f"NO RESULT: result.json is not valid JSON (exit {exit_code})"
+    if not isinstance(data, dict):
+        return f"NO RESULT: result.json is not a JSON object (exit {exit_code})"
+    return data
 
-    failed = [stage for stage in (data.get("result") or {}).get("stageOutcomes") or []
-              if stage.get("status") == "failed"]
-    if failed:
-        return _failed_stage_verdict(failed[0])
-    if exit_code == 0 and data.get("status") == "succeeded":
-        return "OK"
-    return f"FAILED (exit {exit_code}): {data.get('status') or 'no stage outcome recorded'}"
+
+def _failed_stages(data):
+    stages = (data.get("result") or {}).get("stageOutcomes") or []
+    return [stage for stage in stages if stage.get("status") == "failed"]
 
 
 def _failed_stage_verdict(stage):

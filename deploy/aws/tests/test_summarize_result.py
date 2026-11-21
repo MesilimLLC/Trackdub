@@ -56,6 +56,9 @@ class SummarizeResultTests(unittest.TestCase):
     def test_malformed_result_is_reported_not_raised(self):
         self.assertEqual(summarize("{not json", exit_code=1), "NO RESULT: result.json is not valid JSON (exit 1)")
 
+    def test_json_that_is_not_an_object_is_reported(self):
+        self.assertEqual(summarize("[1, 2]", exit_code=1), "NO RESULT: result.json is not a JSON object (exit 1)")
+
     def test_nonzero_exit_without_failed_stage_is_not_ok(self):
         text = json.dumps({"status": "cancelled", "result": {"stageOutcomes": []}})
 

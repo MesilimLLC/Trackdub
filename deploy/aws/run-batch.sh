@@ -102,7 +102,13 @@ run_clip() {
   start=$(date +%s)
   install -d -o 10001 -g 10001 "$JOBS_ROOT/$name"
 
-  aws s3 cp "s3://$RUN_BUCKET/$key" docker/input/in.mp4 --region "$AWS_REGION"
+  # Remove the previous clip's input first: a failed download must not let the pipeline run on it.
+  rm -f docker/input/in.mp4
+  if ! aws s3 cp "s3://$RUN_BUCKET/$key" docker/input/in.mp4 --region "$AWS_REGION"; then
+    printf '%s\tfailed\t0s\tFAILED at input: could not download %s. Fix: check the upload and rerun this clip.\n' \
+      "$name" "$key" | tee -a "$SUMMARY"
+    return 1
+  fi
   chmod 0644 docker/input/in.mp4
 
   echo "== [$(date -u +%H:%M:%S)] job $name"
@@ -119,9 +125,25 @@ run_clip() {
   printf '%s\t%s\t%ss\t%s\n' "$name" "$([ "$code" -eq 0 ] && echo ok || echo failed)" \
     "$(( $(date +%s) - start ))" "$verdict" | tee -a "$SUMMARY"
 
-  aws s3 sync "$JOBS_ROOT/$name" "$DEST/jobs/$name" --region "$AWS_REGION" || true
-  aws s3 cp "$SUMMARY" "$DEST/summary.txt" --region "$AWS_REGION" || true
+  # The data volume is deleted when the instance terminates, so an upload that never succeeds loses the
+  # clip. Retry, and count a failed upload as a failed clip.
+  if ! upload_with_retry aws s3 sync "$JOBS_ROOT/$name" "$DEST/jobs/$name" --region "$AWS_REGION"; then
+    printf '%s\tfailed\t0s\tUPLOAD FAILED: results for this clip are only on the instance.\n' "$name" | tee -a "$SUMMARY"
+    code=1
+  fi
+  upload_with_retry aws s3 cp "$SUMMARY" "$DEST/summary.txt" --region "$AWS_REGION" || true
   return "$code"
+}
+
+upload_with_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    fi
+    sleep $((attempt * 10))
+  done
+  return 1
 }
 
 failures=0
