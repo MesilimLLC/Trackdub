@@ -187,6 +187,8 @@ watch_clip() {
       # Only this clip's log lines count when naming the stage.
       stage="$(tail -n "+$log_start" "$LOG" | grep -E '^\[Started\] ' | tail -n 1 | sed 's/^\[Started\] //')"
       capture_stall_snapshot "$container"
+      # The snapshot takes up to ~40 s; a clip that finished meanwhile keeps its own result.
+      kill -0 "$pid" 2>/dev/null || return 0
       stop_clip "$pid" "$container"
       upload_stall_snapshot
       echo "$reason in stage '${stage:-unknown}'. Snapshot: stall-snapshot.txt"
