@@ -57,6 +57,7 @@ internal static class RunPipelineHandler
             request.NoTtsRubberbandStretch,
             request.TtsRubberbandThreshold,
             request.TtsAutoStretchMaxOverrun,
+            request.TtsAutoStretchToLimit,
             cancellationToken).ConfigureAwait(false);
         if (timingExitCode != Program.ExitSuccess)
         {
@@ -214,6 +215,7 @@ internal static class RunPipelineHandler
         public bool NoTtsRubberbandStretch { get; init; }
         public double? TtsRubberbandThreshold { get; init; }
         public double? TtsAutoStretchMaxOverrun { get; init; }
+        public bool TtsAutoStretchToLimit { get; init; }
     }
 
     private static async Task WriteOutcomeAsync(RunPipelineRequest request, WorkerRunOutcome outcome)

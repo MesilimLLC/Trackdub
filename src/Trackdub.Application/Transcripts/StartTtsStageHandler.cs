@@ -64,6 +64,10 @@ public sealed class StartTtsStageHandler(
 {
     private const string TtsAudioPostProcessVersion = "tts-audio-trim-v1";
 
+    // Appended to render identities only when AutoStretchToLimit is on, so identities for the default
+    // policy stay what they were and existing takes keep matching.
+    private const string AutoStretchToLimitIdentity = "auto-stretch-to-limit";
+
     private readonly DurationAnalysisService durationAnalysisService = durationAnalysisService ?? new DurationAnalysisService();
     private readonly TtsTimingOptions timingOptions = (timingOptions ?? TtsTimingOptions.Default).Normalize();
     private readonly TtsExecutionOptions executionOptions = executionOptions ?? TtsExecutionOptions.Default;
@@ -773,7 +777,7 @@ public sealed class StartTtsStageHandler(
         double? artifactDurationSeconds = rawDurationSeconds;
         DurationAnalysisResult analysis = durationAnalysisService.Analyze(sourceSegment, rawDurationSeconds, timingOptions);
 
-        if (analysis.AutoStretchEligible && analysis.TempoRatio is double tempoRatio)
+        if (analysis.AutoStretchTempoRatio is double tempoRatio)
         {
             if (audioTimeStretchService is null)
             {
@@ -788,10 +792,12 @@ public sealed class StartTtsStageHandler(
             stretchRatioApplied = tempoRatio;
             stretchMode = TtsStretchMode.Automatic;
             stretchEngine = stretchResult.Engine;
-            artifactDurationSeconds = analysis.OriginalDurationSeconds;
+            artifactDurationSeconds = analysis.AutoStretchEligible
+                ? analysis.OriginalDurationSeconds
+                : rawDurationSeconds!.Value / tempoRatio;
             if (artifactSampleRate > 0)
             {
-                artifactDurationSamples = Math.Max(1, (int)Math.Round(analysis.OriginalDurationSeconds * artifactSampleRate));
+                artifactDurationSamples = Math.Max(1, (int)Math.Round(artifactDurationSeconds.Value * artifactSampleRate));
             }
         }
 
@@ -837,7 +843,8 @@ public sealed class StartTtsStageHandler(
             timingOptions.MinimumStretchableDurationSeconds.ToString("G17", CultureInfo.InvariantCulture), "\0",
             timingOptions.EnableRubberbandStretch ? "1" : "0", "\0",
             timingOptions.RubberbandStretchThreshold.ToString("G17", CultureInfo.InvariantCulture), "\0",
-            TtsAudioPostProcessVersion);
+            TtsAudioPostProcessVersion,
+            timingOptions.AutoStretchToLimit ? "\0" + AutoStretchToLimitIdentity : string.Empty);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
     }
 
@@ -1237,7 +1244,8 @@ public sealed class StartTtsStageHandler(
             timingOptions.EnableRubberbandStretch ? "1" : "0", "\0",
             timingOptions.RubberbandStretchThreshold.ToString("G17", CultureInfo.InvariantCulture), "\0",
             TtsAudioPostProcessVersion, "\0",
-            voiceAssignmentId.ToString("D"));
+            voiceAssignmentId.ToString("D"),
+            timingOptions.AutoStretchToLimit ? "\0" + AutoStretchToLimitIdentity : string.Empty);
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return TtsTimingResumeIdentity.Append(Convert.ToHexString(hash).ToLowerInvariant(), timingOptions.AutoStretchMaxOverrun);
     }

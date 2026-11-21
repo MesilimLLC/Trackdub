@@ -36,6 +36,7 @@ internal sealed record PipelineCommandOptions(
     Option<bool> NoTtsRubberbandStretch,
     Option<double?> TtsRubberbandThreshold,
     Option<double?> TtsAutoStretchMaxOverrun,
+    Option<bool> TtsAutoStretchToLimit,
     Option<string?> ResultFile,
     Option<string?> ProgressFile);
 
@@ -81,6 +82,11 @@ internal static class RunPipelineCommandOptions
             restorePan, matchLoudness, voice, subtitleFormat, subtitleSource,
             burnIn, videoEncoder, preset, batch, inputGlob, recursive, continueOnError,
             ttsRubberband, noTtsRubberband, ttsRubberbandThreshold, ttsAutoStretchMaxOverrun,
+            new Option<bool>("--tts-auto-stretch-to-limit")
+            {
+                Description = "Compress takes that overrun by more than --tts-auto-stretch-max-overrun by that limit instead of leaving them unstretched. Use for unattended runs, where nobody stretches takes by hand.",
+                DefaultValueFactory = _ => false,
+            },
             new Option<string?>("--result-file") { Description = "Write a strict atomic machine result to a new file" },
             new Option<string?>("--progress-file") { Description = "Write dedicated JSONL progress to a new file" });
     }
@@ -121,6 +127,7 @@ internal static class RunPipelineCommandOptions
         command.Add(options.NoTtsRubberbandStretch);
         command.Add(options.TtsRubberbandThreshold);
         command.Add(options.TtsAutoStretchMaxOverrun);
+        command.Add(options.TtsAutoStretchToLimit);
     }
 
     private static Option<string?> CreateMediaOption() => new("--media")

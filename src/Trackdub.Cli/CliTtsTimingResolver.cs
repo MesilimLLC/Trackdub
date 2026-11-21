@@ -15,6 +15,7 @@ internal static class CliTtsTimingResolver
         bool noRubberbandStretch,
         double? rubberbandStretchThreshold,
         double? autoStretchMaxOverrun,
+        bool autoStretchToLimit,
         CancellationToken cancellationToken)
     {
         if (rubberbandStretchThreshold is double threshold &&
@@ -54,7 +55,7 @@ internal static class CliTtsTimingResolver
 
         TtsTimingSettings baseline = await LoadBaselineAsync(factory, cancellationToken).ConfigureAwait(false);
 
-        if (enable is null && rubberbandStretchThreshold is null && autoStretchMaxOverrun is null)
+        if (enable is null && rubberbandStretchThreshold is null && autoStretchMaxOverrun is null && !autoStretchToLimit)
         {
             // No flags: keep host/default settings as-is for this run.
             return (baseline, Program.ExitSuccess);
@@ -63,7 +64,8 @@ internal static class CliTtsTimingResolver
         var resolved = new TtsTimingSettings(
             EnableRubberbandStretch: enable ?? baseline.EnableRubberbandStretch,
             RubberbandStretchThreshold: rubberbandStretchThreshold ?? baseline.RubberbandStretchThreshold,
-            AutoStretchMaxOverrun: autoStretchMaxOverrun ?? baseline.AutoStretchMaxOverrun);
+            AutoStretchMaxOverrun: autoStretchMaxOverrun ?? baseline.AutoStretchMaxOverrun,
+            AutoStretchToLimit: autoStretchToLimit ? true : baseline.AutoStretchToLimit);
         return (resolved, Program.ExitSuccess);
     }
 

@@ -33,6 +33,11 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 {
     private const double OverrunToleranceSeconds = 0.010d;
 
+    // How far a take may start before its own segment when it is pulled back from the end of the
+    // source audio. Dubbed speech that leads the speaker by a few seconds within continuous speech
+    // is acceptable; moving it into a long silence is not.
+    internal const double MaxTailReflowLeadSeconds = 4.0d;
+
     public const double CleanAmbianceDefaultDuckingGainDb = 0d;
     public const double OriginalMixDefaultDuckingGainDb = -13d;
 
@@ -86,7 +91,7 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
         }
         foreach (TranscriptSegment segment in request.TranscriptSegments.OrderBy(static segment => segment.SegmentIndex))
         {
-            MixSpeechClip clip = BuildSpeechClip(
+            clips.Add(BuildSpeechClip(
                 segment,
                 translatedSegmentsByIndex,
                 takesBySegmentIndex,
@@ -94,18 +99,22 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                 warnings,
                 lipSyncByTakeId,
                 artifactStore,
-                selectedCandidateBySegmentId);
-            clips.Add(clip);
+                selectedCandidateBySegmentId));
+        }
 
+        ReflowTailOverrun(clips, sourceAudioEndSeconds);
+
+        foreach (MixSpeechClip clip in clips)
+        {
             if (!clip.IsSilentGap)
             {
                 double duckingLeadSeconds = NormalizeSeconds(request.DuckingLeadSeconds, 0.05d);
                 double duckingTailSeconds = NormalizeSeconds(request.DuckingTailSeconds, 0.18d);
                 duckingRegions.Add(new MixDuckRegion(
-                    segment.SegmentIndex,
-                    segment.Id,
+                    clip.SegmentIndex,
+                    clip.SegmentId,
                     Math.Max(0d, clip.StartSeconds - duckingLeadSeconds),
-                    ResolveClipDuckingEndSeconds(clip, segment.EndSeconds) + duckingTailSeconds,
+                    ResolveClipDuckingEndSeconds(clip, clip.EndSeconds) + duckingTailSeconds,
                     duckingGainDb));
 
                 if (sourceAudioEndSeconds is double sourceAudioEndSecondsValue &&
@@ -115,8 +124,8 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                 {
                     double overhangSeconds = clip.StartSeconds + takeDuration - sourceAudioEndSecondsValue;
                     warnings.Add(new MixPlanWarning(
-                        segment.SegmentIndex,
-                        segment.Id,
+                        clip.SegmentIndex,
+                        clip.SegmentId,
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
                             $"Dubbed take extends {overhangSeconds:0.###} s past the end of the source audio ({sourceAudioEndSecondsValue:0.###} s) and would be cut off at export. Stretch the take to fit, trim it, or raise the auto-stretch limit."),
@@ -146,6 +155,74 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             vocalStemArtifact?.RelativePath,
             BuildMediaClips(request));
     }
+
+    /// <summary>
+    /// Pulls takes that would run past the end of the source audio earlier, into time the preceding
+    /// takes leave unused. The renderer cuts output at the source end, so without this a take that
+    /// fits the clip overall still fails export when the last segment runs long.
+    /// </summary>
+    /// <remarks>
+    /// Walks back from the last take: each moved take sets the latest end for the one before it, which
+    /// moves too only if it would now overlap. A take moves at most <see cref="MaxTailReflowLeadSeconds"/>
+    /// and never before 0; a forward pass then keeps moved takes from overlapping a predecessor that could
+    /// not move far enough. Whatever still overhangs is reported by the caller as before.
+    /// </remarks>
+    internal static void ReflowTailOverrun(List<MixSpeechClip> clips, double? sourceAudioEndSeconds)
+    {
+        if (sourceAudioEndSeconds is not double sourceEnd)
+        {
+            return;
+        }
+
+        int[] placed = Enumerable.Range(0, clips.Count)
+            .Where(index => HasPlacedTake(clips[index]))
+            .OrderBy(index => clips[index].StartSeconds)
+            .ToArray();
+        if (placed.Length == 0)
+        {
+            return;
+        }
+
+        double[] originalStarts = placed.Select(index => clips[index].StartSeconds).ToArray();
+        double latestEnd = sourceEnd;
+        for (int k = placed.Length - 1; k >= 0; k--)
+        {
+            MixSpeechClip clip = clips[placed[k]];
+            double duration = clip.TakeDurationSeconds!.Value;
+            if (clip.StartSeconds + duration - latestEnd <= OverrunToleranceSeconds)
+            {
+                break;
+            }
+
+            double earliestStart = Math.Max(0d, clip.StartSeconds - MaxTailReflowLeadSeconds);
+            double newStart = Math.Max(earliestStart, latestEnd - duration);
+            clips[placed[k]] = clip with { StartSeconds = newStart };
+            latestEnd = newStart;
+        }
+
+        for (int k = 1; k < placed.Length; k++)
+        {
+            MixSpeechClip clip = clips[placed[k]];
+            if (clip.StartSeconds >= originalStarts[k])
+            {
+                continue;
+            }
+
+            MixSpeechClip previous = clips[placed[k - 1]];
+            double previousEnd = previous.StartSeconds + previous.TakeDurationSeconds!.Value;
+            if (clip.StartSeconds < previousEnd)
+            {
+                clips[placed[k]] = clip with { StartSeconds = Math.Min(originalStarts[k], previousEnd) };
+            }
+        }
+    }
+
+    private static bool HasPlacedTake(MixSpeechClip clip) =>
+        !clip.IsSilentGap &&
+        clip.TakeDurationSeconds is double duration &&
+        double.IsFinite(duration) &&
+        duration > 0d &&
+        double.IsFinite(clip.StartSeconds);
 
     private static IReadOnlyList<MixMediaClip>? BuildMediaClips(MixPlanBuildRequest request)
     {

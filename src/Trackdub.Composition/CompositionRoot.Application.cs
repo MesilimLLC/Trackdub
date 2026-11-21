@@ -338,7 +338,8 @@ public static partial class CompositionRoot
         {
             EnableRubberbandStretch = normalized.EnableRubberbandStretch,
             RubberbandStretchThreshold = normalized.RubberbandStretchThreshold,
-            AutoStretchMaxOverrun = normalized.AutoStretchMaxOverrun ?? TtsTimingOptions.Default.AutoStretchMaxOverrun
+            AutoStretchMaxOverrun = normalized.AutoStretchMaxOverrun ?? TtsTimingOptions.Default.AutoStretchMaxOverrun,
+            AutoStretchToLimit = normalized.AutoStretchToLimit ?? false
         };
     }
 
