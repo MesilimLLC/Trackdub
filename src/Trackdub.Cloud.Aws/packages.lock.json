@@ -13,11 +13,11 @@
       },
       "AWSSDK.S3": {
         "type": "Direct",
-        "requested": "[4.1.0, )",
-        "resolved": "4.1.0",
-        "contentHash": "uV//Txuga5jW6wIE5UXi6RaqAvc0eg76i7vmUDgK2H4yOtrSG4BxF+IdXYOu4sbPG/L6q/k2UbK5L6ptysj9oA==",
+        "requested": "[4.1.2, )",
+        "resolved": "4.1.2",
+        "contentHash": "vGRpeXIxK7uRRHzVIrp2dYDri4wwlerUutG8TG7jHMolb3hX6Zu6VVDZpmwB8AlTIZ9BKLIV+V4Oi4xEsamZsQ==",
         "dependencies": {
-          "AWSSDK.Core": "[4.1.0, 5.0.0)"
+          "AWSSDK.Core": "[4.1.1.1, 5.0.0)"
         }
       },
       "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
