@@ -425,7 +425,9 @@ public static class TranscriptWorkflowUtilities
             artifact.Provenance.Contains("model=spleeter", StringComparison.OrdinalIgnoreCase) ||
             artifact.Provenance.Contains("model=spleeter-2stems", StringComparison.OrdinalIgnoreCase) ||
             artifact.Provenance.Contains("engine_family=sepformer", StringComparison.OrdinalIgnoreCase) ||
-            artifact.Provenance.Contains("model=sepformer", StringComparison.OrdinalIgnoreCase));
+            artifact.Provenance.Contains("model=sepformer", StringComparison.OrdinalIgnoreCase) ||
+            artifact.Provenance.Contains("engine_family=sam-audio", StringComparison.OrdinalIgnoreCase) ||
+            artifact.Provenance.Contains("model=sam-audio", StringComparison.OrdinalIgnoreCase));
 
     private static bool HasDialogueIsolationUnavailableDegradation(IReadOnlyList<ProjectArtifact> artifacts) =>
         artifacts
