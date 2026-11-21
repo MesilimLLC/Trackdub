@@ -28,6 +28,7 @@ case "$1 $2" in
   "ssm get-parameter") echo "ami-test" ;;
   "ec2 describe-images") echo "/dev/sda1" ;;
   "ec2 run-instances")
+    for arg in "$@"; do [[ "$arg" == file://* ]] && cp "${arg#file://}" "$USER_DATA_COPY"; done
     if [[ "$*" == *"subnet-a"* ]]; then
       echo "InsufficientInstanceCapacity: no capacity" >&2
       exit 255
@@ -39,6 +40,7 @@ STUB
 chmod +x "$TEST_ROOT/bin/aws"
 export PATH="$TEST_ROOT/bin:$PATH"
 export AWS_LOG="$TEST_ROOT/aws.log"
+export USER_DATA_COPY="$TEST_ROOT/user-data.sh"
 
 expect_failure() {
   local name="$1" message="$2"; shift 2
@@ -60,6 +62,7 @@ expect_failure "no clips" "Give --clips-dir" "$LAUNCHER" --image ghcr.io/mesilim
 mkdir -p "$TEST_ROOT/other"
 printf 'x' > "$TEST_ROOT/other/a.MP4"
 expect_failure "duplicate basename" "share the name a.MP4" "$LAUNCHER" "${base[@]}" --clip "$TEST_ROOT/clips/a.MP4" --clip "$TEST_ROOT/other/a.MP4"
+expect_failure "bad vram budget" "--vram-budget-mb must be a positive integer" "$LAUNCHER" "${base[@]}" --vram-budget-mb 20GB
 expect_failure "unpinned tag without commit" "Pass --repo-commit" "$LAUNCHER" --image ghcr.io/mesilimllc/trackdub:container-v0.1.0-server --ghcr-user t --clip "$TEST_ROOT/clips/a.MP4"
 
 # Dry run renders the config and uploads nothing.
@@ -81,5 +84,17 @@ grep -q "runs/test-run/input/b.mp4" "$AWS_LOG"
 grep -q "runs/test-run/tools/summarize_result.py" "$AWS_LOG"
 grep -q -- "--instance-initiated-shutdown-behavior terminate" "$AWS_LOG"
 grep -q -- "HttpTokens=required" "$AWS_LOG"
+# The default g6e.xlarge keeps the detected VRAM budget.
+grep -q "SESSION_VRAM_BUDGET_MB=''$" "$USER_DATA_COPY"
+# No --voice leaves the voice empty so the pipeline pairs Qwen3 presets by speaker gender.
+grep -q "VOICE=''$" "$USER_DATA_COPY"
+
+# g6.* (L4) gets a VRAM budget above the Qwen3-TTS reservation estimate; an explicit value wins.
+"$LAUNCHER" "${base[@]}" --run-id test-l4 --instance-type g6.xlarge > /dev/null 2>&1
+grep -q "SESSION_VRAM_BUDGET_MB=30000$" "$USER_DATA_COPY"
+"$LAUNCHER" "${base[@]}" --run-id test-l4-explicit --instance-type g6.xlarge --vram-budget-mb 26000 > /dev/null 2>&1
+grep -q "SESSION_VRAM_BUDGET_MB=26000$" "$USER_DATA_COPY"
+"$LAUNCHER" "${base[@]}" --run-id test-voice --voice SPEAKER_00:qwen3:ryan > /dev/null 2>&1
+grep -q "VOICE=SPEAKER_00:qwen3:ryan$" "$USER_DATA_COPY"
 
 echo "launch-run tests passed"

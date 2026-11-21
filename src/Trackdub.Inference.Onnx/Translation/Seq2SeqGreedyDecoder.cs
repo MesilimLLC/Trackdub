@@ -19,6 +19,11 @@ namespace Trackdub.Inference.Onnx.Translation;
 /// Causal self-attention keeps the padding from influencing earlier positions, so the result matches
 /// unpadded decoding, while the engine only ever sees a handful of shapes.
 /// </para>
+/// <para>
+/// A positive <c>noRepeatNgramSize</c> blocks any token that would repeat an n-gram already generated
+/// (Hugging Face's <c>no_repeat_ngram_size</c>). Greedy decoding has no other way out of a loop: on
+/// disfluent input such as "uh ... uh" MADLAD can emit one token until <c>maxSteps</c>.
+/// </para>
 /// </remarks>
 internal static class Seq2SeqGreedyDecoder
 {
@@ -58,12 +63,13 @@ internal static class Seq2SeqGreedyDecoder
         int maxSteps,
         ExecutionProviderKind? provider,
         CancellationToken cancellationToken,
-        bool staticShapes = false) =>
+        bool staticShapes = false,
+        int noRepeatNgramSize = 0) =>
         !staticShapes && SupportsKeyValueCache(decoderSession)
             ? DecodeWithCache(decoderSession, encoderHiddenStates, encoderAttentionMask, decoderStartTokenId,
-                endOfSentenceTokenId, padTokenId, maxSteps, provider, cancellationToken)
+                endOfSentenceTokenId, padTokenId, maxSteps, provider, cancellationToken, noRepeatNgramSize)
             : DecodeWithoutCache(decoderSession, encoderHiddenStates, encoderAttentionMask, decoderStartTokenId,
-                endOfSentenceTokenId, padTokenId, maxSteps, provider, cancellationToken, staticShapes);
+                endOfSentenceTokenId, padTokenId, maxSteps, provider, cancellationToken, staticShapes, noRepeatNgramSize);
 
     private static List<long> DecodeWithCache(
         InferenceSession decoderSession,
@@ -74,7 +80,8 @@ internal static class Seq2SeqGreedyDecoder
         int padTokenId,
         int maxSteps,
         ExecutionProviderKind? provider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int noRepeatNgramSize)
     {
         var generated = new List<long>();
         var maskTensor = new DenseTensor<long>(encoderAttentionMask, [1, encoderAttentionMask.Length]);
@@ -118,9 +125,12 @@ internal static class Seq2SeqGreedyDecoder
                 }
 
                 previous = outputs;
-                int nextToken = ArgMaxLastPosition(
-                    outputs.Single(static value => value.Name == "logits").AsTensor<float>(),
-                    padTokenId);
+                Tensor<float> logits = outputs.Single(static value => value.Name == "logits").AsTensor<float>();
+                int nextToken = ArgMaxAtPosition(
+                    logits,
+                    logits.Dimensions[1] - 1,
+                    padTokenId,
+                    BannedNgramContinuations(generated, noRepeatNgramSize));
                 if (nextToken < 0 || nextToken == endOfSentenceTokenId)
                 {
                     break;
@@ -175,7 +185,8 @@ internal static class Seq2SeqGreedyDecoder
         int maxSteps,
         ExecutionProviderKind? provider,
         CancellationToken cancellationToken,
-        bool staticShapes)
+        bool staticShapes,
+        int noRepeatNgramSize)
     {
         var tokens = new List<long> { decoderStartTokenId };
         var maskTensor = new DenseTensor<long>(encoderAttentionMask, [1, encoderAttentionMask.Length]);
@@ -207,7 +218,8 @@ internal static class Seq2SeqGreedyDecoder
             int nextToken = ArgMaxAtPosition(
                 outputs.Single(static value => value.Name == "logits").AsTensor<float>(),
                 tokens.Count - 1,
-                padTokenId);
+                padTokenId,
+                BannedNgramContinuations(tokens.Skip(1).ToList(), noRepeatNgramSize));
             if (nextToken < 0 || nextToken == endOfSentenceTokenId)
             {
                 break;
@@ -242,7 +254,42 @@ internal static class Seq2SeqGreedyDecoder
     internal static int ArgMaxLastPosition(Tensor<float> logits, int padTokenId) =>
         ArgMaxAtPosition(logits, logits.Dimensions[1] - 1, padTokenId);
 
-    internal static int ArgMaxAtPosition(Tensor<float> logits, int position, int padTokenId)
+    /// <summary>
+    /// Tokens that would complete an n-gram already present in <paramref name="generated"/>, or null when
+    /// the guard is off or nothing is banned yet.
+    /// </summary>
+    internal static HashSet<int>? BannedNgramContinuations(IReadOnlyList<long> generated, int ngramSize)
+    {
+        if (ngramSize <= 0 || generated.Count < ngramSize)
+        {
+            return null;
+        }
+
+        int prefixLength = ngramSize - 1;
+        int prefixStart = generated.Count - prefixLength;
+        HashSet<int>? banned = null;
+        for (int start = 0; start + prefixLength < generated.Count; start++)
+        {
+            bool matches = true;
+            for (int offset = 0; offset < prefixLength; offset++)
+            {
+                if (generated[start + offset] != generated[prefixStart + offset])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                (banned ??= []).Add((int)generated[start + prefixLength]);
+            }
+        }
+
+        return banned;
+    }
+
+    internal static int ArgMaxAtPosition(Tensor<float> logits, int position, int padTokenId, HashSet<int>? bannedTokens = null)
     {
         int vocabularySize = logits.Dimensions[2];
         int bestToken = -1;
@@ -252,7 +299,7 @@ internal static class Seq2SeqGreedyDecoder
             ReadOnlySpan<float> row = dense.Buffer.Span.Slice(position * vocabularySize, vocabularySize);
             for (int token = 0; token < row.Length; token++)
             {
-                if (token != padTokenId && row[token] > bestValue)
+                if (token != padTokenId && row[token] > bestValue && bannedTokens?.Contains(token) != true)
                 {
                     bestValue = row[token];
                     bestToken = token;
@@ -265,7 +312,7 @@ internal static class Seq2SeqGreedyDecoder
         for (int token = 0; token < vocabularySize; token++)
         {
             float value = logits[0, position, token];
-            if (token != padTokenId && value > bestValue)
+            if (token != padTokenId && value > bestValue && bannedTokens?.Contains(token) != true)
             {
                 bestValue = value;
                 bestToken = token;

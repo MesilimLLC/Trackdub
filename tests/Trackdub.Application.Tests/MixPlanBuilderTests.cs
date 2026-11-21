@@ -16,7 +16,7 @@ using Trackdub.TestDoubles;
 
 namespace Trackdub.Application.Tests;
 
-public sealed class MixPlanBuilderTests
+public sealed partial class MixPlanBuilderTests
 {
     [Theory]
     [InlineData(StageRunStatus.Failed)]
@@ -412,9 +412,9 @@ public sealed class MixPlanBuilderTests
             ArtifactKind.TtsTake,
             "artifacts/tts/take.wav",
             createdOffsetSeconds: 2,
-            durationSeconds: 3.0d);
+            durationSeconds: 7.0d);
         TtsTake take = TtsTake.Create(context.ProjectId, context.VoiceAssignmentId, segmentIndex: segment.SegmentIndex)
-            .Complete(takeArtifact.Id, durationSamples: 72000, sampleRate: 24000, provider: "fake");
+            .Complete(takeArtifact.Id, durationSamples: 168000, sampleRate: 24000, provider: "fake");
 
         MixPlan plan = new MixPlanBuilder().Build(new MixPlanBuildRequest(
             context.ProjectId,
@@ -424,7 +424,8 @@ public sealed class MixPlanBuilderTests
             [],
             [take], StageRuns: null));
 
-        // Take starts at 8.0s and runs 3.0s, ending at 11.0s — 1.0s past the 10.0s source audio.
+        // The 7.0s take at 8.0s may move back at most 4.0s, to 4.0s, and still ends at 11.0s —
+        // 1.0s past the 10.0s source audio.
         MixPlanWarning warning = Assert.Single(plan.Warnings);
         Assert.Equal(MixPlanWarningCode.TakeExceedsSourceAudio, warning.Code);
         Assert.Equal(segment.SegmentIndex, warning.SegmentIndex);
@@ -451,9 +452,9 @@ public sealed class MixPlanBuilderTests
             ArtifactKind.TtsTake,
             "artifacts/tts/take.wav",
             createdOffsetSeconds: 2,
-            durationSeconds: 2.0d);
+            durationSeconds: 6.0d);
         TtsTake take = TtsTake.Create(context.ProjectId, context.VoiceAssignmentId, segmentIndex: segment.SegmentIndex)
-            .Complete(takeArtifact.Id, durationSamples: 48000, sampleRate: 24000, provider: "fake");
+            .Complete(takeArtifact.Id, durationSamples: 144000, sampleRate: 24000, provider: "fake");
 
         MixPlan plan = new MixPlanBuilder().Build(new MixPlanBuildRequest(
             context.ProjectId,
@@ -464,7 +465,8 @@ public sealed class MixPlanBuilderTests
             [take],
             MediaDurationSeconds: 6.0d, StageRuns: null));
 
-        // Take runs 5.0s–7.0s: inside the 10.0s source audio but 1.0s past the 6.0s media end.
+        // The 6.0s take moves back from 5.0s to 1.0s (the 4.0s limit) and runs to 7.0s: inside the
+        // 10.0s source audio but 1.0s past the 6.0s media end.
         MixPlanWarning warning = Assert.Single(plan.Warnings);
         Assert.Equal(MixPlanWarningCode.TakeExceedsSourceAudio, warning.Code);
         Assert.Contains("(6 s)", warning.Message);
@@ -564,13 +566,14 @@ public sealed class MixPlanBuilderTests
     }
 
     [Theory]
-    [InlineData(3.009d, 10d, false)]
-    [InlineData(3.011d, 10d, true)]
-    [InlineData(3d, 9d, true)]
+    [InlineData(10.009d, 10d, false)]
+    [InlineData(10.011d, 10d, true)]
+    [InlineData(10d, 9d, true)]
     public void Build_applies_overrun_tolerance_and_media_boundary(double takeDuration, double mediaDuration, bool warns)
     {
+        // The segment starts at 0, so the tail reflow has nowhere to move the take.
         TestProjectContext context = CreateContext();
-        TranscriptSegment segment = TranscriptSegment.Create(context.TranscriptRevisionId, 0, 7d, 9.5d, "Hello", context.SpeakerId);
+        TranscriptSegment segment = TranscriptSegment.Create(context.TranscriptRevisionId, 0, 0d, 9.5d, "Hello", context.SpeakerId);
         ProjectArtifact source = CreateArtifact(context, ArtifactKind.NormalizedAudio,
             ProjectArtifactPaths.NormalizedAudioRelativePath, createdOffsetSeconds: 0, durationSeconds: 10d);
         ProjectArtifact artifact = CreateArtifact(context, ArtifactKind.TtsTake,

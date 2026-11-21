@@ -34,7 +34,10 @@ internal static class UnattendedVoiceSelection
     internal static Dictionary<Guid, string>? BuildUnattendedFallbackVoiceIds(
         TranscriptProjectState state,
         string? targetLanguageCode,
-        string? preferredTtsModelAlias = null)
+        string? preferredTtsModelAlias = null,
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null,
+        IReadOnlyDictionary<Guid, string>? explicitVoiceIds = null,
+        IReadOnlySet<Guid>? excludedSpeakerIds = null)
     {
         if (state.Speakers.Count == 0)
         {
@@ -52,10 +55,60 @@ internal static class UnattendedVoiceSelection
             return null;
         }
 
-        Dictionary<Guid, string> fallbackVoiceIds = state.Speakers
-            .Where(speaker => !deliberatelyAssignedSpeakerIds.Contains(speaker.Id))
-            .ToDictionary(static speaker => speaker.Id, _ => defaultVoiceId);
+        ProjectSpeaker[] unassignedSpeakers =
+        [
+            .. state.Speakers.Where(speaker =>
+                !deliberatelyAssignedSpeakerIds.Contains(speaker.Id) &&
+                explicitVoiceIds?.ContainsKey(speaker.Id) != true &&
+                excludedSpeakerIds?.Contains(speaker.Id) != true)
+        ];
+        Dictionary<Guid, string> fallbackVoiceIds = speakerGenders is not null && Qwen3TtsDefaults.IsPresetVoiceId(defaultVoiceId)
+            ? PairQwenPresetsBySpeaker(
+                unassignedSpeakers,
+                targetLanguageCode,
+                speakerGenders,
+                ReservedPresetVoiceIds(state, explicitVoiceIds))
+            : unassignedSpeakers.ToDictionary(static speaker => speaker.Id, _ => defaultVoiceId);
         return fallbackVoiceIds.Count > 0 ? fallbackVoiceIds : null;
+    }
+
+    /// <summary>
+    /// Gives each speaker the Qwen3 preset that matches their estimated gender, preferring one native
+    /// to the target language and one no other speaker in the clip is using yet.
+    /// </summary>
+    private static Dictionary<Guid, string> PairQwenPresetsBySpeaker(
+        IEnumerable<ProjectSpeaker> speakers,
+        string? targetLanguageCode,
+        IReadOnlyDictionary<Guid, string?> speakerGenders,
+        HashSet<string> used)
+    {
+        var voiceIds = new Dictionary<Guid, string>();
+        foreach (ProjectSpeaker speaker in speakers)
+        {
+            string voiceId = Qwen3TtsDefaults.ResolvePresetVoiceId(
+                targetLanguageCode,
+                speakerGenders.GetValueOrDefault(speaker.Id),
+                used);
+            used.Add(voiceId);
+            voiceIds[speaker.Id] = voiceId;
+        }
+
+        return voiceIds;
+    }
+
+    // Presets other speakers already speak with, so an automatic speaker does not share one.
+    private static HashSet<string> ReservedPresetVoiceIds(
+        TranscriptProjectState state,
+        IReadOnlyDictionary<Guid, string>? explicitVoiceIds)
+    {
+        IEnumerable<string?> taken = state.VoiceAssignments
+            .Where(static assignment => !assignment.IsFallback)
+            .SelectMany(static assignment => new[] { assignment.VoiceVariant, assignment.VoiceModelId })
+            .Concat(explicitVoiceIds?.Values ?? []);
+        return taken
+            .Where(static voiceId => voiceId is not null && Qwen3TtsDefaults.IsPresetVoiceId(voiceId))
+            .Select(static voiceId => voiceId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string? ResolveUnattendedFallbackVoiceId(
@@ -138,6 +191,27 @@ internal static class UnattendedVoiceSelection
     }
 
     /// <summary>
+    /// True when this run will give at least one speaker a fallback Qwen3 preset, so estimating
+    /// speaker gender is worth the audio read.
+    /// </summary>
+    internal static bool WillPairQwenPresets(
+        TranscriptProjectState state,
+        DubbingSessionOptions options,
+        string? ttsModelAlias)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(options);
+        if (RequestsVoiceCloning(options))
+        {
+            return false;
+        }
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            ResolveUnattendedVoicePlan(state, options, ttsModelAlias).FallbackVoiceIds;
+        return fallbackVoiceIds?.Values.Any(Qwen3TtsDefaults.IsPresetVoiceId) == true;
+    }
+
+    /// <summary>
     /// Builds the unattended TTS request: explicit <c>--voice</c> assignments, stock Kokoro
     /// fallbacks for remaining speakers, and per-speaker source-audio cloning when
     /// <see cref="DubbingSessionOptions.UseVoiceCloning"/> is set. Cloning is skipped for
@@ -146,7 +220,8 @@ internal static class UnattendedVoiceSelection
     internal static GenerateTtsForAllSpeakersRequest BuildUnattendedTtsRequest(
         TranscriptProjectState state,
         DubbingSessionOptions options,
-        string? ttsModelAlias)
+        string? ttsModelAlias,
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
@@ -157,7 +232,7 @@ internal static class UnattendedVoiceSelection
             preferredModelAlias = VoiceCloningDefaults.ResolveDefaultCloneModelAlias(options.TargetLanguageCode);
         }
 
-        UnattendedVoicePlan voicePlan = ResolveUnattendedVoicePlan(state, options, preferredModelAlias);
+        UnattendedVoicePlan voicePlan = ResolveUnattendedVoicePlan(state, options, preferredModelAlias, speakerGenders);
         IReadOnlyDictionary<Guid, string> explicitVoiceIds = voicePlan.ExplicitVoiceIds;
         Dictionary<Guid, bool>? cloneBySpeaker = voicePlan.CloneBySpeaker;
         Dictionary<Guid, string>? fallbackVoiceIds = voicePlan.FallbackVoiceIds;
@@ -373,7 +448,8 @@ internal static class UnattendedVoiceSelection
     private static UnattendedVoicePlan ResolveUnattendedVoicePlan(
         TranscriptProjectState state,
         DubbingSessionOptions options,
-        string? preferredTtsModelAlias = null)
+        string? preferredTtsModelAlias = null,
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null)
     {
         IReadOnlyDictionary<Guid, string> explicitVoiceIds = ResolveVoiceAssignmentOverrides(
             state,
@@ -395,7 +471,17 @@ internal static class UnattendedVoiceSelection
         Dictionary<Guid, string>? fallbackVoiceIds = null;
         if (options.AutoAssignFallbackVoices)
         {
-            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(state, options.TargetLanguageCode, ttsAlias);
+            HashSet<Guid> clonedSpeakerIds = cloneBySpeaker?
+                .Where(static pair => pair.Value)
+                .Select(static pair => pair.Key)
+                .ToHashSet() ?? [];
+            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(
+                state,
+                options.TargetLanguageCode,
+                ttsAlias,
+                speakerGenders,
+                explicitVoiceIds,
+                clonedSpeakerIds);
             if (fallbackVoiceIds is not null)
             {
                 fallbackVoiceIds = fallbackVoiceIds

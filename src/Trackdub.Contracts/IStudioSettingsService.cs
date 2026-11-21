@@ -601,7 +601,8 @@ public sealed record StudioPlaybackSettings(
 public sealed record TtsTimingSettings(
     bool EnableRubberbandStretch,
     double RubberbandStretchThreshold,
-    double? AutoStretchMaxOverrun = null)
+    double? AutoStretchMaxOverrun = null,
+    bool? AutoStretchToLimit = null)
 {
     public static TtsTimingSettings Default { get; } = new(
         EnableRubberbandStretch: false,

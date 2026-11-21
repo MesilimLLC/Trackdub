@@ -19,6 +19,9 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
 {
     public const string EngineFamilyName = "madlad";
 
+    // A legitimate segment rarely repeats four tokens verbatim; a greedy loop always does.
+    internal const int NoRepeatNgramSize = 4;
+
     private readonly IRuntimePlanner runtimePlanner = runtimePlanner ?? throw new ArgumentNullException(nameof(runtimePlanner));
     private readonly BenchmarkModelPathResolver modelPathResolver = modelPathResolver ?? throw new ArgumentNullException(nameof(modelPathResolver));
 
@@ -347,7 +350,8 @@ public sealed class MadladTranslationEngine(IRuntimePlanner runtimePlanner,
             maxSteps ?? Math.Max(8, tokenizer.MaxGenerationLength),
             provider: sessionLease.SelectedProviderKind,
             cancellationToken,
-            staticShapes);
+            staticShapes,
+            NoRepeatNgramSize);
         string translatedText = tokenizer.DecodeTargetText(generatedTokens);
 
         return Task.FromResult(string.IsNullOrWhiteSpace(translatedText)

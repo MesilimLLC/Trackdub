@@ -995,11 +995,12 @@ public sealed class ExportStageHandlerTests
     {
         using var temp = new TempDirectory();
         TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
-        // Make the take overrun the source: 1.0s start + 5.5s take = 6.5s > 6.0s source.
+        // Make the take overrun the source: even moved back from 1.0s to 0, a 7.5s take ends 1.5s
+        // past the 6.0s source.
         var state = context.State;
         var artifacts = state.ProjectState.Artifacts
             .Select(artifact => artifact.Kind == ArtifactKind.TtsTake
-                ? artifact with { DurationSeconds = 5.5d }
+                ? artifact with { DurationSeconds = 7.5d }
                 : artifact)
             .ToList();
         state = state with { ProjectState = state.ProjectState with { Artifacts = artifacts } };
@@ -1033,8 +1034,8 @@ public sealed class ExportStageHandlerTests
     }
 
     [Theory]
-    [InlineData(null, 5.5d, "take-exceeds-source-audio")]
-    [InlineData(0d, 5.5d, "take-exceeds-source-audio")]
+    [InlineData(null, 7.5d, "take-exceeds-source-audio")]
+    [InlineData(0d, 7.5d, "take-exceeds-source-audio")]
     [InlineData(null, 0d, "export-error")]
     public async Task ExportAsync_probes_missing_take_duration_before_rendering(
         double? storedDuration, double probedDuration, string failureCode)
@@ -1081,7 +1082,8 @@ public sealed class ExportStageHandlerTests
                     : artifact).ToArray()
             }
         };
-        var probe = new FakeMediaProbe { Snapshot = CreateProbeSnapshot(1.5d) };
+        // The probed source is 0.5s: the 1.0s take overruns it even when moved back to 0.
+        var probe = new FakeMediaProbe { Snapshot = CreateProbeSnapshot(0.5d) };
         var renderer = new FakeMixRenderer();
         ExportStageHandler handler = CreateHandler(new FakeArtifactStore(temp.Path), renderer,
             new FakeLoudnessNormalizer(), new FakeExportRenderer(), probe,

@@ -9,6 +9,10 @@
 set -euo pipefail
 # The cost cap must be set before anything else can fail, so it has a default.
 : "${MAX_MINUTES:=180}"
+# A clip is killed after CLIP_TIMEOUT_MINUTES, or after STALL_MINUTES with no new line in run.log or the
+# clip's progress file. Either way the clip is recorded as failed and the batch moves on.
+: "${CLIP_TIMEOUT_MINUTES:=60}"
+: "${STALL_MINUTES:=12}"
 
 WORK=/opt/trackdub-e2e
 REPO_DIR="$WORK/Trackdub"
@@ -37,6 +41,7 @@ finish() {
   } > "$WORK/timings.json" || true
   aws s3 cp "$WORK/timings.json" "$DEST/timings.json" --region "$AWS_REGION" || true
   aws s3 cp "$LOG" "$DEST/run.log" --region "$AWS_REGION" || true
+  [ -f "$WORK/gpu.csv" ] && aws s3 cp "$WORK/gpu.csv" "$DEST/gpu.csv" --region "$AWS_REGION" || true
   [ -f "$SUMMARY" ] && aws s3 cp "$SUMMARY" "$DEST/summary.txt" --region "$AWS_REGION" || true
   shutdown -h now "trackdub poc batch finished (status $status)"
 }
@@ -54,6 +59,8 @@ done
 mkfs.xfs -f "$DEV"
 mkdir -p /mnt/trackdub-data
 mount "$DEV" /mnt/trackdub-data
+# docker-compose.aws.yml binds ${TRACKDUB_DATA_ROOT:-/mnt/trackdub-data}; pin it to the volume mounted here.
+export TRACKDUB_DATA_ROOT=/mnt/trackdub-data
 mkdir -p "$JOBS_ROOT"
 chown -R 10001:10001 /mnt/trackdub-data
 mark data_volume_ready
@@ -74,6 +81,10 @@ mark repo_ready
 
 TRACKDUB_IMAGE="$IMAGE" ./scripts/docker/prepare-gpu-worker-host.sh
 mark host_ready
+
+# GPU utilization and memory every 15 s, for diagnosing slow or stalled stages.
+nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw \
+  --format=csv -l 15 > "$WORK/gpu.csv" 2>/dev/null &
 
 aws s3 cp "$DEST/tools/summarize_result.py" "$WORK/summarize_result.py" --region "$AWS_REGION"
 
@@ -112,16 +123,29 @@ run_clip() {
   chmod 0644 docker/input/in.mp4
 
   echo "== [$(date -u +%H:%M:%S)] job $name"
+  local container="trackdub-job-$name" killed="" log_start
+  log_start=$(( $(wc -l < "$LOG") + 1 ))
   set +e
+  local env_args=()
+  [[ -z "${SESSION_VRAM_BUDGET_MB:-}" ]] || env_args=(-e "TRACKDUB_SESSION_VRAM_BUDGET_MB=$SESSION_VRAM_BUDGET_MB")
+  local voice_args=()
+  [[ -z "${VOICE:-}" ]] || voice_args=(--voice "$VOICE")
   # shellcheck disable=SC2086  # EXTRA_PIPELINE_ARGS is a deliberate word list from the launcher.
-  dc run --rm -T trackdub run pipeline --media /work/input/in.mp4 --output "$job/project" \
+  dc run --rm -T --name "$container" "${env_args[@]}" trackdub run pipeline --media /work/input/in.mp4 --output "$job/project" \
     --source-language "$SOURCE_LANGUAGE" --target-language "$TARGET_LANG" \
-    --preset "$PRESET" --voice "$VOICE" $EXTRA_PIPELINE_ARGS \
-    --subtitle-format srt --result-file "$job/result.json" --progress-file "$job/progress.jsonl" </dev/null
+    --preset "$PRESET" "${voice_args[@]}" $EXTRA_PIPELINE_ARGS \
+    --subtitle-format srt --result-file "$job/result.json" --progress-file "$job/progress.jsonl" </dev/null &
+  local pid=$!
+  killed="$(watch_clip "$pid" "$container" "$JOBS_ROOT/$name/progress.jsonl" "$start" "$log_start")"
+  wait "$pid"
   code=$?
   set -e
 
   verdict="$(python3 "$WORK/summarize_result.py" "$JOBS_ROOT/$name/result.json" --exit-code "$code" 2>&1 || true)"
+  if [ -n "$killed" ]; then
+    verdict="$killed"
+    code=1
+  fi
   elapsed=$(( $(date +%s) - start ))
 
   # The data volume is deleted when the instance terminates, so an upload that never succeeds loses the
@@ -134,7 +158,73 @@ run_clip() {
   printf '%s\t%s\t%ss\t%s\n' "$name" "$([ "$code" -eq 0 ] && echo ok || echo failed)" "$elapsed" "$verdict" \
     | tee -a "$SUMMARY"
   upload_with_retry aws s3 cp "$SUMMARY" "$DEST/summary.txt" --region "$AWS_REGION" || true
+  aws s3 cp "$LOG" "$DEST/run.log" --region "$AWS_REGION" >/dev/null 2>&1 || true
+  [ -f "$WORK/gpu.csv" ] && aws s3 cp "$WORK/gpu.csv" "$DEST/gpu.csv" --region "$AWS_REGION" >/dev/null 2>&1 || true
   return "$code"
+}
+
+# Watches one clip's container. Prints a verdict and stops the clip if it runs past CLIP_TIMEOUT_MINUTES
+# or produces no new log or progress line for STALL_MINUTES. Prints nothing otherwise.
+watch_clip() {
+  local pid="$1" container="$2" progress="$3" start="$4" log_start="$5"
+  local now last_change size_log size_prog prev_log="" prev_prog="" stage reason
+  last_change=$(date +%s)
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 30
+    # The clip may have finished during the sleep; never judge a finished clip.
+    kill -0 "$pid" 2>/dev/null || return 0
+    now=$(date +%s)
+    size_log=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+    size_prog=$(stat -c %s "$progress" 2>/dev/null || echo 0)
+    if [ "$size_log" != "$prev_log" ] || [ "$size_prog" != "$prev_prog" ]; then
+      last_change=$now
+      prev_log=$size_log
+      prev_prog=$size_prog
+    fi
+    reason=""
+    if (( now - start > CLIP_TIMEOUT_MINUTES * 60 )); then
+      reason="TIMED OUT after ${CLIP_TIMEOUT_MINUTES} min"
+    elif (( now - last_change > STALL_MINUTES * 60 )); then
+      reason="STALLED: no log or progress output for ${STALL_MINUTES} min"
+    fi
+    if [ -n "$reason" ]; then
+      # Only this clip's log lines count when naming the stage.
+      stage="$(tail -n "+$log_start" "$LOG" | grep -E '^\[Started\] ' | tail -n 1 | sed 's/^\[Started\] //')"
+      capture_stall_snapshot "$container"
+      # The snapshot takes up to ~40 s; a clip that finished meanwhile keeps its own result.
+      kill -0 "$pid" 2>/dev/null || return 0
+      stop_clip "$pid" "$container"
+      upload_stall_snapshot
+      echo "$reason in stage '${stage:-unknown}'. Snapshot: stall-snapshot.txt"
+      return 0
+    fi
+  done
+}
+
+# Stops a clip: the container if it exists, and the launcher in any case, so `wait` cannot block.
+stop_clip() {
+  local pid="$1" container="$2" i
+  timeout 30 docker kill "$container" >/dev/null 2>&1 || true
+  kill -TERM "$pid" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+  done
+  pkill -KILL -P "$pid" 2>/dev/null || true
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
+# Records GPU and process state while the clip is still running. Every call is time-bounded.
+capture_stall_snapshot() {
+  local container="$1" snap="$WORK/stall-snapshot.txt"
+  {
+    echo "== $(date -u +%FT%TZ) container $container"
+    timeout 20 nvidia-smi || echo "(nvidia-smi did not answer within 20 s)"
+    echo "== processes in container"
+    timeout 20 docker top "$container" -eo pid,pcpu,pmem,stat,etime,args 2>&1 || echo "(docker top failed or timed out)"
+    echo "== last 40 log lines"
+    tail -n 40 "$LOG" | tr -d '\033' || true
+  } >> "$snap" 2>&1
 }
 
 upload_with_retry() {
@@ -146,6 +236,10 @@ upload_with_retry() {
     sleep $((attempt * 10))
   done
   return 1
+}
+
+upload_stall_snapshot() {
+  timeout 60 aws s3 cp "$WORK/stall-snapshot.txt" "$DEST/stall-snapshot.txt" --region "$AWS_REGION" >/dev/null 2>&1 || true
 }
 
 failures=0

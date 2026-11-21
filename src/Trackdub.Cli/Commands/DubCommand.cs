@@ -375,6 +375,7 @@ internal static class DubCommand
                         noTtsRubberbandStretch,
                         ttsRubberbandThreshold,
                         ttsAutoStretchMaxOverrun,
+                        autoStretchToLimit: false,
                         cancellationToken).ConfigureAwait(false);
                     if (timingExitCode != Program.ExitSuccess)
                     {

@@ -404,8 +404,11 @@ public sealed partial class DubbingPipelineEngine
                 return null;
             }
 
+            // Same voices as the TTS stage will pick, or every prefetched clip would miss.
+            IReadOnlyDictionary<Guid, string?>? speakerGenders = await TryEstimateSpeakerGendersAsync(
+                session, options, runtimeSelections, state, progress: null, cancellationToken).ConfigureAwait(false);
             return await session.Workspace.CreateTtsStreamingPrefetchAsync(
-                BuildPipelineTtsRequest(state, options, runtimeSelections),
+                BuildPipelineTtsRequest(state, options, runtimeSelections, speakerGenders),
                 options.TargetLanguageCode,
                 cancellationToken).ConfigureAwait(false);
         }

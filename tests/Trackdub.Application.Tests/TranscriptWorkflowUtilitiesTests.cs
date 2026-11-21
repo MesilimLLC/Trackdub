@@ -175,6 +175,61 @@ public sealed class TranscriptWorkflowUtilitiesTests
     }
 
     [Fact]
+    public void BuildStemAudioRoute_accepts_current_sam_audio_stems_for_asr_and_mix()
+    {
+        MediaAsset mediaAsset = CreateMediaAsset();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ProjectArtifact normalized = new(
+            Guid.NewGuid(),
+            mediaAsset.ProjectId,
+            mediaAsset.Id,
+            ArtifactKind.NormalizedAudio,
+            ProjectArtifactPaths.NormalizedAudioRelativePath,
+            "sha-normalized",
+            100,
+            mediaAsset.DurationSeconds,
+            44100,
+            2,
+            now);
+        ProjectArtifact vocals = new(
+            Guid.NewGuid(),
+            mediaAsset.ProjectId,
+            mediaAsset.Id,
+            ArtifactKind.Vocals,
+            "artifacts/stems/sam-audio/vocals.wav",
+            "sha-vocals",
+            100,
+            mediaAsset.DurationSeconds,
+            48000,
+            1,
+            now.AddSeconds(1),
+            Provenance: "generated-sam-audio-vocals;bed=native-residual;engine_family=sam-audio;model=sam-audio");
+        ProjectArtifact ambiance = new(
+            Guid.NewGuid(),
+            mediaAsset.ProjectId,
+            mediaAsset.Id,
+            ArtifactKind.Ambiance,
+            "artifacts/stems/sam-audio/ambiance.wav",
+            "sha-ambiance",
+            100,
+            mediaAsset.DurationSeconds,
+            48000,
+            2,
+            now.AddSeconds(2),
+            Provenance: "generated-sam-audio-ambiance;bed=native-residual;engine_family=sam-audio;model=sam-audio");
+
+        StageRunRecord run = StageRunRecord.Start(mediaAsset.ProjectId, StageNames.Separation, now)
+            .Complete(now.AddSeconds(3));
+        vocals = vocals with { StageRunId = run.Id };
+        ambiance = ambiance with { StageRunId = run.Id };
+        StemAudioRoute route = TranscriptWorkflowUtilities.BuildStemAudioRoute(
+            [normalized, vocals, ambiance], [run]);
+
+        Assert.Equal(ambiance.RelativePath, route.MixSourceAudioRelativePath);
+        Assert.Null(route.WarningMessage);
+    }
+
+    [Fact]
     public void BuildStemAudioRoute_warns_when_only_legacy_hush_stems_exist()
     {
         MediaAsset mediaAsset = CreateMediaAsset();

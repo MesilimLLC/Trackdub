@@ -208,6 +208,107 @@ public sealed class UnattendedFallbackVoiceTests
         Assert.Equal("ef_lat", fallbackVoiceIds[speaker.Id]);
     }
 
+    [Theory]
+    [InlineData("zh", "male", "qwen3:uncle_fu")]
+    [InlineData("zh", "female", "qwen3:vivian")]
+    [InlineData("es", "male", "qwen3:ryan")]
+    [InlineData("es", "female", "qwen3:vivian")]
+    [InlineData("ja", "female", "qwen3:ono_anna")]
+    [InlineData("ja", "male", "qwen3:ryan")]
+    public void Pairs_qwen3_preset_by_estimated_speaker_gender(string targetLanguage, string gender, string expectedVoiceId)
+    {
+        ProjectSpeaker speaker = CreateSpeaker("Speaker 1");
+        TranscriptProjectState state = BuildState(speakers: [speaker], availableVoices: [], voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                targetLanguage,
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [speaker.Id] = gender });
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.Equal(expectedVoiceId, fallbackVoiceIds[speaker.Id]);
+    }
+
+    [Fact]
+    public void Gives_same_gender_speakers_distinct_qwen3_presets()
+    {
+        ProjectSpeaker speakerA = CreateSpeaker("Speaker 1");
+        ProjectSpeaker speakerB = CreateSpeaker("Speaker 2");
+        TranscriptProjectState state = BuildState(speakers: [speakerA, speakerB], availableVoices: [], voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [speakerA.Id] = "male", [speakerB.Id] = "male" });
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.NotEqual(fallbackVoiceIds[speakerA.Id], fallbackVoiceIds[speakerB.Id]);
+        Assert.All(fallbackVoiceIds.Values, voiceId => Assert.Contains(voiceId, new[] { "qwen3:uncle_fu", "qwen3:dylan", "qwen3:eric" }));
+    }
+
+    [Fact]
+    public void Does_not_reuse_a_preset_another_speaker_is_deliberately_assigned()
+    {
+        ProjectSpeaker assigned = CreateSpeaker("Speaker 1");
+        ProjectSpeaker automatic = CreateSpeaker("Speaker 2");
+        TranscriptProjectState state = BuildState(
+            speakers: [assigned, automatic],
+            availableVoices: [],
+            voiceAssignments: [VoiceAssignment.Create(ProjectId, assigned.Id, Qwen3TtsDefaults.CustomVoice17Alias, "qwen3:uncle_fu")]);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [assigned.Id] = "male", [automatic.Id] = "male" });
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.Equal("qwen3:dylan", Assert.Single(fallbackVoiceIds).Value);
+    }
+
+    [Fact]
+    public void Gives_the_preferred_preset_to_an_automatic_speaker_after_an_overridden_one()
+    {
+        ProjectSpeaker overridden = CreateSpeaker("Speaker 1");
+        ProjectSpeaker automatic = CreateSpeaker("Speaker 2");
+        TranscriptProjectState state = BuildState(speakers: [overridden, automatic], availableVoices: [], voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [overridden.Id] = "male", [automatic.Id] = "male" },
+                new Dictionary<Guid, string> { [overridden.Id] = "qwen3:ryan" });
+
+        Assert.NotNull(fallbackVoiceIds);
+        KeyValuePair<Guid, string> only = Assert.Single(fallbackVoiceIds);
+        Assert.Equal(automatic.Id, only.Key);
+        Assert.Equal("qwen3:uncle_fu", only.Value);
+    }
+
+    [Fact]
+    public void Unknown_gender_keeps_the_language_default_qwen3_preset()
+    {
+        ProjectSpeaker speaker = CreateSpeaker("Speaker 1");
+        TranscriptProjectState state = BuildState(speakers: [speaker], availableVoices: [], voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [speaker.Id] = null });
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.Equal("qwen3:vivian", fallbackVoiceIds[speaker.Id]);
+    }
+
     private static ProjectSpeaker CreateSpeaker(string displayName) =>
         new(Guid.NewGuid(), ProjectId, displayName, DateTimeOffset.UtcNow);
 

@@ -55,4 +55,23 @@ public sealed class TtsTimingResumeIdentityTests
     {
         Assert.Equal("TtsTiming.AutoStretchMaxOverrun", TtsTimingResumeIdentity.SnapshotKey);
     }
+
+    [Fact]
+    public void Auto_stretch_to_limit_changes_the_identity_only_when_on()
+    {
+        Assert.Equal(TtsTimingResumeIdentity.Normalize(0.20d), TtsTimingResumeIdentity.Normalize(0.20d, autoStretchToLimit: false));
+        Assert.NotEqual(TtsTimingResumeIdentity.Normalize(0.20d), TtsTimingResumeIdentity.Normalize(0.20d, autoStretchToLimit: true));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Resume_rejects_a_take_made_under_the_other_auto_stretch_policy(bool takeToLimit, bool runToLimit)
+    {
+        string fingerprint = TtsTimingResumeIdentity.Append("abcdef", 0.20d, takeToLimit);
+
+        Assert.False(TtsTimingResumeIdentity.Matches(fingerprint, TtsTimingResumeIdentity.Normalize(0.20d, runToLimit)));
+        Assert.True(TtsTimingResumeIdentity.Matches(fingerprint, TtsTimingResumeIdentity.Normalize(0.20d, takeToLimit)));
+        Assert.Equal("abcdef", TtsTimingResumeIdentity.WithoutSuffix(fingerprint));
+    }
 }

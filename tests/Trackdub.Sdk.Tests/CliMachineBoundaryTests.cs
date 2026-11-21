@@ -75,6 +75,25 @@ public sealed class CliMachineBoundaryTests
     }
 
     [Fact]
+    public void SpanishQwenPresetTargetsSpanishWithoutKokoroAndResolvesBuiltIn()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Join(root, "AGENTS.md"))) root = Path.GetDirectoryName(root);
+        Assert.NotNull(root);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Join(root, "src/Trackdub.Inference/Runtime/ModelManifest/bundled-models.manifest.json")));
+        var models = manifest.RootElement.GetProperty("models").EnumerateArray().ToArray();
+        Assert.True(PocPresets.TryResolve(PocServerEsQwenPreset.Name, out var preset, out var providers, out var variants));
+        Assert.Equal("en", preset!.SourceLanguage);
+        Assert.Equal("es", preset.TargetLanguage);
+        Assert.Equal("qwen3-tts-1.7b-customvoice", preset.Models!["tts"]);
+        Assert.NotEqual("kokoro", preset.Models["tts"]);
+        Assert.Equal("cuda", providers!["tts"]);
+        Assert.Equal("quantized", variants!["translation"]);
+        foreach (string alias in preset.Models.Values)
+            Assert.Contains(models, model => model.GetProperty("aliases").EnumerateArray().Any(a => a.GetString() == alias));
+    }
+
+    [Fact]
     public void ChinesePresetTargetsMandarinWithQwen3TtsAndResolvesBuiltIn()
     {
         string? root = AppContext.BaseDirectory;

@@ -33,6 +33,11 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 {
     private const double OverrunToleranceSeconds = 0.010d;
 
+    // How far into silence a take may move when it is pulled back from the end of the source audio.
+    // Within continuous speech the take may move into the previous segment's time (never over the
+    // previous take); across a pause longer than this, dubbed speech would start before the speaker.
+    internal const double MaxTailReflowLeadSeconds = 4.0d;
+
     public const double CleanAmbianceDefaultDuckingGainDb = 0d;
     public const double OriginalMixDefaultDuckingGainDb = -13d;
 
@@ -86,7 +91,7 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
         }
         foreach (TranscriptSegment segment in request.TranscriptSegments.OrderBy(static segment => segment.SegmentIndex))
         {
-            MixSpeechClip clip = BuildSpeechClip(
+            clips.Add(BuildSpeechClip(
                 segment,
                 translatedSegmentsByIndex,
                 takesBySegmentIndex,
@@ -94,18 +99,22 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                 warnings,
                 lipSyncByTakeId,
                 artifactStore,
-                selectedCandidateBySegmentId);
-            clips.Add(clip);
+                selectedCandidateBySegmentId));
+        }
 
+        ReflowTailOverrun(clips, sourceAudioEndSeconds);
+
+        foreach (MixSpeechClip clip in clips)
+        {
             if (!clip.IsSilentGap)
             {
                 double duckingLeadSeconds = NormalizeSeconds(request.DuckingLeadSeconds, 0.05d);
                 double duckingTailSeconds = NormalizeSeconds(request.DuckingTailSeconds, 0.18d);
                 duckingRegions.Add(new MixDuckRegion(
-                    segment.SegmentIndex,
-                    segment.Id,
+                    clip.SegmentIndex,
+                    clip.SegmentId,
                     Math.Max(0d, clip.StartSeconds - duckingLeadSeconds),
-                    ResolveClipDuckingEndSeconds(clip, segment.EndSeconds) + duckingTailSeconds,
+                    ResolveClipDuckingEndSeconds(clip, clip.EndSeconds) + duckingTailSeconds,
                     duckingGainDb));
 
                 if (sourceAudioEndSeconds is double sourceAudioEndSecondsValue &&
@@ -115,8 +124,8 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                 {
                     double overhangSeconds = clip.StartSeconds + takeDuration - sourceAudioEndSecondsValue;
                     warnings.Add(new MixPlanWarning(
-                        segment.SegmentIndex,
-                        segment.Id,
+                        clip.SegmentIndex,
+                        clip.SegmentId,
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
                             $"Dubbed take extends {overhangSeconds:0.###} s past the end of the source audio ({sourceAudioEndSecondsValue:0.###} s) and would be cut off at export. Stretch the take to fit, trim it, or raise the auto-stretch limit."),
@@ -146,6 +155,104 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             vocalStemArtifact?.RelativePath,
             BuildMediaClips(request));
     }
+
+    /// <summary>
+    /// Pulls takes that would run past the end of the source audio earlier, into time the preceding
+    /// takes leave unused. The renderer cuts output at the source end, so without this a take that
+    /// fits the clip overall still fails export when the last segment runs long.
+    /// </summary>
+    /// <remarks>
+    /// Walks back from the last take: each moved take sets the latest end for the one before it, which
+    /// moves too only if it would now overlap. A take after a pause longer than
+    /// <see cref="MaxTailReflowLeadSeconds"/> moves at most that far; after a shorter pause it may move into
+    /// the previous segment. Nothing moves before 0, and a forward pass keeps moved takes from overlapping
+    /// a predecessor that could not move far enough. Whatever still overhangs is reported as before.
+    /// </remarks>
+    internal static void ReflowTailOverrun(List<MixSpeechClip> clips, double? sourceAudioEndSeconds)
+    {
+        if (sourceAudioEndSeconds is not double sourceEnd)
+        {
+            return;
+        }
+
+        int[] placed = Enumerable.Range(0, clips.Count)
+            .Where(index => HasPlacedTake(clips[index]))
+            .OrderBy(index => clips[index].StartSeconds)
+            .ToArray();
+        if (placed.Length == 0)
+        {
+            return;
+        }
+
+        double[] originalStarts = placed.Select(index => clips[index].StartSeconds).ToArray();
+        PullTakesBackFromEnd(clips, placed, originalStarts, sourceEnd);
+        KeepMovedTakesAfterEarlierTakes(clips, placed, originalStarts);
+    }
+
+    private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, double sourceEnd)
+    {
+        // A take moves when it runs past the source end, or past the start of any later take that was
+        // moved, since a moved take must stay after every earlier take. An overlap with takes that
+        // stayed put is left as it was.
+        double latestEnd = sourceEnd;
+        double earliestMovedStart = double.PositiveInfinity;
+        for (int k = placed.Length - 1; k >= 0; k--)
+        {
+            MixSpeechClip clip = clips[placed[k]];
+            double duration = clip.TakeDurationSeconds!.Value;
+            double end = clip.StartSeconds + duration;
+            bool overrunsSource = end - sourceEnd > OverrunToleranceSeconds;
+            if (!overrunsSource && end - earliestMovedStart <= OverrunToleranceSeconds)
+            {
+                latestEnd = Math.Min(sourceEnd, clip.StartSeconds);
+                continue;
+            }
+
+            double limit = overrunsSource ? Math.Min(latestEnd, earliestMovedStart) : earliestMovedStart;
+            double earliestStart = EarliestReflowStart(clips, placed, originalStarts, k);
+            double newStart = Math.Max(earliestStart, Math.Min(limit, sourceEnd) - duration);
+            clips[placed[k]] = clip with { StartSeconds = newStart };
+            latestEnd = newStart;
+            earliestMovedStart = Math.Min(earliestMovedStart, newStart);
+        }
+    }
+
+    private static double EarliestReflowStart(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, int k)
+    {
+        double originalStart = originalStarts[k];
+        double silenceBefore = k == 0
+            ? originalStart
+            : Math.Max(0d, originalStart - clips[placed[k - 1]].EndSeconds);
+        double earliest = silenceBefore > MaxTailReflowLeadSeconds || k == 0
+            ? originalStart - MaxTailReflowLeadSeconds
+            : originalStarts[k - 1];
+        return Math.Max(0d, earliest);
+    }
+
+    // A moved take must not start before any earlier take has ended, not only its neighbour.
+    private static void KeepMovedTakesAfterEarlierTakes(List<MixSpeechClip> clips, int[] placed, double[] originalStarts)
+    {
+        double earlierEnd = double.NegativeInfinity;
+        for (int k = 0; k < placed.Length; k++)
+        {
+            MixSpeechClip clip = clips[placed[k]];
+            bool moved = clip.StartSeconds < originalStarts[k];
+            if (moved && clip.StartSeconds < earlierEnd)
+            {
+                clip = clip with { StartSeconds = Math.Min(originalStarts[k], earlierEnd) };
+                clips[placed[k]] = clip;
+            }
+
+            earlierEnd = Math.Max(earlierEnd, clip.StartSeconds + clip.TakeDurationSeconds!.Value);
+        }
+    }
+
+    private static bool HasPlacedTake(MixSpeechClip clip) =>
+        !clip.IsSilentGap &&
+        clip.TakeDurationSeconds is double duration &&
+        double.IsFinite(duration) &&
+        duration > 0d &&
+        double.IsFinite(clip.StartSeconds);
 
     private static IReadOnlyList<MixMediaClip>? BuildMediaClips(MixPlanBuildRequest request)
     {
