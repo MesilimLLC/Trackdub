@@ -47,8 +47,11 @@ deploy/aws/launch-run.sh \
   --run-id 2026-11-26-batch1
 ```
 
-Defaults are en→zh: `--target-language zh --preset poc-server-zh-v1 --voice SPEAKER_00:qwen3:vivian`.
-For en→es: `--target-language es --preset poc-server-v1 --voice SPEAKER_00:ef_dora`.
+Defaults are en→zh: `--target-language zh --preset poc-server-zh-v1`. For en→es: `--target-language es --preset poc-server-es-qwen-v1` (`poc-server-v1` needs Kokoro, which the Linux
+server image does not ship; on images older than this preset, `poc-server-quality-v1` is the same pipeline).
+With no `--voice`, the pipeline estimates each speaker's gender from pitch and gives each speaker a distinct Qwen3 preset
+of that gender, preferring presets native to the target language (male zh → `uncle_fu`, male es → `ryan`, female zh →
+`vivian`). The chosen voice is printed as a progress line per speaker. Pass `--voice SPEAKER_00:qwen3:<preset>` to force one.
 
 Pipeline flags go through `--pipeline-args`, for example `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"`.
 

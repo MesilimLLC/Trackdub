@@ -26,8 +26,8 @@ Options:
   --instance-type TYPE   g6.xlarge, g6.2xlarge, g6e.xlarge or g6e.2xlarge (default: g6e.xlarge).
   --source-language CODE Default: en.
   --target-language CODE Default: zh.
-  --preset NAME          Default: poc-server-zh-v1 (or poc-server-v1 for Spanish).
-  --voice SPEAKER:VOICE  Default: SPEAKER_00:qwen3:vivian.
+  --preset NAME          Default: poc-server-zh-v1 (use poc-server-es-qwen-v1 for Spanish).
+  --voice SPEAKER:VOICE  Default: none; the pipeline picks a Qwen3 preset per speaker by estimated gender.
   --pipeline-args "ARGS" Extra arguments for run pipeline, such as "--tts-rubberband-stretch".
   --repo-commit SHA      Commit whose scripts the instance uses. Default: the commit in the image tag, or HEAD.
   --ami ID               Override the Deep Learning Base GPU AMI lookup.
@@ -45,7 +45,7 @@ INSTANCE_TYPE=g6e.xlarge
 SOURCE_LANGUAGE=en
 TARGET_LANG=zh
 PRESET=poc-server-zh-v1
-VOICE=SPEAKER_00:qwen3:vivian
+VOICE=
 PIPELINE_ARGS=""
 REPO_COMMIT=""
 AMI=""
@@ -166,7 +166,7 @@ echo "Image:       $IMAGE"
 echo "Repo commit: $REPO_COMMIT"
 echo "Instance:    $INSTANCE_TYPE from AMI $AMI"
 echo "Clips:       ${#CLIPS[@]}"
-echo "Job:         $SOURCE_LANGUAGE -> $TARGET_LANG, preset $PRESET, voice $VOICE"
+echo "Job:         $SOURCE_LANGUAGE -> $TARGET_LANG, preset $PRESET, voice ${VOICE:-auto}"
 [[ -n "$PIPELINE_ARGS" ]] && echo "Pipeline:    $PIPELINE_ARGS"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then

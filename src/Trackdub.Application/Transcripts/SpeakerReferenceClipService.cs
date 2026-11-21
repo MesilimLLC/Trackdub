@@ -85,6 +85,72 @@ public sealed class SpeakerReferenceClipService(
         }
     }
 
+    /// <summary>
+    /// Estimates each speaker's gender from the pitch of their longest segment, cut from the same
+    /// source audio reference clips use (the vocal stem when there is one). Nothing is saved to the
+    /// project. A speaker whose audio cannot be read or is not voiced enough maps to null.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, string?>> EstimateSpeakerGendersAsync(
+        TranscriptProjectState currentState,
+        CancellationToken cancellationToken)
+    {
+        var genders = new Dictionary<Guid, string?>();
+        if (currentState.Speakers.Count == 0)
+        {
+            return genders;
+        }
+
+        string sourceWavePath = artifactStore.GetPath(ResolveReferenceClipSourceAudioArtifact(currentState).RelativePath);
+        foreach (ProjectSpeaker speaker in currentState.Speakers)
+        {
+            genders[speaker.Id] = await TryEstimateSpeakerGenderAsync(
+                currentState,
+                speaker.Id,
+                sourceWavePath,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return genders;
+    }
+
+    private async Task<string?> TryEstimateSpeakerGenderAsync(
+        TranscriptProjectState currentState,
+        Guid speakerId,
+        string sourceWavePath,
+        CancellationToken cancellationToken)
+    {
+        string clipPath = Path.Join(Path.GetTempPath(), $"trackdub-gender-{Guid.NewGuid():N}.wav");
+        try
+        {
+            ClipRange clipRange = ResolveReferenceClipRange(currentState, new ExtractReferenceClipRequest(speakerId));
+            _ = await audioClipExtractor.ExtractAsync(
+                sourceWavePath,
+                clipRange.StartSeconds,
+                clipRange.EndSeconds,
+                clipPath,
+                cancellationToken).ConfigureAwait(false);
+            ReferenceClipAnalysis analysis = await referenceClipAnalyzer
+                .AnalyzeAsync(clipPath, cancellationToken)
+                .ConfigureAwait(false);
+            return analysis.EstimatedGender;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(clipPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A leftover temp clip costs only disk.
+            }
+        }
+    }
+
     public async Task ImportReferenceClipAsync(
         TranscriptProjectState currentState,
         ImportReferenceClipRequest request,

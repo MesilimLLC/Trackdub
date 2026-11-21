@@ -25,6 +25,8 @@ public sealed class SpokenFillerFilterTests
     [InlineData("We left, uh, early.", "We left, early.")]
     [InlineData("Hmm. Okay then.", "Okay then.")]
     [InlineData("Errm we waited, ummm, and then left.", "We waited, and then left.")]
+    [InlineData("Uh .5 seconds left.", ".5 seconds left.")]
+    [InlineData("We waited, um, .5 seconds.", "We waited, .5 seconds.")]
     public void Handles_commas_and_sentence_starts(string text, string expected)
     {
         Assert.Equal(expected, SpokenFillerFilter.StripForTranslation(text, "en-US"));
@@ -34,6 +36,8 @@ public sealed class SpokenFillerFilterTests
     [InlineData("The umbrella is here.")]
     [InlineData("Ahead of the hum, Erma ran.")]
     [InlineData("Ummah and Ahmed met at the summit.")]
+    [InlineData("The gap is 5 mm wide.")]
+    [InlineData("It lasts .5 seconds.")]
     public void Keeps_words_that_only_contain_filler_letters(string text)
     {
         Assert.Equal(text, SpokenFillerFilter.StripForTranslation(text, "en"));

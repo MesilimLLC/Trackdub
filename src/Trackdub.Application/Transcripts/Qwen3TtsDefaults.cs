@@ -41,6 +41,61 @@ public static class Qwen3TtsDefaults
         };
     }
 
+    /// <summary>
+    /// Gender and native language of each CustomVoice preset, from the upstream model card
+    /// (https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice); the same table backs
+    /// Qwen3TtsVoiceCatalog. Order is the preference order within a gender: standard Mandarin before
+    /// the dialect voices.
+    /// </summary>
+    private static readonly (string Speaker, string Gender, string NativeLanguage)[] PresetVoices =
+    [
+        ("vivian", "female", "zh"),
+        ("serena", "female", "zh"),
+        ("ono_anna", "female", "ja"),
+        ("sohee", "female", "ko"),
+        ("uncle_fu", "male", "zh"),
+        ("ryan", "male", "en"),
+        ("aiden", "male", "en"),
+        ("dylan", "male", "zh"),
+        ("eric", "male", "zh"),
+    ];
+
+    /// <summary>
+    /// Preset for one speaker of a known or estimated gender. A preset native to the target language
+    /// comes first; for other languages, English natives come before Mandarin ones. Presets in
+    /// <paramref name="usedVoiceIds"/> are skipped while an unused one of the right gender remains,
+    /// so speakers in one clip get different voices. An unknown gender keeps the language default.
+    /// </summary>
+    public static string ResolvePresetVoiceId(
+        string? targetLanguage,
+        string? gender,
+        IReadOnlySet<string>? usedVoiceIds = null)
+    {
+        string? normalizedGender = NormalizeGender(gender);
+        string language = NormalizeLanguage(targetLanguage);
+        string languageDefault = ResolveDefaultPresetVoiceId(targetLanguage);
+        IEnumerable<(string Speaker, string Gender, string NativeLanguage)> candidates = normalizedGender is null
+            ? PresetVoices.Where(preset => PresetVoicePrefix + preset.Speaker == languageDefault)
+                .Concat(PresetVoices.Where(preset => PresetVoicePrefix + preset.Speaker != languageDefault))
+            : PresetVoices.Where(preset => preset.Gender == normalizedGender)
+                .OrderBy(preset => preset.NativeLanguage == language ? 0 : preset.NativeLanguage == "en" ? 1 : 2);
+        string[] ordered = [.. candidates.Select(static preset => PresetVoicePrefix + preset.Speaker)];
+        return ordered.FirstOrDefault(voiceId => usedVoiceIds?.Contains(voiceId) != true) ?? ordered[0];
+    }
+
+    private static string? NormalizeGender(string? gender) =>
+        gender?.Trim().ToLowerInvariant() switch
+        {
+            "male" or "m" => "male",
+            "female" or "f" => "female",
+            _ => null,
+        };
+
+    private static string NormalizeLanguage(string? language) =>
+        string.IsNullOrWhiteSpace(language)
+            ? string.Empty
+            : language.Trim().Replace('_', '-').Split('-')[0].ToLowerInvariant();
+
     private static readonly HashSet<string> SupportedLanguages = new(StringComparer.OrdinalIgnoreCase)
     {
         "zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it",
