@@ -134,7 +134,7 @@ public sealed class SpeakerReferenceClipService(
                 .ConfigureAwait(false);
             return analysis.EstimatedGender;
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
         {
             return null;
         }
