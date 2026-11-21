@@ -1347,6 +1347,22 @@ public sealed class MixPlanBuilderTests
     }
 
     [Fact]
+    public void Build_moves_a_take_more_than_the_silence_limit_within_continuous_speech()
+    {
+        // The second POC Chinese run: segment 1 starts where segment 0 ends, its 17.53s take has to
+        // start 4.11s early, and the previous take ends at 18.25s. No silence is crossed, so the
+        // 4.0s limit does not apply.
+        MixPlan plan = BuildTwoSegmentPlan(
+            (0.14d, 26.75d, 18.11d),
+            (26.75d, 40.15d, 17.53d),
+            sourceSeconds: 40.171d);
+
+        Assert.Empty(plan.Warnings);
+        Assert.Equal(40.171d - 17.53d, plan.SpeechClips[1].StartSeconds, precision: 6);
+        Assert.Equal(0.14d, plan.SpeechClips[0].StartSeconds, precision: 6);
+    }
+
+    [Fact]
     public void Build_moves_the_previous_take_too_when_the_last_one_would_overlap_it()
     {
         // Last take needs to start at 7.0s; the previous take ends at 7.5s, so it moves back 0.5s.

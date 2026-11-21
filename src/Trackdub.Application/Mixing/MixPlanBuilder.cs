@@ -33,9 +33,9 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 {
     private const double OverrunToleranceSeconds = 0.010d;
 
-    // How far a take may start before its own segment when it is pulled back from the end of the
-    // source audio. Dubbed speech that leads the speaker by a few seconds within continuous speech
-    // is acceptable; moving it into a long silence is not.
+    // How far into silence a take may move when it is pulled back from the end of the source audio.
+    // Within continuous speech the take may move into the previous segment's time (never over the
+    // previous take); across a pause longer than this, dubbed speech would start before the speaker.
     internal const double MaxTailReflowLeadSeconds = 4.0d;
 
     public const double CleanAmbianceDefaultDuckingGainDb = 0d;
@@ -163,9 +163,10 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
     /// </summary>
     /// <remarks>
     /// Walks back from the last take: each moved take sets the latest end for the one before it, which
-    /// moves too only if it would now overlap. A take moves at most <see cref="MaxTailReflowLeadSeconds"/>
-    /// and never before 0; a forward pass then keeps moved takes from overlapping a predecessor that could
-    /// not move far enough. Whatever still overhangs is reported by the caller as before.
+    /// moves too only if it would now overlap. A take after a pause longer than
+    /// <see cref="MaxTailReflowLeadSeconds"/> moves at most that far; after a shorter pause it may move into
+    /// the previous segment. Nothing moves before 0, and a forward pass keeps moved takes from overlapping
+    /// a predecessor that could not move far enough. Whatever still overhangs is reported as before.
     /// </remarks>
     internal static void ReflowTailOverrun(List<MixSpeechClip> clips, double? sourceAudioEndSeconds)
     {
@@ -184,14 +185,14 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
         }
 
         double[] originalStarts = placed.Select(index => clips[index].StartSeconds).ToArray();
-        PullTakesBackFromEnd(clips, placed, sourceEnd);
+        PullTakesBackFromEnd(clips, placed, originalStarts, sourceEnd);
         for (int k = 1; k < placed.Length; k++)
         {
             KeepMovedTakeAfterPrevious(clips, placed[k - 1], placed[k], originalStarts[k]);
         }
     }
 
-    private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double sourceEnd)
+    private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, double sourceEnd)
     {
         double latestEnd = sourceEnd;
         for (int k = placed.Length - 1; k >= 0; k--)
@@ -203,11 +204,23 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                 return;
             }
 
-            double earliestStart = Math.Max(0d, clip.StartSeconds - MaxTailReflowLeadSeconds);
+            double earliestStart = EarliestReflowStart(clips, placed, originalStarts, k);
             double newStart = Math.Max(earliestStart, latestEnd - duration);
             clips[placed[k]] = clip with { StartSeconds = newStart };
             latestEnd = newStart;
         }
+    }
+
+    private static double EarliestReflowStart(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, int k)
+    {
+        double originalStart = originalStarts[k];
+        double silenceBefore = k == 0
+            ? originalStart
+            : Math.Max(0d, originalStart - clips[placed[k - 1]].EndSeconds);
+        double earliest = silenceBefore > MaxTailReflowLeadSeconds || k == 0
+            ? originalStart - MaxTailReflowLeadSeconds
+            : originalStarts[k - 1];
+        return Math.Max(0d, earliest);
     }
 
     private static void KeepMovedTakeAfterPrevious(
