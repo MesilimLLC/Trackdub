@@ -89,7 +89,7 @@
     -->
     <PackageVersion Include="LibVLCSharp" Version="3.10.2" />
 
-    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <!-- Trackdub.Api -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
     <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.1.0.3" />
