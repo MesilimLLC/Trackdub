@@ -4,7 +4,12 @@ Audience: the SnapSoft delivery team (Solution Architect, Cloud Engineer). The S
 signed 2026-10-30) is the contract. This page maps each SOW prerequisite to the file that satisfies it, states
 where the repository differs from the SOW, and lists the decisions left for the Design phase. Where the repository
 and the SOW disagree, the SOW is the POC target unless both parties agree a change order. Nothing here claims AWS
-readiness: no AWS resource has been created and no GPU run on G6/G6e has happened.
+readiness. One end-to-end test ran on a g6e.xlarge in the Mesilim-owned test account (English to Mandarin, two runs). Both
+stopped at the export stage, because the dubbed speech ran past the source length, so no finished clip exists yet.
+
+To run a batch in your own AWS account, use the five-step command checklist in
+[snapsoft-quickstart.md](snapsoft-quickstart.md). It wraps the CloudFormation template in `deploy/aws/`. The
+manual steps below remain the reference for each part.
 
 ## 1. SOW prerequisites and where to find them
 
