@@ -35,7 +35,9 @@ internal static class UnattendedVoiceSelection
         TranscriptProjectState state,
         string? targetLanguageCode,
         string? preferredTtsModelAlias = null,
-        IReadOnlyDictionary<Guid, string?>? speakerGenders = null)
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null,
+        IReadOnlyDictionary<Guid, string>? explicitVoiceIds = null,
+        IReadOnlySet<Guid>? excludedSpeakerIds = null)
     {
         if (state.Speakers.Count == 0)
         {
@@ -55,10 +57,17 @@ internal static class UnattendedVoiceSelection
 
         ProjectSpeaker[] unassignedSpeakers =
         [
-            .. state.Speakers.Where(speaker => !deliberatelyAssignedSpeakerIds.Contains(speaker.Id))
+            .. state.Speakers.Where(speaker =>
+                !deliberatelyAssignedSpeakerIds.Contains(speaker.Id) &&
+                explicitVoiceIds?.ContainsKey(speaker.Id) != true &&
+                excludedSpeakerIds?.Contains(speaker.Id) != true)
         ];
         Dictionary<Guid, string> fallbackVoiceIds = speakerGenders is not null && Qwen3TtsDefaults.IsPresetVoiceId(defaultVoiceId)
-            ? PairQwenPresetsBySpeaker(unassignedSpeakers, targetLanguageCode, speakerGenders)
+            ? PairQwenPresetsBySpeaker(
+                unassignedSpeakers,
+                targetLanguageCode,
+                speakerGenders,
+                ReservedPresetVoiceIds(state, explicitVoiceIds))
             : unassignedSpeakers.ToDictionary(static speaker => speaker.Id, _ => defaultVoiceId);
         return fallbackVoiceIds.Count > 0 ? fallbackVoiceIds : null;
     }
@@ -70,9 +79,9 @@ internal static class UnattendedVoiceSelection
     private static Dictionary<Guid, string> PairQwenPresetsBySpeaker(
         IEnumerable<ProjectSpeaker> speakers,
         string? targetLanguageCode,
-        IReadOnlyDictionary<Guid, string?> speakerGenders)
+        IReadOnlyDictionary<Guid, string?> speakerGenders,
+        HashSet<string> used)
     {
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var voiceIds = new Dictionary<Guid, string>();
         foreach (ProjectSpeaker speaker in speakers)
         {
@@ -85,6 +94,21 @@ internal static class UnattendedVoiceSelection
         }
 
         return voiceIds;
+    }
+
+    // Presets other speakers already speak with, so an automatic speaker does not share one.
+    private static HashSet<string> ReservedPresetVoiceIds(
+        TranscriptProjectState state,
+        IReadOnlyDictionary<Guid, string>? explicitVoiceIds)
+    {
+        IEnumerable<string?> taken = state.VoiceAssignments
+            .Where(static assignment => !assignment.IsFallback)
+            .SelectMany(static assignment => new[] { assignment.VoiceVariant, assignment.VoiceModelId })
+            .Concat(explicitVoiceIds?.Values ?? []);
+        return taken
+            .Where(static voiceId => voiceId is not null && Qwen3TtsDefaults.IsPresetVoiceId(voiceId))
+            .Select(static voiceId => voiceId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string? ResolveUnattendedFallbackVoiceId(
@@ -447,7 +471,17 @@ internal static class UnattendedVoiceSelection
         Dictionary<Guid, string>? fallbackVoiceIds = null;
         if (options.AutoAssignFallbackVoices)
         {
-            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(state, options.TargetLanguageCode, ttsAlias, speakerGenders);
+            HashSet<Guid> clonedSpeakerIds = cloneBySpeaker?
+                .Where(static pair => pair.Value)
+                .Select(static pair => pair.Key)
+                .ToHashSet() ?? [];
+            fallbackVoiceIds = BuildUnattendedFallbackVoiceIds(
+                state,
+                options.TargetLanguageCode,
+                ttsAlias,
+                speakerGenders,
+                explicitVoiceIds,
+                clonedSpeakerIds);
             if (fallbackVoiceIds is not null)
             {
                 fallbackVoiceIds = fallbackVoiceIds

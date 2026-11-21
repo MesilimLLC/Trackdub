@@ -1446,6 +1446,19 @@ public sealed class MixPlanBuilderTests
     }
 
     [Fact]
+    public void Build_moves_an_earlier_take_that_reaches_past_a_moved_take_beyond_a_fitting_neighbour()
+    {
+        // C is pulled from 16s to 14s. B fits before it, but A (2–15s) would still push C back to 15s,
+        // so A moves 1s earlier and C stays at 14s.
+        MixPlan plan = BuildPlan(17d, (2d, 13d, 13d), (13d, 14d, 1d), (16d, 17d, 3d));
+
+        Assert.Empty(plan.Warnings);
+        Assert.Equal(1d, plan.SpeechClips[0].StartSeconds, precision: 6);
+        Assert.Equal(13d, plan.SpeechClips[1].StartSeconds, precision: 6);
+        Assert.Equal(14d, plan.SpeechClips[2].StartSeconds, precision: 6);
+    }
+
+    [Fact]
     public void Build_leaves_an_existing_overlap_alone_when_nothing_runs_past_the_source_end()
     {
         MixPlan plan = BuildPlan(20d, (0d, 5d, 7d), (5d, 8d, 2d));

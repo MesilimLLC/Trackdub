@@ -191,29 +191,29 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 
     private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, double sourceEnd)
     {
-        // A take moves when it runs past the source end, or past the start of a take that was just
-        // moved. An overlap with a successor that stayed put is left as it was.
+        // A take moves when it runs past the source end, or past the start of any later take that was
+        // moved, since a moved take must stay after every earlier take. An overlap with takes that
+        // stayed put is left as it was.
         double latestEnd = sourceEnd;
-        bool successorMoved = false;
+        double earliestMovedStart = double.PositiveInfinity;
         for (int k = placed.Length - 1; k >= 0; k--)
         {
             MixSpeechClip clip = clips[placed[k]];
             double duration = clip.TakeDurationSeconds!.Value;
             double end = clip.StartSeconds + duration;
-            bool mustMove = end - sourceEnd > OverrunToleranceSeconds ||
-                            (successorMoved && end - latestEnd > OverrunToleranceSeconds);
-            if (!mustMove)
+            bool overrunsSource = end - sourceEnd > OverrunToleranceSeconds;
+            if (!overrunsSource && end - earliestMovedStart <= OverrunToleranceSeconds)
             {
                 latestEnd = Math.Min(sourceEnd, clip.StartSeconds);
-                successorMoved = false;
                 continue;
             }
 
+            double limit = overrunsSource ? Math.Min(latestEnd, earliestMovedStart) : earliestMovedStart;
             double earliestStart = EarliestReflowStart(clips, placed, originalStarts, k);
-            double newStart = Math.Max(earliestStart, Math.Min(latestEnd, sourceEnd) - duration);
+            double newStart = Math.Max(earliestStart, Math.Min(limit, sourceEnd) - duration);
             clips[placed[k]] = clip with { StartSeconds = newStart };
             latestEnd = newStart;
-            successorMoved = true;
+            earliestMovedStart = Math.Min(earliestMovedStart, newStart);
         }
     }
 

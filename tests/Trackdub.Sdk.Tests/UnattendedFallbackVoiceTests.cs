@@ -251,6 +251,48 @@ public sealed class UnattendedFallbackVoiceTests
     }
 
     [Fact]
+    public void Does_not_reuse_a_preset_another_speaker_is_deliberately_assigned()
+    {
+        ProjectSpeaker assigned = CreateSpeaker("Speaker 1");
+        ProjectSpeaker automatic = CreateSpeaker("Speaker 2");
+        TranscriptProjectState state = BuildState(
+            speakers: [assigned, automatic],
+            availableVoices: [],
+            voiceAssignments: [VoiceAssignment.Create(ProjectId, assigned.Id, Qwen3TtsDefaults.CustomVoice17Alias, "qwen3:uncle_fu")]);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [assigned.Id] = "male", [automatic.Id] = "male" });
+
+        Assert.NotNull(fallbackVoiceIds);
+        Assert.Equal("qwen3:dylan", Assert.Single(fallbackVoiceIds).Value);
+    }
+
+    [Fact]
+    public void Gives_the_preferred_preset_to_an_automatic_speaker_after_an_overridden_one()
+    {
+        ProjectSpeaker overridden = CreateSpeaker("Speaker 1");
+        ProjectSpeaker automatic = CreateSpeaker("Speaker 2");
+        TranscriptProjectState state = BuildState(speakers: [overridden, automatic], availableVoices: [], voiceAssignments: []);
+
+        Dictionary<Guid, string>? fallbackVoiceIds =
+            TrackdubDubbingEngine.BuildUnattendedFallbackVoiceIds(
+                state,
+                "zh",
+                Qwen3TtsDefaults.CustomVoice17Alias,
+                new Dictionary<Guid, string?> { [overridden.Id] = "male", [automatic.Id] = "male" },
+                new Dictionary<Guid, string> { [overridden.Id] = "qwen3:ryan" });
+
+        Assert.NotNull(fallbackVoiceIds);
+        KeyValuePair<Guid, string> only = Assert.Single(fallbackVoiceIds);
+        Assert.Equal(automatic.Id, only.Key);
+        Assert.Equal("qwen3:uncle_fu", only.Value);
+    }
+
+    [Fact]
     public void Unknown_gender_keeps_the_language_default_qwen3_preset()
     {
         ProjectSpeaker speaker = CreateSpeaker("Speaker 1");

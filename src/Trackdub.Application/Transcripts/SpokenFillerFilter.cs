@@ -70,15 +70,16 @@ public static partial class SpokenFillerFilter
     // A filler is a whole word, optionally followed by the comma a transcriber puts after it.
     // \b alone still matches beside a hyphen, so lookarounds reject hyphen-connected forms such
     // as "uh-uh". "err"/"ER" are excluded as ambiguous real words; only "erm"/"errm" are fillers.
-    [GeneratedRegex(@"(?<!-)\b(?:u+h+|u+m+|uhm+|e+r+m+|a+h+|h+m+|m+h*m+)\b(?!-),?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // "mm" after a number is millimetres, not a hesitation.
+    [GeneratedRegex(@"(?<!-)\b(?:u+h+|u+m+|uhm+|e+r+m+|a+h+|h+m+|(?<!\d\s*)m+h*m+)\b(?!-),?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FillerPattern();
 
-    [GeneratedRegex(@"\s+([,.;:!?])")]
+    [GeneratedRegex(@"\s+([,;:!?]|\.(?!\d))")]
     private static partial Regex SpaceBeforePunctuation();
 
     [GeneratedRegex(@"\s{2,}")]
     private static partial Regex RepeatedSpace();
 
-    [GeneratedRegex(@"^[,.;:]\s*")]
+    [GeneratedRegex(@"^(?:[,;:]|\.(?!\d))\s*")]
     private static partial Regex LeadingPunctuation();
 }

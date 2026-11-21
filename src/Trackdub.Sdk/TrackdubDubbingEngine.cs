@@ -66,8 +66,10 @@ public sealed class TrackdubDubbingEngine : IDubbingPipelineEngine, ITransientFa
         TranscriptProjectState state,
         string? targetLanguageCode,
         string? preferredTtsModelAlias = null,
-        IReadOnlyDictionary<Guid, string?>? speakerGenders = null) =>
-        UnattendedVoiceSelection.BuildUnattendedFallbackVoiceIds(state, targetLanguageCode, preferredTtsModelAlias, speakerGenders);
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null,
+        IReadOnlyDictionary<Guid, string>? explicitVoiceIds = null) =>
+        UnattendedVoiceSelection.BuildUnattendedFallbackVoiceIds(
+            state, targetLanguageCode, preferredTtsModelAlias, speakerGenders, explicitVoiceIds);
 
     internal static DubbingSessionOptions ApplyVoiceCloningDefaults(DubbingSessionOptions options) =>
         UnattendedVoiceSelection.ApplyVoiceCloningDefaults(options);

@@ -26,7 +26,7 @@ Options:
   --instance-type TYPE   g6.xlarge, g6.2xlarge, g6e.xlarge or g6e.2xlarge (default: g6e.xlarge).
   --source-language CODE Default: en.
   --target-language CODE Default: zh.
-  --preset NAME          Default: poc-server-zh-v1 (or poc-server-v1 for Spanish).
+  --preset NAME          Default: poc-server-zh-v1 (use poc-server-es-qwen-v1 for Spanish).
   --voice SPEAKER:VOICE  Default: none; the pipeline picks a Qwen3 preset per speaker by estimated gender.
   --pipeline-args "ARGS" Extra arguments for run pipeline, such as "--tts-rubberband-stretch".
   --repo-commit SHA      Commit whose scripts the instance uses. Default: the commit in the image tag, or HEAD.
