@@ -1,36 +1,21 @@
-# SnapSoft quickstart: run a batch of clips in your AWS account
+# Trackdub POC quickstart: batch runner in your AWS account
 
-This runs the published `server` image on one GPU instance in your AWS account and processes a batch of clips.
-Each clip gets its own result line, and a failed clip does not stop the rest. The instance powers itself off
-when the batch finishes or after 180 minutes, whichever is first.
+Runs the published `server` image on one GPU instance and processes a batch of MP4 clips. Each clip gets a job
+directory, a result and one summary line. A failed clip does not stop the batch. The instance terminates when the
+batch finishes or after `--max-minutes` (default 180), whichever comes first.
 
-For the background, SOW criteria and the manual steps behind each script, see
-[snapsoft-onboarding.md](snapsoft-onboarding.md).
+Scope and status: [snapsoft-onboarding.md](snapsoft-onboarding.md).
 
-## Before you start
+## Prerequisites
 
-- **Permissions:** the `SnapSoft-POC-Engineer` permission set, in `us-east-1`. It can deploy the stack, launch
-  `g6` and `g6e` instances, and create IAM roles named `trackdub-poc-*`.
-- **Tools:** AWS CLI v2 signed in to the account, Python 3, and a checkout of this repository at the commit
-  the image was built from.
-- **Image:** a pinned server image. Use a digest (`ghcr.io/mesilimllc/trackdub@sha256:…`) or a
-  `sha-<commit>-server` tag. Do not use `main-server`: it moves.
-- **Clips:** MP4, up to 600 s, up to 1920×1080, up to 1 GiB each.
+- IAM: the `SnapSoft-POC-Engineer` permission set, in `us-east-1`. It covers CloudFormation, EC2 (g6/g6e only), S3,
+  SSM, and IAM roles named `trackdub-poc-*`.
+- Tooling: AWS CLI v2, Python 3, and a checkout of this repository at the commit the image was built from.
+- Image: pinned. Use a digest (`ghcr.io/mesilimllc/trackdub@sha256:…`) or `sha-<commit>-server`. Never `main-server`.
+- GitHub: a classic PAT with `read:packages` only, SSO-authorized for MesilimLLC.
+- Clips: MP4, at most 1 GiB, 600 s, 1920×1080.
 
-## 1. Create a GitHub token for the image pull
-
-The image is private. Create a classic personal access token with only the `read:packages` scope:
-
-1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token.
-2. Select only `read:packages`, and set a short expiry.
-3. If GitHub offers **Configure SSO**, authorize it for MesilimLLC.
-
-Each engineer uses their own token, so access can be revoked per person. Fine-grained tokens do not cover
-packages yet.
-
-## 2. Store the token in SSM Parameter Store
-
-Run this in the repository checkout. The token is read without echoing it to the terminal:
+## 1. Store the GHCR token
 
 ```bash
 read -rs GHCR_TOKEN && echo
@@ -39,88 +24,85 @@ aws ssm put-parameter --region us-east-1 --name /trackdub/ghcr-read-token \
 unset GHCR_TOKEN
 ```
 
-The parameter is encrypted with the account's default SSM key. The instance reads it at boot; it is never
-written to user data or to the repository.
+The instance reads this parameter at boot. The token never goes into user data or the repository.
 
-## 3. Deploy the network, bucket and instance role
+## 2. Deploy the stack
 
 ```bash
-deploy/aws/deploy-stack.sh --stack snapsoft-poc
+deploy/aws/deploy-stack.sh --stack snapsoft-poc            # add --bucket-name if the default is taken
 ```
 
-This creates a VPC with three public subnets, a security group with no inbound rules, a private S3 bucket
-(outputs under `runs/` expire after 30 days), and the instance role. It creates no compute, so it costs nothing
-while idle. Re-running it is safe. If the default bucket name is taken, add `--bucket-name <name>`.
+Creates: a VPC with three public subnets, a security group with no inbound rules, a private bucket (`runs/`
+expires after 30 days), and the instance role and profile. No compute. Re-running is safe.
 
-## 4. Launch a batch
-
-Put the clips in one folder, then:
+## 3. Launch a batch
 
 ```bash
 deploy/aws/launch-run.sh \
   --stack snapsoft-poc \
   --image "ghcr.io/mesilimllc/trackdub@sha256:<digest>" \
   --repo-commit <full-commit-sha> \
-  --ghcr-user <your-github-user> \
+  --ghcr-user <github-user> \
   --clips-dir ./clips \
   --run-id 2026-11-26-batch1
 ```
 
-The defaults are English→Mandarin (`--target-language zh --preset poc-server-zh-v1 --voice SPEAKER_00:qwen3:vivian`).
-For Spanish, add `--target-language es --preset poc-server-v1 --voice SPEAKER_00:ef_dora`.
+Defaults are en→zh: `--target-language zh --preset poc-server-zh-v1 --voice SPEAKER_00:qwen3:vivian`.
+For en→es: `--target-language es --preset poc-server-v1 --voice SPEAKER_00:ef_dora`.
 
-To add a fix for a known failure, pass it with `--pipeline-args`, for example
-`--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"`.
+Pipeline flags go through `--pipeline-args`, for example `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"`.
 
-Add `--dry-run` to check the plan and the rendered configuration without uploading or launching anything.
+Options: `--instance-type` (`g6.xlarge`, `g6.2xlarge`, `g6e.xlarge`, `g6e.2xlarge`; default `g6e.xlarge`),
+`--max-minutes`, `--ami`, `--dry-run` (renders and prints the plan, uploads and launches nothing).
 
-The launcher uploads the clips to `s3://<bucket>/runs/<run-id>/input/`, then tries each subnet until one has
-capacity. If none does, pick another instance type with `--instance-type g6e.2xlarge` or run again later.
+The launcher uploads clips to `s3://<bucket>/runs/<run-id>/input/`, then tries each subnet until one has capacity.
+Clip filenames must be unique.
 
-## 5. Check the results
-
-The batch writes one line per clip to `summary.txt`, after each clip finishes:
+## 4. Watch and collect
 
 ```bash
 BUCKET=$(aws cloudformation describe-stacks --stack-name snapsoft-poc --region us-east-1 \
   --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
-aws s3 cp "s3://$BUCKET/runs/2026-11-26-batch1/summary.txt" -
+
+aws s3 cp "s3://$BUCKET/runs/2026-11-26-batch1/summary.txt" -          # one line per clip, updated after each clip
+aws s3 sync "s3://$BUCKET/runs/2026-11-26-batch1/" "./results/2026-11-26-batch1/"
 ```
 
-Each line is `clip  ok|failed  duration  verdict`. A failure names the stage and the reason, with a suggested fix.
-This is an example of a failed line, shortened:
+Per clip: `jobs/<clip>/result.json`, `jobs/<clip>/progress.jsonl`, `jobs/<clip>/project/`. Per run: `run.log`,
+`timings.json`, `summary.txt`.
 
-```
-clip_03  failed  412s  FAILED at export: Dubbed take extends 6.826 s past the end of the source audio (40.171 s)…
-                       Fix: TTS overran the source; rerun with --tts-rubberband-stretch and a higher
-                       --tts-auto-stretch-max-overrun (e.g. 0.35), or shorten the translation (overrun 6.826 s)
-```
+Summary line format: `<clip> <ok|failed> <duration> <verdict>`. A failure names the stage and reason, and a
+suggested fix where one is known.
 
-Everything else is under `runs/<run-id>/`: `jobs/<clip>/project/` (artifacts and the database), `jobs/<clip>/result.json`,
-`run.log` and `timings.json`. Download it all:
+## 5. Known failures
 
-```bash
-aws s3 sync "s3://$BUCKET/runs/2026-11-26-batch1/" ./results/2026-11-26-batch1/
-```
+| Verdict contains | Cause | Fix |
+|---|---|---|
+| `FAILED at export: Dubbed take extends … s past the end` | TTS overran the source; the exporter won't truncate | `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"` (default limit 0.20), or shorten the translation for that clip |
+| `FAILED at input: could not download` | S3 read failed | Check the object exists under `input/`, rerun the launch for that clip |
+| `UPLOAD FAILED` | Results could not reach S3 after 3 tries | Results are only on the instance; the data volume is deleted at termination. Open an incident before relaunching |
+| `NO RESULT` | The pipeline exited before writing `result.json` | Read `run.log` and the clip's `progress.jsonl` |
+| Launcher: `No subnet had capacity` | No g6/g6e capacity in the three zones | Retry later, or use another instance type |
 
-## Teardown
+The export overrun is still open. The 0.35 setting in the first retry still left a 4.9 s overrun on the test clip.
 
-The instance terminates itself. There is nothing else to stop.
+## 6. Teardown
 
-To remove the network, role and bucket when the POC is done, download what you need first, then:
+The instance terminates itself. Nothing else runs.
+
+When the POC ends, download what you need, then:
 
 ```bash
 aws cloudformation delete-stack --stack-name snapsoft-poc --region us-east-1
 aws s3 rm "s3://$BUCKET" --recursive
 aws s3api delete-bucket --bucket "$BUCKET" --region us-east-1
+aws ssm delete-parameter --region us-east-1 --name /trackdub/ghcr-read-token
 ```
 
-The bucket is retained when the stack is deleted, so results are not lost by accident. Empty it and delete it
-with the last two commands when you no longer need the results. Also delete the SSM parameter when the POC ends.
+The bucket is retained when the stack is deleted, so results are not lost by accident. Empty and delete it
+explicitly.
 
-## Notes
+## Cost
 
-- Cost: about $1.86 per hour for `g6e.xlarge` in us-east-1 (on-demand), plus storage. In the first test, host
-  preparation took about 4.5 minutes, and a 40-second clip took about 4 minutes to process end to end.
-- Do not reuse a `runs/` prefix. Use a new `--run-id` for each batch.
-- Pre-seeding a data volume snapshot to cut host preparation is not built yet.
+`g6e.xlarge` is about $1.86/hour on demand in us-east-1, plus storage. In the first test, host preparation took
+about 4.5 minutes, and a 40-second clip took about 4 minutes to process. Use a new `--run-id` for every batch.
