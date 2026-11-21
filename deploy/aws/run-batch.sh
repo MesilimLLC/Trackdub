@@ -164,6 +164,8 @@ watch_clip() {
   last_change=$(date +%s)
   while kill -0 "$pid" 2>/dev/null; do
     sleep 30
+    # The clip may have finished during the sleep; never judge a finished clip.
+    kill -0 "$pid" 2>/dev/null || return 0
     now=$(date +%s)
     size_log=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
     size_prog=$(stat -c %s "$progress" 2>/dev/null || echo 0)
