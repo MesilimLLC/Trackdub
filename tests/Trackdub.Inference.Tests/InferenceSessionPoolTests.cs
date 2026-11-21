@@ -1849,6 +1849,136 @@ public sealed class InferenceSessionPoolTests
     }
 
     [Fact]
+    public async Task ReservationAdmission_HeldLeaseLeavesNothingEvictable_FailsFastInsteadOfPolling()
+    {
+        // The caller holds a 2048 MB lease for the whole synthesis. A second 2560 MB graph in the
+        // same 4096 MB bucket can never fit: nothing is evictable and the held lease is only freed by
+        // the caller itself. The reservation-blocked wait must reach the stall bound, not poll forever.
+        using var pool = new InferenceSessionPool(
+            maxSessions: 8,
+            memoryBudgetMb: 4096,
+            hostMemoryBudgetMb: 4096);
+
+        SessionLease held = await pool.GetLeaseAsync(
+            AcceleratorKey("reserve-held", 2048), _ => Task.FromResult(CreateMinimalSession()), CancellationToken.None);
+
+        int previousBound = InferenceSessionPool.ObservedBlockFailFastPasses;
+        int previousBusyBound = InferenceSessionPool.ObservedBlockBusyFailFastPasses;
+        InferenceSessionPool.ObservedBlockFailFastPasses = 4;
+        InferenceSessionPool.ObservedBlockBusyFailFastPasses = 4;
+        try
+        {
+            int factoryCalls = 0;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => pool.GetLeaseAsync(
+                AcceleratorKey("reserve-next", 2560),
+                _ => { Interlocked.Increment(ref factoryCalls); return Task.FromResult(CreateMinimalSession()); },
+                cts.Token));
+
+            Assert.Contains(SharedPoolOptions.BudgetMbVariable, failure.Message, StringComparison.Ordinal);
+            Assert.Equal(0, Volatile.Read(ref factoryCalls));
+        }
+        finally
+        {
+            InferenceSessionPool.ObservedBlockFailFastPasses = previousBound;
+            InferenceSessionPool.ObservedBlockBusyFailFastPasses = previousBusyBound;
+        }
+
+        held.Dispose();
+    }
+
+    [Fact]
+    public async Task AdmissionWaitLog_WithoutCaptureScope_ReachesDiagnosticsLogger()
+    {
+        var logger = new RecordingApplicationLogger();
+        IApplicationLogger? previousLogger = Trackdub.Inference.Onnx.OnnxExecutionSessionFactory.DiagnosticsLogger;
+        TimeSpan previousThreshold = InferenceSessionPool.AdmissionWaitLogThreshold;
+        int previousBound = InferenceSessionPool.ObservedBlockFailFastPasses;
+        int previousBusyBound = InferenceSessionPool.ObservedBlockBusyFailFastPasses;
+        Trackdub.Inference.Onnx.OnnxExecutionSessionFactory.DiagnosticsLogger = logger;
+        InferenceSessionPool.AdmissionWaitLogThreshold = TimeSpan.Zero;
+        InferenceSessionPool.ObservedBlockFailFastPasses = 4;
+        InferenceSessionPool.ObservedBlockBusyFailFastPasses = 4;
+        try
+        {
+            using var pool = new InferenceSessionPool(
+                maxSessions: 8,
+                memoryBudgetMb: 4096,
+                hostMemoryBudgetMb: 4096);
+            SessionLease held = await pool.GetLeaseAsync(
+                AcceleratorKey("log-held", 2048), _ => Task.FromResult(CreateMinimalSession()), CancellationToken.None);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => pool.GetLeaseAsync(
+                AcceleratorKey("log-next", 2560), _ => Task.FromResult(CreateMinimalSession()), cts.Token));
+
+            held.Dispose();
+        }
+        finally
+        {
+            Trackdub.Inference.Onnx.OnnxExecutionSessionFactory.DiagnosticsLogger = previousLogger;
+            InferenceSessionPool.AdmissionWaitLogThreshold = previousThreshold;
+            InferenceSessionPool.ObservedBlockFailFastPasses = previousBound;
+            InferenceSessionPool.ObservedBlockBusyFailFastPasses = previousBusyBound;
+        }
+
+        Assert.Contains(logger.Messages, message => message.Contains("admission wait", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConcurrentLeaseAdmission_GraphSetOverBucketBudget_FailsBeforeAnyLeaseIsTaken()
+    {
+        using var pool = new InferenceSessionPool(
+            maxSessions: 8,
+            memoryBudgetMb: 4096,
+            hostMemoryBudgetMb: 4096);
+
+        // Two graphs that one synthesis holds together: 2048 + 2560 cannot fit 4096 MB.
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+            pool.ValidateConcurrentLeaseAdmission(new[]
+            {
+                new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, null, 2048),
+                new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, null, 2560),
+            }));
+        Assert.Contains(SharedPoolOptions.BudgetMbVariable, failure.Message, StringComparison.Ordinal);
+
+        // The same graphs on separate buckets, and a set that exactly fits, are admissible.
+        pool.ValidateConcurrentLeaseAdmission(new[]
+        {
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, null, 2048),
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, null, 2048),
+        });
+        pool.ValidateConcurrentLeaseAdmission(new[]
+        {
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, 0, 2560),
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cuda, 1, 2560),
+        });
+    }
+
+    private sealed class RecordingApplicationLogger : IApplicationLogger
+    {
+        private readonly List<string> messages = [];
+
+        public IReadOnlyList<string> Messages
+        {
+            get { lock (messages) { return messages.ToArray(); } }
+        }
+
+        public void LogDebug(string message) => Record(message);
+        public void LogInformation(string message) => Record(message);
+        public void LogWarning(string message, Exception? exception = null) => Record(message);
+        public void LogError(string message, Exception? exception = null) => Record(message);
+
+        private void Record(string message)
+        {
+            lock (messages)
+            {
+                messages.Add(message);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ProcessGpuAdmission_PerAdapterAttributionIsolatesDevices()
     {
         // With a per-adapter breakdown and a host LUID map, device 1's real usage is never

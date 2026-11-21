@@ -1,4 +1,6 @@
+using System.Linq;
 using Trackdub.Domain;
+using Trackdub.Inference.Onnx.Pool;
 using Trackdub.Inference.Onnx.Qwen3Tts.Models;
 
 namespace Trackdub.Inference.Onnx.Qwen3Tts;
@@ -35,6 +37,36 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
     public QwenPooledSession Vocoder { get; }
 
     public QwenPooledSession? SpeakerEncoder { get; }
+
+    /// <summary>
+    /// Graphs one synthesis leases together (<c>GenerateInternal</c> holds prefill, decode and
+    /// code predictor for its whole run). Their reservations must fit one bucket at once.
+    /// </summary>
+    private static readonly string[] SynthesisGraphFileNames =
+    [
+        "talker_prefill.onnx",
+        "talker_decode.onnx",
+        "code_predictor.onnx",
+    ];
+
+    /// <summary>
+    /// Fails before any residency pin when the synthesis working set cannot fit the shared pool's
+    /// bucket budget. Pinning would otherwise hold the first graphs and then wait forever for the
+    /// rest, since held and pinned sessions are never evictable.
+    /// </summary>
+    internal static void ValidateSynthesisAdmission(
+        string modelDir,
+        ExecutionProviderKind provider,
+        bool providerMayFallBack)
+    {
+        InferenceSessionPool.Shared.ValidateConcurrentLeaseAdmission(
+            SynthesisGraphFileNames
+                .Select(fileName => new InferenceSessionPool.ConcurrentLeaseGraph(
+                    provider,
+                    null,
+                    SessionPoolKey.EstimateVramMb(Path.Join(modelDir, fileName), provider, providerMayFallBack)))
+                .ToArray());
+    }
 
     public static async Task<Qwen3TtsPooledSessions> CreateAsync(
         Qwen3TtsModelFiles modelFiles,
