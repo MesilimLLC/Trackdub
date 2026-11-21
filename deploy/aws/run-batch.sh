@@ -7,6 +7,8 @@
 # batch. Host setup failures do, because nothing can run without them. Outputs upload after every
 # clip, and the instance powers off when the batch ends or after MAX_MINUTES, whichever is first.
 set -euo pipefail
+# The cost cap must be set before anything else can fail, so it has a default.
+: "${MAX_MINUTES:=180}"
 
 WORK=/opt/trackdub-e2e
 REPO_DIR="$WORK/Trackdub"
@@ -90,6 +92,12 @@ run_clip() {
   local stem name job start code verdict
   stem="$(basename "$key" .mp4)"
   name="$(printf '%s' "$stem" | tr -c 'A-Za-z0-9_-' '_')"
+  # Two clip names can sanitize to the same string; give the later one its own job directory.
+  local base_name="$name" suffix=2
+  while [[ -e "$JOBS_ROOT/$name" ]]; do
+    name="${base_name}_${suffix}"
+    suffix=$((suffix + 1))
+  done
   job="/data/jobs/$name"
   start=$(date +%s)
   install -d -o 10001 -g 10001 "$JOBS_ROOT/$name"

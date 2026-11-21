@@ -190,9 +190,44 @@ Resources:
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
+        # The SSM agent actions from AmazonSSMManagedInstanceCore, without its ssm:GetParameter(s) on all
+        # parameters. The instance may read only the GHCR token parameter below.
+        - PolicyName: trackdub-poc-ssm-agent
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SsmAgentChannels
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:DeleteMessage
+                  - ec2messages:FailMessage
+                  - ec2messages:GetEndpoint
+                  - ec2messages:GetMessages
+                  - ec2messages:SendReply
+                Resource: "*"
+              - Sid: SsmAgentInventoryAndAssociations
+                Effect: Allow
+                Action:
+                  - ssm:DescribeAssociation
+                  - ssm:DescribeDocument
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetDocument
+                  - ssm:GetManifest
+                  - ssm:ListAssociations
+                  - ssm:ListInstanceAssociations
+                  - ssm:PutComplianceItems
+                  - ssm:PutConfigurePackageResult
+                  - ssm:PutInventory
+                  - ssm:UpdateAssociationStatus
+                  - ssm:UpdateInstanceAssociationStatus
+                  - ssm:UpdateInstanceInformation
+                Resource: "*"
         - PolicyName: trackdub-poc-run
           PolicyDocument:
             Version: "2012-10-17"
