@@ -284,7 +284,7 @@ internal sealed partial class InferenceSessionPool
                     $"Graphs held together by one synthesis need ~{totalMb} MB across {group.Count()} graph(s) on "
                     + $"{DescribeBucket(group.Key)}, which exceeds its admission budget of {budgetMb} MB. Held sessions "
                     + "cannot be evicted, so this set cannot be admitted. Raise the budget "
-                    + $"({SharedPoolOptions.BudgetMbVariable}) or run on a device with more memory.");
+                    + $"({BudgetVariableFor(group.Key)}) or run on a device with more memory.");
             }
         }
     }
@@ -641,19 +641,22 @@ internal sealed partial class InferenceSessionPool
         }
     }
 
+    private static string BudgetVariableFor(AdmissionBucket bucket) =>
+        bucket.IsHost ? SharedPoolOptions.HostBudgetMbVariable : SharedPoolOptions.BudgetMbVariable;
+
     private string DescribeReservationStall(AdmissionWaitPass pass) =>
         $"Accelerator admission for '{DescribeBucket(pass.Bucket)}' needs ~{pass.NeedMb} MB, but ~{CurrentReservedMb(pass.Bucket)} MB "
         + "is already reserved in this bucket against its admission budget of "
         + $"{BudgetFor(pass.Bucket)} MB, with no idle sessions or external reservations left to free. "
         + "The reserved sessions are held or pinned and do not release while this wait blocks. "
-        + $"Raise the budget ({SharedPoolOptions.BudgetMbVariable}) or run on a device with more memory.";
+        + $"Raise the budget ({BudgetVariableFor(pass.Bucket)}) or run on a device with more memory.";
 
     private string DescribeObservationStall(AdmissionWaitPass pass) =>
         $"Accelerator admission for '{DescribeBucket(pass.Bucket)}' needs ~{pass.NeedMb} MB, but ~{ObservedProcessGpuUsageMb(pass.Bucket, pass.Observation)} MB "
         + "of dedicated GPU memory is attributed to this bucket against its admission budget of "
         + $"{BudgetFor(pass.Bucket)} MB, with no evictable sessions or external reservations left to "
         + "free. Free GPU memory, raise the budget "
-        + $"({SharedPoolOptions.BudgetMbVariable}), or opt out of process-GPU admission "
+        + $"({BudgetVariableFor(pass.Bucket)}), or opt out of process-GPU admission "
         + $"({SharedPoolOptions.ProcessGpuAdmissionVariable}=0).";
 
     private void LogLongAdmissionWait(AdmissionWaitPass pass)

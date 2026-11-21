@@ -1956,6 +1956,26 @@ public sealed class InferenceSessionPoolTests
     }
 
     [Fact]
+    public void ConcurrentLeaseAdmission_HostBucketOverflow_NamesHostBudgetVariable()
+    {
+        using var pool = new InferenceSessionPool(
+            maxSessions: 8,
+            memoryBudgetMb: 8192,
+            hostMemoryBudgetMb: 4096);
+
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+            pool.ValidateConcurrentLeaseAdmission(new[]
+            {
+                new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cpu, null, 2048),
+                new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.Cpu, null, 2560),
+            }));
+
+        // Raising the accelerator budget does not change host RAM, so the message must name the RAM setting.
+        Assert.Contains(SharedPoolOptions.HostBudgetMbVariable, failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SharedPoolOptions.BudgetMbVariable, failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConcurrentLeaseAdmission_OpenVinoCpuProxy_UsesHostRamBucket()
     {
         // Under the CPU proxy an OpenVINO graph lives in host RAM, as its real session key does.
