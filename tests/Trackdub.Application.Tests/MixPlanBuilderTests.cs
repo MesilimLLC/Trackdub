@@ -1421,10 +1421,47 @@ public sealed class MixPlanBuilderTests
         Assert.Equal(6d, plan.SpeechClips[1].StartSeconds, precision: 6);
     }
 
+    [Fact]
+    public void Build_moves_an_earlier_take_that_runs_past_the_source_end_even_when_the_last_one_fits()
+    {
+        // The first take (2s, 9s long) ends at 11s, past the 10s source; the last take fits. The first
+        // take moves to 0 and ends where the last one starts.
+        MixPlan plan = BuildPlan(10d, (2d, 9d, 9d), (9d, 10d, 1d));
+
+        Assert.Empty(plan.Warnings);
+        Assert.Equal(0d, plan.SpeechClips[0].StartSeconds, precision: 6);
+        Assert.Equal(9d, plan.SpeechClips[1].StartSeconds, precision: 6);
+    }
+
+    [Fact]
+    public void Build_keeps_a_moved_take_after_every_earlier_take_not_only_its_neighbour()
+    {
+        // A (0–15s) reaches past B (13–14s). C is pulled from 16s towards 14s but must not start
+        // before A ends, so it stops at 15s and the remaining 1s overhang is reported.
+        MixPlan plan = BuildPlan(17d, (0d, 13d, 15d), (13d, 14d, 1d), (16d, 17d, 3d));
+
+        Assert.Equal(15d, plan.SpeechClips[2].StartSeconds, precision: 6);
+        MixPlanWarning warning = Assert.Single(plan.Warnings);
+        Assert.Equal(2, warning.SegmentIndex);
+    }
+
+    [Fact]
+    public void Build_leaves_an_existing_overlap_alone_when_nothing_runs_past_the_source_end()
+    {
+        MixPlan plan = BuildPlan(20d, (0d, 5d, 7d), (5d, 8d, 2d));
+
+        Assert.Empty(plan.Warnings);
+        Assert.Equal(0d, plan.SpeechClips[0].StartSeconds, precision: 6);
+        Assert.Equal(5d, plan.SpeechClips[1].StartSeconds, precision: 6);
+    }
+
     private static MixPlan BuildTwoSegmentPlan(
         (double Start, double End, double Take) first,
         (double Start, double End, double Take) second,
-        double sourceSeconds)
+        double sourceSeconds) =>
+        BuildPlan(sourceSeconds, first, second);
+
+    private static MixPlan BuildPlan(double sourceSeconds, params (double Start, double End, double Take)[] segmentTakes)
     {
         TestProjectContext context = CreateContext();
         ProjectArtifact source = CreateArtifact(context, ArtifactKind.NormalizedAudio,
@@ -1432,7 +1469,7 @@ public sealed class MixPlanBuilderTests
         var segments = new List<TranscriptSegment>();
         var artifacts = new List<ProjectArtifact> { source };
         var takes = new List<TtsTake>();
-        foreach ((int index, (double start, double end, double takeSeconds)) in new[] { (0, first), (1, second) })
+        foreach ((int index, (double start, double end, double takeSeconds)) in segmentTakes.Select((value, index) => (index, value)))
         {
             segments.Add(TranscriptSegment.Create(context.TranscriptRevisionId, index, start, end, $"Segment {index}", context.SpeakerId));
             ProjectArtifact artifact = CreateArtifact(context, ArtifactKind.TtsTake,

@@ -186,28 +186,34 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
 
         double[] originalStarts = placed.Select(index => clips[index].StartSeconds).ToArray();
         PullTakesBackFromEnd(clips, placed, originalStarts, sourceEnd);
-        for (int k = 1; k < placed.Length; k++)
-        {
-            KeepMovedTakeAfterPrevious(clips, placed[k - 1], placed[k], originalStarts[k]);
-        }
+        KeepMovedTakesAfterEarlierTakes(clips, placed, originalStarts);
     }
 
     private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double[] originalStarts, double sourceEnd)
     {
+        // A take moves when it runs past the source end, or past the start of a take that was just
+        // moved. An overlap with a successor that stayed put is left as it was.
         double latestEnd = sourceEnd;
+        bool successorMoved = false;
         for (int k = placed.Length - 1; k >= 0; k--)
         {
             MixSpeechClip clip = clips[placed[k]];
             double duration = clip.TakeDurationSeconds!.Value;
-            if (clip.StartSeconds + duration - latestEnd <= OverrunToleranceSeconds)
+            double end = clip.StartSeconds + duration;
+            bool mustMove = end - sourceEnd > OverrunToleranceSeconds ||
+                            (successorMoved && end - latestEnd > OverrunToleranceSeconds);
+            if (!mustMove)
             {
-                return;
+                latestEnd = Math.Min(sourceEnd, clip.StartSeconds);
+                successorMoved = false;
+                continue;
             }
 
             double earliestStart = EarliestReflowStart(clips, placed, originalStarts, k);
-            double newStart = Math.Max(earliestStart, latestEnd - duration);
+            double newStart = Math.Max(earliestStart, Math.Min(latestEnd, sourceEnd) - duration);
             clips[placed[k]] = clip with { StartSeconds = newStart };
             latestEnd = newStart;
+            successorMoved = true;
         }
     }
 
@@ -223,19 +229,21 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
         return Math.Max(0d, earliest);
     }
 
-    private static void KeepMovedTakeAfterPrevious(
-        List<MixSpeechClip> clips,
-        int previousIndex,
-        int index,
-        double originalStart)
+    // A moved take must not start before any earlier take has ended, not only its neighbour.
+    private static void KeepMovedTakesAfterEarlierTakes(List<MixSpeechClip> clips, int[] placed, double[] originalStarts)
     {
-        MixSpeechClip clip = clips[index];
-        MixSpeechClip previous = clips[previousIndex];
-        double previousEnd = previous.StartSeconds + previous.TakeDurationSeconds!.Value;
-        bool moved = clip.StartSeconds < originalStart;
-        if (moved && clip.StartSeconds < previousEnd)
+        double earlierEnd = double.NegativeInfinity;
+        for (int k = 0; k < placed.Length; k++)
         {
-            clips[index] = clip with { StartSeconds = Math.Min(originalStart, previousEnd) };
+            MixSpeechClip clip = clips[placed[k]];
+            bool moved = clip.StartSeconds < originalStarts[k];
+            if (moved && clip.StartSeconds < earlierEnd)
+            {
+                clip = clip with { StartSeconds = Math.Min(originalStarts[k], earlierEnd) };
+                clips[placed[k]] = clip;
+            }
+
+            earlierEnd = Math.Max(earlierEnd, clip.StartSeconds + clip.TakeDurationSeconds!.Value);
         }
     }
 

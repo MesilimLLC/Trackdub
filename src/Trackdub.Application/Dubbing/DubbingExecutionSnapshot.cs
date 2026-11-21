@@ -165,7 +165,7 @@ internal static class DubbingExecutionSnapshot
         }
 
         snapshot[TtsTimingResumeIdentity.SnapshotKey] =
-            TtsTimingResumeIdentity.Normalize(ttsTiming?.AutoStretchMaxOverrun);
+            TtsTimingResumeIdentity.Normalize(ttsTiming?.AutoStretchMaxOverrun, ttsTiming?.AutoStretchToLimit is true);
     }
 
     /// <summary>
