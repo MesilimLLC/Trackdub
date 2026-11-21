@@ -191,10 +191,11 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             double duration = clip.TakeDurationSeconds!.Value;
             if (clip.StartSeconds + duration - latestEnd <= OverrunToleranceSeconds)
             {
-                break;
+                latestEnd = clip.StartSeconds;
+                continue;
             }
 
-            double earliestStart = Math.Max(0d, clip.StartSeconds - MaxTailReflowLeadSeconds);
+            double earliestStart = Math.Max(0d, originalStarts[k] - MaxTailReflowLeadSeconds);
             double newStart = Math.Max(earliestStart, latestEnd - duration);
             clips[placed[k]] = clip with { StartSeconds = newStart };
             latestEnd = newStart;

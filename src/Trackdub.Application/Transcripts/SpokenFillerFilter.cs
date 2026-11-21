@@ -19,22 +19,45 @@ public static partial class SpokenFillerFilter
             return text;
         }
 
-        string stripped = FillerPattern().Replace(text, " ");
-        stripped = SpaceBeforePunctuation().Replace(stripped, "$1");
-        stripped = RepeatedSpace().Replace(stripped, " ").Trim();
-        stripped = LeadingPunctuation().Replace(stripped, string.Empty);
-        if (stripped.Length == 0)
+        string stripped = CleanupFillerMatches(text);
+        if (!HasMeaningfulContent(stripped))
         {
             return text;
         }
 
-        string original = text.TrimStart();
-        if (original.Length > 0 && char.IsUpper(original[0]) && char.IsLower(stripped[0]))
+        return RestoreLeadingCase(text, stripped);
+    }
+
+    private static string CleanupFillerMatches(string text)
+    {
+        string stripped = FillerPattern().Replace(text, " ");
+        stripped = SpaceBeforePunctuation().Replace(stripped, "$1");
+        stripped = RepeatedSpace().Replace(stripped, " ").Trim();
+        return LeadingPunctuation().Replace(stripped, string.Empty);
+    }
+
+    private static string RestoreLeadingCase(string originalText, string stripped)
+    {
+        string original = originalText.TrimStart();
+        if (original.Length == 0 || !char.IsUpper(original[0]) || !char.IsLower(stripped[0]))
         {
-            stripped = char.ToUpperInvariant(stripped[0]) + stripped[1..];
+            return stripped;
         }
 
-        return stripped;
+        return char.ToUpperInvariant(stripped[0]) + stripped[1..];
+    }
+
+    private static bool HasMeaningfulContent(string text)
+    {
+        foreach (char c in text)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsEnglish(string? language) =>
@@ -44,7 +67,9 @@ public static partial class SpokenFillerFilter
          language.StartsWith("en_", StringComparison.OrdinalIgnoreCase));
 
     // A filler is a whole word, optionally followed by the comma a transcriber puts after it.
-    [GeneratedRegex(@"\b(?:u+h+|u+m+|uhm+|e+r+m+|e+r+|a+h+|h+m+|m+h*m+)\b,?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // \b alone still matches beside a hyphen, so lookarounds reject hyphen-connected forms such
+    // as "uh-uh". "err"/"ER" are excluded as ambiguous real words; only "erm"/"errm" are fillers.
+    [GeneratedRegex(@"(?<!-)\b(?:u+h+|u+m+|uhm+|e+r+m+|a+h+|h+m+|m+h*m+)\b(?!-),?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FillerPattern();
 
     [GeneratedRegex(@"\s+([,.;:!?])")]
