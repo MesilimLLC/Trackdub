@@ -253,11 +253,11 @@ public sealed class Qwen3TtsEngine(
         ExecutionProviderKind vocoderProvider = sessionOptions.SelectedProvider is ExecutionProviderKind.DirectMl
             ? ExecutionProviderKind.Cpu
             : sessionOptions.SelectedProvider;
-        Qwen3TtsPooledSessions.ValidateSynthesisAdmission(
-            modelFiles.RootDirectory,
+        Qwen3TtsPooledSessions.ValidateAdmission(
+            modelFiles,
+            providerRequest,
             sessionOptions.SelectedProvider,
-            providerMayFallBack: providerRequest.AllowTrtInitFallback
-                && sessionOptions.SelectedProvider is ExecutionProviderKind.TensorRTRtx);
+            vocoderProvider);
         Qwen3TtsPooledSessions pooledSessions = await Qwen3TtsPooledSessions.CreateAsync(
             modelFiles,
             providerRequest,

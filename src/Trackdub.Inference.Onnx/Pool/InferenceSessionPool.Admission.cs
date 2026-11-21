@@ -309,19 +309,6 @@ internal sealed partial class InferenceSessionPool
     /// </summary>
     internal static TimeSpan AdmissionWaitLogThreshold { get; set; } = TimeSpan.FromSeconds(1);
     /// <summary>
-    /// Waits until <paramref name="needMb"/> fits in <paramref name="bucket"/>'s budget
-    /// (evicting idle sessions in that bucket as needed), then takes the reservation.
-    /// Never holds a reservation while waiting unless <paramref name="alreadyReserved"/> is set.
-    /// Host-backed providers share the host RAM budget; accelerator providers share their
-    /// device's VRAM budget.
-    /// </summary>
-    /// <param name="alreadyReserved">
-    /// When <see langword="true"/>, the caller already holds the <paramref name="needMb"/>
-    /// reservation in <paramref name="bucket"/> (a session that already exists and is resident),
-    /// so the wait only brings the bucket's total — including that reservation — within budget
-    /// and does not take a new one on success.
-    /// </param>
-    /// <summary>
     /// Per-pass state for <see cref="WaitForAdmissionBudgetAsync"/>: the observed GPU
     /// reading, blocked flags, and eviction candidates collected under
     /// <see cref="creationLock"/>, plus the stall bookkeeping that carries across passes.
@@ -356,6 +343,19 @@ internal sealed partial class InferenceSessionPool
         }
     }
 
+    /// <summary>
+    /// Waits until <paramref name="needMb"/> fits in <paramref name="bucket"/>'s budget
+    /// (evicting idle sessions in that bucket as needed), then takes the reservation.
+    /// Never holds a reservation while waiting unless <paramref name="alreadyReserved"/> is set.
+    /// Host-backed providers share the host RAM budget; accelerator providers share their
+    /// device's VRAM budget.
+    /// </summary>
+    /// <param name="alreadyReserved">
+    /// When <see langword="true"/>, the caller already holds the <paramref name="needMb"/>
+    /// reservation in <paramref name="bucket"/> (a session that already exists and is resident),
+    /// so the wait only brings the bucket's total — including that reservation — within budget
+    /// and does not take a new one on success.
+    /// </param>
     private async Task WaitForAdmissionBudgetAsync(
         long needMb,
         AdmissionBucket bucket,

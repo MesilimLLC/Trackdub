@@ -39,32 +39,42 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
     public QwenPooledSession? SpeakerEncoder { get; }
 
     /// <summary>
-    /// Graphs one synthesis leases together (<c>GenerateInternal</c> holds prefill, decode and
-    /// code predictor for its whole run). Their reservations must fit one bucket at once.
+    /// Fails before any residency pin when the graphs <see cref="CreateAsync"/> pins cannot all
+    /// fit their buckets' budgets. Pins are held until the engine is disposed and are never
+    /// evictable, so an unfittable set would pin the first graphs and then wait forever for the
+    /// rest. The talker prefill, decode and code predictor graphs are also leased together for
+    /// each synthesis; the vocoder and speaker encoder run on their own providers.
     /// </summary>
-    private static readonly string[] SynthesisGraphFileNames =
-    [
-        "talker_prefill.onnx",
-        "talker_decode.onnx",
-        "code_predictor.onnx",
-    ];
-
-    /// <summary>
-    /// Fails before any residency pin when the synthesis working set cannot fit the shared pool's
-    /// bucket budget. Pinning would otherwise hold the first graphs and then wait forever for the
-    /// rest, since held and pinned sessions are never evictable.
-    /// </summary>
-    internal static void ValidateSynthesisAdmission(
-        string modelDir,
-        ExecutionProviderKind provider,
-        bool providerMayFallBack)
+    internal static void ValidateAdmission(
+        Qwen3TtsModelFiles modelFiles,
+        PooledProviderRequest providerRequest,
+        ExecutionProviderKind selectedProvider,
+        ExecutionProviderKind vocoderProvider)
     {
+        string modelDir = modelFiles.RootDirectory;
+        bool talkerMayFallBack = providerRequest.AllowTrtInitFallback
+            && selectedProvider is ExecutionProviderKind.TensorRTRtx;
+        bool vocoderMayFallBack = providerRequest.AllowTrtInitFallback
+            && vocoderProvider is ExecutionProviderKind.TensorRTRtx;
+
+        var graphs = new List<(string FileName, ExecutionProviderKind Provider, bool MayFallBack)>
+        {
+            ("talker_prefill.onnx", selectedProvider, talkerMayFallBack),
+            ("talker_decode.onnx", selectedProvider, talkerMayFallBack),
+            ("code_predictor.onnx", selectedProvider, talkerMayFallBack),
+            ("vocoder.onnx", vocoderProvider, vocoderMayFallBack),
+        };
+        if (modelFiles.IsBaseModel)
+        {
+            graphs.Add(("speaker_encoder.onnx", selectedProvider, talkerMayFallBack));
+        }
+
         InferenceSessionPool.Shared.ValidateConcurrentLeaseAdmission(
-            SynthesisGraphFileNames
-                .Select(fileName => new InferenceSessionPool.ConcurrentLeaseGraph(
-                    provider,
+            graphs
+                .Select(graph => new InferenceSessionPool.ConcurrentLeaseGraph(
+                    graph.Provider,
                     null,
-                    SessionPoolKey.EstimateVramMb(Path.Join(modelDir, fileName), provider, providerMayFallBack)))
+                    SessionPoolKey.EstimateVramMb(Path.Join(modelDir, graph.FileName), graph.Provider, graph.MayFallBack)))
                 .ToArray());
     }
 
