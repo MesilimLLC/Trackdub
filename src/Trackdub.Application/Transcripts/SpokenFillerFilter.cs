@@ -28,14 +28,17 @@ public static partial class SpokenFillerFilter
             return text;
         }
 
-        string original = text.TrimStart();
-        if (original.Length > 0 && char.IsUpper(original[0]) && char.IsLower(stripped[0]))
-        {
-            stripped = char.ToUpperInvariant(stripped[0]) + stripped[1..];
-        }
-
-        return stripped;
+        return StartsWithCapital(text) ? Capitalize(stripped) : stripped;
     }
+
+    private static bool StartsWithCapital(string text)
+    {
+        string trimmed = text.TrimStart();
+        return trimmed.Length > 0 && char.IsUpper(trimmed[0]);
+    }
+
+    private static string Capitalize(string text) =>
+        char.IsLower(text[0]) ? char.ToUpperInvariant(text[0]) + text[1..] : text;
 
     private static bool IsEnglish(string? language) =>
         language is not null &&

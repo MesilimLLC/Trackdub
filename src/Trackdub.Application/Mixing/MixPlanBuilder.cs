@@ -184,6 +184,15 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
         }
 
         double[] originalStarts = placed.Select(index => clips[index].StartSeconds).ToArray();
+        PullTakesBackFromEnd(clips, placed, sourceEnd);
+        for (int k = 1; k < placed.Length; k++)
+        {
+            KeepMovedTakeAfterPrevious(clips, placed[k - 1], placed[k], originalStarts[k]);
+        }
+    }
+
+    private static void PullTakesBackFromEnd(List<MixSpeechClip> clips, int[] placed, double sourceEnd)
+    {
         double latestEnd = sourceEnd;
         for (int k = placed.Length - 1; k >= 0; k--)
         {
@@ -191,7 +200,7 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             double duration = clip.TakeDurationSeconds!.Value;
             if (clip.StartSeconds + duration - latestEnd <= OverrunToleranceSeconds)
             {
-                break;
+                return;
             }
 
             double earliestStart = Math.Max(0d, clip.StartSeconds - MaxTailReflowLeadSeconds);
@@ -199,21 +208,21 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
             clips[placed[k]] = clip with { StartSeconds = newStart };
             latestEnd = newStart;
         }
+    }
 
-        for (int k = 1; k < placed.Length; k++)
+    private static void KeepMovedTakeAfterPrevious(
+        List<MixSpeechClip> clips,
+        int previousIndex,
+        int index,
+        double originalStart)
+    {
+        MixSpeechClip clip = clips[index];
+        MixSpeechClip previous = clips[previousIndex];
+        double previousEnd = previous.StartSeconds + previous.TakeDurationSeconds!.Value;
+        bool moved = clip.StartSeconds < originalStart;
+        if (moved && clip.StartSeconds < previousEnd)
         {
-            MixSpeechClip clip = clips[placed[k]];
-            if (clip.StartSeconds >= originalStarts[k])
-            {
-                continue;
-            }
-
-            MixSpeechClip previous = clips[placed[k - 1]];
-            double previousEnd = previous.StartSeconds + previous.TakeDurationSeconds!.Value;
-            if (clip.StartSeconds < previousEnd)
-            {
-                clips[placed[k]] = clip with { StartSeconds = Math.Min(originalStarts[k], previousEnd) };
-            }
+            clips[index] = clip with { StartSeconds = Math.Min(originalStart, previousEnd) };
         }
     }
 
