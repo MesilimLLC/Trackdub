@@ -122,15 +122,17 @@ run_clip() {
   set -e
 
   verdict="$(python3 "$WORK/summarize_result.py" "$JOBS_ROOT/$name/result.json" --exit-code "$code" 2>&1 || true)"
-  printf '%s\t%s\t%ss\t%s\n' "$name" "$([ "$code" -eq 0 ] && echo ok || echo failed)" \
-    "$(( $(date +%s) - start ))" "$verdict" | tee -a "$SUMMARY"
+  elapsed=$(( $(date +%s) - start ))
 
   # The data volume is deleted when the instance terminates, so an upload that never succeeds loses the
-  # clip. Retry, and count a failed upload as a failed clip.
+  # clip. Retry, and treat a failed upload as a failed clip. One summary line per clip, written last, so it
+  # reflects the final outcome.
   if ! upload_with_retry aws s3 sync "$JOBS_ROOT/$name" "$DEST/jobs/$name" --region "$AWS_REGION"; then
-    printf '%s\tfailed\t0s\tUPLOAD FAILED: results for this clip are only on the instance.\n' "$name" | tee -a "$SUMMARY"
+    verdict="UPLOAD FAILED: results for this clip are only on the instance. Pipeline said: $verdict"
     code=1
   fi
+  printf '%s\t%s\t%ss\t%s\n' "$name" "$([ "$code" -eq 0 ] && echo ok || echo failed)" "$elapsed" "$verdict" \
+    | tee -a "$SUMMARY"
   upload_with_retry aws s3 cp "$SUMMARY" "$DEST/summary.txt" --region "$AWS_REGION" || true
   return "$code"
 }
