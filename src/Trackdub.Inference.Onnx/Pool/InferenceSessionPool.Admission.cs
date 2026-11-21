@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Linq;
 using Microsoft.ML.OnnxRuntime;
+using Trackdub.Contracts;
 using Trackdub.Contracts.Benchmarking;
 using Trackdub.Contracts.Diagnostics;
 using Trackdub.Domain;
@@ -249,8 +250,49 @@ internal sealed partial class InferenceSessionPool
         return false;
     }
     /// <summary>
-    /// Consecutive wait passes blocked by the process-GPU observation alone — with no evictable
-    /// pooled or external work left — before admission fails fast instead of parking until the
+    /// One graph a caller holds at the same time as its siblings, such as the three graphs a
+    /// single synthesis leases together. <paramref name="EstimatedMb"/> is its admission reservation.
+    /// <paramref name="UseOpenVinoCpuProxy"/> places an OpenVINO graph in the host-RAM bucket, as
+    /// <see cref="SessionPoolKey.UseOpenVinoCpuProxy"/> does for its real session key.
+    /// </summary>
+    internal readonly record struct ConcurrentLeaseGraph(
+        ExecutionProviderKind Provider,
+        int? DeviceId,
+        long EstimatedMb,
+        bool UseOpenVinoCpuProxy = false);
+
+    /// <summary>
+    /// Fails before anything is leased when the graphs a caller holds together cannot all fit their
+    /// buckets' budgets. Held leases are never evictable, so such a set can never be admitted: the
+    /// create would wait on memory its own leases hold, and nothing else can free it.
+    /// </summary>
+    internal void ValidateConcurrentLeaseAdmission(IReadOnlyList<ConcurrentLeaseGraph> graphs)
+    {
+        if (!enableMemoryAdmission)
+        {
+            return;
+        }
+
+        foreach (IGrouping<AdmissionBucket, ConcurrentLeaseGraph> group in
+                 graphs.GroupBy(graph => BucketOf(graph.Provider, graph.DeviceId, graph.UseOpenVinoCpuProxy)))
+        {
+            long totalMb = group.Sum(graph => graph.EstimatedMb);
+            long budgetMb = BudgetFor(group.Key);
+            if (totalMb > budgetMb)
+            {
+                throw new InvalidOperationException(
+                    $"Graphs held together by one synthesis need ~{totalMb} MB across {group.Count()} graph(s) on "
+                    + $"{DescribeBucket(group.Key)}, which exceeds its admission budget of {budgetMb} MB. Held sessions "
+                    + "cannot be evicted, so this set cannot be admitted. Raise the budget "
+                    + $"({BudgetVariableFor(group.Key)}) or run on a device with more memory.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Consecutive wait passes blocked — by the process-GPU observation alone, or by reservations
+    /// that exceed everything evictable — with no evictable pooled or external work left — before
+    /// admission fails fast instead of parking until the
     /// caller cancels. Each pass waits ~50 ms, so the default bounds the stall at ~5 s. Mutable
     /// (rather than const) so tests can pin the fail-fast without waiting out the production
     /// bound.
@@ -272,19 +314,6 @@ internal sealed partial class InferenceSessionPool
     /// no trace in run evidence. Mutable so tests can pin the threshold.
     /// </summary>
     internal static TimeSpan AdmissionWaitLogThreshold { get; set; } = TimeSpan.FromSeconds(1);
-    /// <summary>
-    /// Waits until <paramref name="needMb"/> fits in <paramref name="bucket"/>'s budget
-    /// (evicting idle sessions in that bucket as needed), then takes the reservation.
-    /// Never holds a reservation while waiting unless <paramref name="alreadyReserved"/> is set.
-    /// Host-backed providers share the host RAM budget; accelerator providers share their
-    /// device's VRAM budget.
-    /// </summary>
-    /// <param name="alreadyReserved">
-    /// When <see langword="true"/>, the caller already holds the <paramref name="needMb"/>
-    /// reservation in <paramref name="bucket"/> (a session that already exists and is resident),
-    /// so the wait only brings the bucket's total — including that reservation — within budget
-    /// and does not take a new one on success.
-    /// </param>
     /// <summary>
     /// Per-pass state for <see cref="WaitForAdmissionBudgetAsync"/>: the observed GPU
     /// reading, blocked flags, and eviction candidates collected under
@@ -320,6 +349,19 @@ internal sealed partial class InferenceSessionPool
         }
     }
 
+    /// <summary>
+    /// Waits until <paramref name="needMb"/> fits in <paramref name="bucket"/>'s budget
+    /// (evicting idle sessions in that bucket as needed), then takes the reservation.
+    /// Never holds a reservation while waiting unless <paramref name="alreadyReserved"/> is set.
+    /// Host-backed providers share the host RAM budget; accelerator providers share their
+    /// device's VRAM budget.
+    /// </summary>
+    /// <param name="alreadyReserved">
+    /// When <see langword="true"/>, the caller already holds the <paramref name="needMb"/>
+    /// reservation in <paramref name="bucket"/> (a session that already exists and is resident),
+    /// so the wait only brings the bucket's total — including that reservation — within budget
+    /// and does not take a new one on success.
+    /// </param>
     private async Task WaitForAdmissionBudgetAsync(
         long needMb,
         AdmissionBucket bucket,
@@ -365,7 +407,7 @@ internal sealed partial class InferenceSessionPool
                     continue;
                 }
 
-                TrackObservedStall(pass);
+                TrackBlockedStall(pass);
 
                 if (pass.ReservationBlocked || pass.ObservedBlocked)
                 {
@@ -547,20 +589,22 @@ internal sealed partial class InferenceSessionPool
     }
 
     /// <summary>
-    /// Stall accounting for observation-held passes: consecutive passes that free
+    /// Stall accounting for blocked passes (observation-held or reservation-held): consecutive passes that free
     /// nothing count toward the fail-fast bound, with the longer busy bound while
     /// live-but-unevictable entries can still turn over.
     /// </summary>
-    private void TrackObservedStall(AdmissionWaitPass pass)
+    private void TrackBlockedStall(AdmissionWaitPass pass)
     {
-        if (!pass.ObservedBlocked)
+        if (!pass.ObservedBlocked && !pass.ReservationBlocked)
         {
             pass.ObservedStallPasses = 0;
             return;
         }
 
         // Any eviction this pass may still drain: the next pass re-observes, so only
-        // consecutive passes that free nothing count toward the fail-fast bound.
+        // consecutive passes that free nothing count toward the fail-fast bound. A
+        // reservation-blocked pass reaches here only after every idle entry and external
+        // was offered, so a stall means the shortfall exceeds everything evictable.
         // Live-but-unevictable entries (held leases, pins, live externals) get the
         // longer busy bound since their turnover can still unblock the wait; an
         // empty bucket fails on the shorter bound.
@@ -591,16 +635,29 @@ internal sealed partial class InferenceSessionPool
             : ObservedBlockFailFastPasses;
         if (pass.ObservedStallPasses >= stallBound)
         {
-            long attributedMb = ObservedProcessGpuUsageMb(pass.Bucket, pass.Observation);
-            throw new InvalidOperationException(
-                $"Accelerator admission for '{DescribeBucket(pass.Bucket)}' needs ~{pass.NeedMb} MB, but ~{attributedMb} MB "
-                + "of dedicated GPU memory is attributed to this bucket against its admission budget of "
-                + $"{BudgetFor(pass.Bucket)} MB, with no evictable sessions or external reservations left to "
-                + "free. Free GPU memory, raise the budget "
-                + $"({SharedPoolOptions.BudgetMbVariable}), or opt out of process-GPU admission "
-                + $"({SharedPoolOptions.ProcessGpuAdmissionVariable}=0).");
+            throw new InvalidOperationException(pass.ReservationBlocked
+                ? DescribeReservationStall(pass)
+                : DescribeObservationStall(pass));
         }
     }
+
+    private static string BudgetVariableFor(AdmissionBucket bucket) =>
+        bucket.IsHost ? SharedPoolOptions.HostBudgetMbVariable : SharedPoolOptions.BudgetMbVariable;
+
+    private string DescribeReservationStall(AdmissionWaitPass pass) =>
+        $"Accelerator admission for '{DescribeBucket(pass.Bucket)}' needs ~{pass.NeedMb} MB, but ~{CurrentReservedMb(pass.Bucket)} MB "
+        + "is already reserved in this bucket against its admission budget of "
+        + $"{BudgetFor(pass.Bucket)} MB, with no idle sessions or external reservations left to free. "
+        + "The reserved sessions are held or pinned and do not release while this wait blocks. "
+        + $"Raise the budget ({BudgetVariableFor(pass.Bucket)}) or run on a device with more memory.";
+
+    private string DescribeObservationStall(AdmissionWaitPass pass) =>
+        $"Accelerator admission for '{DescribeBucket(pass.Bucket)}' needs ~{pass.NeedMb} MB, but ~{ObservedProcessGpuUsageMb(pass.Bucket, pass.Observation)} MB "
+        + "of dedicated GPU memory is attributed to this bucket against its admission budget of "
+        + $"{BudgetFor(pass.Bucket)} MB, with no evictable sessions or external reservations left to "
+        + "free. Free GPU memory, raise the budget "
+        + $"({BudgetVariableFor(pass.Bucket)}), or opt out of process-GPU admission "
+        + $"({SharedPoolOptions.ProcessGpuAdmissionVariable}=0).";
 
     private void LogLongAdmissionWait(AdmissionWaitPass pass)
     {
@@ -618,7 +675,10 @@ internal sealed partial class InferenceSessionPool
             + $"~{CurrentReservedMb(pass.Bucket)} MB incl. ~{pendingMb} MB pending, "
             + $"waited {pass.WaitStopwatch.Elapsed.TotalSeconds:F1}s); waiting for memory "
             + "to drain or sessions to be released.";
-        if (ColdStartCapture.Current?.Logger is { } logger)
+        // The CLI has no cold-start scope, so fall back to the process diagnostics logger
+        // before the trace listener: the wait must reach the run log, not just Trace output.
+        IApplicationLogger? logger = ColdStartCapture.Current?.Logger ?? OnnxExecutionSessionFactory.DiagnosticsLogger;
+        if (logger is not null)
         {
             logger.LogInformation(message);
         }
