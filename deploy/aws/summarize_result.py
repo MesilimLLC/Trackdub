@@ -21,26 +21,27 @@ def summarize(text, exit_code):
     except json.JSONDecodeError:
         return f"NO RESULT: result.json is not valid JSON (exit {exit_code})"
 
-    result = data.get("result") or {}
-    stages = result.get("stageOutcomes") or []
-    failed = [stage for stage in stages if stage.get("status") == "failed"]
+    failed = [stage for stage in (data.get("result") or {}).get("stageOutcomes") or []
+              if stage.get("status") == "failed"]
+    if failed:
+        return _failed_stage_verdict(failed[0])
+    if exit_code == 0 and data.get("status") == "succeeded":
+        return "OK"
+    return f"FAILED (exit {exit_code}): {data.get('status') or 'no stage outcome recorded'}"
 
-    if not failed:
-        if exit_code == 0 and data.get("status") == "succeeded":
-            return "OK"
-        return f"FAILED (exit {exit_code}): {data.get('status') or 'no stage outcome recorded'}"
 
-    stage = failed[0]
+def _failed_stage_verdict(stage):
     name = stage.get("stageName", "unknown stage")
     records = stage.get("degradationRecords") or []
     reason = records[0] if records else (stage.get("reasonCode") or "no reason recorded")
+    return f"FAILED at {name}: {reason}. Fix: {_hint_for(reason)}"
 
+
+def _hint_for(reason):
     overrun = OVERRUN_PATTERN.search(reason)
     if overrun:
-        hint = f"{OVERRUN_HINT} (overrun {overrun.group(1)} s)"
-    else:
-        hint = "read result.json and run.log for the stage's error"
-    return f"FAILED at {name}: {reason}. Fix: {hint}"
+        return f"{OVERRUN_HINT} (overrun {overrun.group(1)} s)"
+    return "read result.json and run.log for the stage's error"
 
 
 def main(argv=None):
