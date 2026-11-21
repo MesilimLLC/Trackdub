@@ -32,6 +32,8 @@ Options:
   --repo-commit SHA      Commit whose scripts the instance uses. Default: the commit in the image tag, or HEAD.
   --ami ID               Override the Deep Learning Base GPU AMI lookup.
   --max-minutes N        Hard cost cap for the instance (default: 180).
+  --vram-budget-mb N     Session pool VRAM admission budget for the container. Default: 30000 on g6.*,
+                         the detected budget on g6e.*. See the note at the default below.
   --dry-run              Render the configuration and print the plan; upload and launch nothing.
 USAGE
 }
@@ -48,6 +50,7 @@ PIPELINE_ARGS=""
 REPO_COMMIT=""
 AMI=""
 MAX_MINUTES=180
+VRAM_BUDGET_MB=""
 IMAGE=""
 GHCR_USER=""
 CLIPS=()
@@ -76,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --repo-commit) REPO_COMMIT="$2"; shift 2 ;;
     --ami) AMI="$2"; shift 2 ;;
     --max-minutes) MAX_MINUTES="$2"; shift 2 ;;
+    --vram-budget-mb) VRAM_BUDGET_MB="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -98,6 +102,13 @@ case "$INSTANCE_TYPE" in
   g6.xlarge|g6.2xlarge|g6e.xlarge|g6e.2xlarge) ;;
   *) fail "Instance type must be g6.* or g6e.* (the POC permission set blocks other types): $INSTANCE_TYPE" ;;
 esac
+# The pool reserves twice the weight size for CUDA sessions, and one Qwen3-TTS synthesis holds the
+# prefill and decode graphs together (~21.6 GB reserved). The L4's detected budget is 19.6 GB, so the
+# admission wait never ends. Actual use is well under 23 GB, so g6.* gets a budget above the estimate.
+if [[ -z "$VRAM_BUDGET_MB" && "$INSTANCE_TYPE" == g6.* ]]; then
+  VRAM_BUDGET_MB=30000
+fi
+[[ -z "$VRAM_BUDGET_MB" || "$VRAM_BUDGET_MB" =~ ^[1-9][0-9]*$ ]] || fail "--vram-budget-mb must be a positive integer: $VRAM_BUDGET_MB"
 if [[ "$IMAGE" != *@sha256:* && "$IMAGE" != *:sha-*-server && "$IMAGE" != *:container-v*-server ]]; then
   fail "Image must be pinned (@sha256 digest, :sha-<commit>-server or :container-vX.Y.Z-server): $IMAGE"
 fi
@@ -142,7 +153,7 @@ USER_DATA="$WORK/user-data.sh"
   printf 'export RUN_BUCKET=%q RUN_PREFIX=%q RUN_ID=%q AWS_REGION=%q\n' "$BUCKET" "$RUN_PREFIX" "$RUN_ID" "$REGION"
   printf 'export IMAGE=%q REPO_COMMIT=%q GHCR_USER=%q GHCR_TOKEN_PARAM=%q\n' "$IMAGE" "$REPO_COMMIT" "$GHCR_USER" "$GHCR_TOKEN_PARAM"
   printf 'export SOURCE_LANGUAGE=%q TARGET_LANG=%q PRESET=%q VOICE=%q\n' "$SOURCE_LANGUAGE" "$TARGET_LANG" "$PRESET" "$VOICE"
-  printf 'export EXTRA_PIPELINE_ARGS=%q MAX_MINUTES=%q\n' "$PIPELINE_ARGS" "$MAX_MINUTES"
+  printf 'export EXTRA_PIPELINE_ARGS=%q MAX_MINUTES=%q SESSION_VRAM_BUDGET_MB=%q\n' "$PIPELINE_ARGS" "$MAX_MINUTES" "$VRAM_BUDGET_MB"
   sed '1d' "$SCRIPT_DIR/run-batch.sh"
 } > "$USER_DATA"
 
