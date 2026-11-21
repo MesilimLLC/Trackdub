@@ -344,8 +344,11 @@ public sealed partial class DubbingPipelineEngine
                         : "Cloning each speaker from source audio."));
         }
 
+        IReadOnlyDictionary<Guid, string?>? speakerGenders =
+            await TryEstimateSpeakerGendersAsync(context, ttsState, cancellationToken).ConfigureAwait(false);
         GenerateTtsForAllSpeakersRequest ttsRequest = BuildPipelineTtsRequest(
-            ttsState, context.Options, context.RuntimeSelections);
+            ttsState, context.Options, context.RuntimeSelections, speakerGenders);
+        ReportGenderPairing(context, ttsState, speakerGenders, ttsRequest);
         if (ttsRequest.VoiceIdsBySpeakerId is { Count: > 0 })
         {
             ReportProgress(
@@ -375,10 +378,80 @@ public sealed partial class DubbingPipelineEngine
         return BuildStageWorkflowResultFromStageRun(ttsResult, StageNames.Tts, stageWorkStartedUtc);
     }
 
+    /// <summary>
+    /// Estimates speaker gender for runs that will give speakers a Qwen3 preset, so each speaker can
+    /// get a matching voice. Best effort: any failure keeps the language default voice.
+    /// </summary>
+    private static Task<IReadOnlyDictionary<Guid, string?>?> TryEstimateSpeakerGendersAsync(
+        StageExecutionContext context,
+        TranscriptProjectState state,
+        CancellationToken cancellationToken) =>
+        TryEstimateSpeakerGendersAsync(
+            context.Session,
+            context.Options,
+            context.RuntimeSelections,
+            state,
+            context.Progress,
+            cancellationToken);
+
+    private static async Task<IReadOnlyDictionary<Guid, string?>?> TryEstimateSpeakerGendersAsync(
+        IDubbingSession session,
+        DubbingSessionOptions options,
+        RuntimeModelSelections runtimeSelections,
+        TranscriptProjectState state,
+        IProgress<PipelineProgressEvent>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!UnattendedVoiceSelection.WillPairQwenPresets(state, options, runtimeSelections.TtsModelAlias) ||
+            TryResolveService<SpeakerReferenceClipService>(session) is not { } referenceClips)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await referenceClips.EstimateSpeakerGendersAsync(state, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ReportProgress(
+                progress,
+                new StageProgressEvent(
+                    StageNames.Tts,
+                    PipelineProgressEventKind.Progress,
+                    $"Could not estimate speaker gender ({ex.Message}); using the language default voice."));
+            return null;
+        }
+    }
+
+    private static void ReportGenderPairing(
+        StageExecutionContext context,
+        TranscriptProjectState state,
+        IReadOnlyDictionary<Guid, string?>? speakerGenders,
+        GenerateTtsForAllSpeakersRequest ttsRequest)
+    {
+        if (speakerGenders is null || ttsRequest.FallbackVoiceIdsBySpeakerId is not { Count: > 0 } fallbacks)
+        {
+            return;
+        }
+
+        foreach (ProjectSpeaker speaker in state.Speakers.Where(speaker => fallbacks.ContainsKey(speaker.Id)))
+        {
+            string gender = speakerGenders.GetValueOrDefault(speaker.Id) ?? "unknown gender";
+            ReportProgress(
+                context.Progress,
+                new StageProgressEvent(
+                    StageNames.Tts,
+                    PipelineProgressEventKind.Progress,
+                    $"{speaker.DisplayName}: estimated {gender}, voice {fallbacks[speaker.Id]}."));
+        }
+    }
+
     private static GenerateTtsForAllSpeakersRequest BuildPipelineTtsRequest(
         TranscriptProjectState state,
         DubbingSessionOptions options,
-        RuntimeModelSelections runtimeSelections)
+        RuntimeModelSelections runtimeSelections,
+        IReadOnlyDictionary<Guid, string?>? speakerGenders = null)
     {
         RuntimeExecutionProviderSelection ttsExecutionProvider =
             RuntimeModelSetupCoordinator.CreateExecutionProviderSelection(
@@ -387,7 +460,8 @@ public sealed partial class DubbingPipelineEngine
         return UnattendedVoiceSelection.BuildUnattendedTtsRequest(
             state,
             options,
-            runtimeSelections.TtsModelAlias) with
+            runtimeSelections.TtsModelAlias,
+            speakerGenders) with
         {
             PreferredExecutionProvider = ttsExecutionProvider.PreferredExecutionProvider,
             RequirePreferredExecutionProvider = ttsExecutionProvider.RequirePreferredExecutionProvider,

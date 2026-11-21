@@ -128,10 +128,12 @@ run_clip() {
   set +e
   local env_args=()
   [[ -z "${SESSION_VRAM_BUDGET_MB:-}" ]] || env_args=(-e "TRACKDUB_SESSION_VRAM_BUDGET_MB=$SESSION_VRAM_BUDGET_MB")
+  local voice_args=()
+  [[ -z "${VOICE:-}" ]] || voice_args=(--voice "$VOICE")
   # shellcheck disable=SC2086  # EXTRA_PIPELINE_ARGS is a deliberate word list from the launcher.
   dc run --rm -T --name "$container" "${env_args[@]}" trackdub run pipeline --media /work/input/in.mp4 --output "$job/project" \
     --source-language "$SOURCE_LANGUAGE" --target-language "$TARGET_LANG" \
-    --preset "$PRESET" --voice "$VOICE" $EXTRA_PIPELINE_ARGS \
+    --preset "$PRESET" "${voice_args[@]}" $EXTRA_PIPELINE_ARGS \
     --subtitle-format srt --result-file "$job/result.json" --progress-file "$job/progress.jsonl" </dev/null &
   local pid=$!
   killed="$(watch_clip "$pid" "$container" "$JOBS_ROOT/$name/progress.jsonl" "$start" "$log_start")"

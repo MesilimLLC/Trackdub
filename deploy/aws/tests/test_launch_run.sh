@@ -86,11 +86,15 @@ grep -q -- "--instance-initiated-shutdown-behavior terminate" "$AWS_LOG"
 grep -q -- "HttpTokens=required" "$AWS_LOG"
 # The default g6e.xlarge keeps the detected VRAM budget.
 grep -q "SESSION_VRAM_BUDGET_MB=''$" "$USER_DATA_COPY"
+# No --voice leaves the voice empty so the pipeline pairs Qwen3 presets by speaker gender.
+grep -q "VOICE=''$" "$USER_DATA_COPY"
 
 # g6.* (L4) gets a VRAM budget above the Qwen3-TTS reservation estimate; an explicit value wins.
 "$LAUNCHER" "${base[@]}" --run-id test-l4 --instance-type g6.xlarge > /dev/null 2>&1
 grep -q "SESSION_VRAM_BUDGET_MB=30000$" "$USER_DATA_COPY"
 "$LAUNCHER" "${base[@]}" --run-id test-l4-explicit --instance-type g6.xlarge --vram-budget-mb 26000 > /dev/null 2>&1
 grep -q "SESSION_VRAM_BUDGET_MB=26000$" "$USER_DATA_COPY"
+"$LAUNCHER" "${base[@]}" --run-id test-voice --voice SPEAKER_00:qwen3:ryan > /dev/null 2>&1
+grep -q "VOICE=SPEAKER_00:qwen3:ryan$" "$USER_DATA_COPY"
 
 echo "launch-run tests passed"
