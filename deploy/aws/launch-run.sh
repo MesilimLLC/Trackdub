@@ -87,8 +87,12 @@ fail() { echo "error: $*" >&2; exit 1; }
 [[ -n "$IMAGE" ]] || fail "--image is required."
 [[ -n "$GHCR_USER" ]] || fail "--ghcr-user is required."
 [[ "${#CLIPS[@]}" -gt 0 ]] || fail "Give --clips-dir or at least one --clip."
+declare -A SEEN_NAMES=()
 for clip in "${CLIPS[@]}"; do
   [[ -f "$clip" ]] || fail "Clip not found: $clip"
+  name="$(basename "$clip")"
+  [[ -z "${SEEN_NAMES[$name]:-}" ]] || fail "Two clips share the name $name; they would overwrite each other in S3. Rename one."
+  SEEN_NAMES[$name]=1
 done
 case "$INSTANCE_TYPE" in
   g6.xlarge|g6.2xlarge|g6e.xlarge|g6e.2xlarge) ;;

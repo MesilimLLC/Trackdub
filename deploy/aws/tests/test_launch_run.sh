@@ -57,6 +57,9 @@ expect_failure "moving tag" "must be pinned" "$LAUNCHER" --image ghcr.io/mesilim
 expect_failure "missing user" "--ghcr-user is required" "$LAUNCHER" --image ghcr.io/mesilimllc/trackdub@sha256:abc --clip "$TEST_ROOT/clips/a.MP4"
 expect_failure "bad instance type" "must be g6.* or g6e.*" "$LAUNCHER" "${base[@]}" --instance-type p5.48xlarge
 expect_failure "no clips" "Give --clips-dir" "$LAUNCHER" --image ghcr.io/mesilimllc/trackdub@sha256:abc --ghcr-user t
+mkdir -p "$TEST_ROOT/other"
+printf 'x' > "$TEST_ROOT/other/a.MP4"
+expect_failure "duplicate basename" "share the name a.MP4" "$LAUNCHER" "${base[@]}" --clip "$TEST_ROOT/clips/a.MP4" --clip "$TEST_ROOT/other/a.MP4"
 expect_failure "unpinned tag without commit" "Pass --repo-commit" "$LAUNCHER" --image ghcr.io/mesilimllc/trackdub:container-v0.1.0-server --ghcr-user t --clip "$TEST_ROOT/clips/a.MP4"
 
 # Dry run renders the config and uploads nothing.
