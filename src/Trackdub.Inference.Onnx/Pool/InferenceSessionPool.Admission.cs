@@ -252,8 +252,14 @@ internal sealed partial class InferenceSessionPool
     /// <summary>
     /// One graph a caller holds at the same time as its siblings, such as the three graphs a
     /// single synthesis leases together. <paramref name="EstimatedMb"/> is its admission reservation.
+    /// <paramref name="UseOpenVinoCpuProxy"/> places an OpenVINO graph in the host-RAM bucket, as
+    /// <see cref="SessionPoolKey.UseOpenVinoCpuProxy"/> does for its real session key.
     /// </summary>
-    internal readonly record struct ConcurrentLeaseGraph(ExecutionProviderKind Provider, int? DeviceId, long EstimatedMb);
+    internal readonly record struct ConcurrentLeaseGraph(
+        ExecutionProviderKind Provider,
+        int? DeviceId,
+        long EstimatedMb,
+        bool UseOpenVinoCpuProxy = false);
 
     /// <summary>
     /// Fails before anything is leased when the graphs a caller holds together cannot all fit their
@@ -268,7 +274,7 @@ internal sealed partial class InferenceSessionPool
         }
 
         foreach (IGrouping<AdmissionBucket, ConcurrentLeaseGraph> group in
-                 graphs.GroupBy(graph => BucketOf(graph.Provider, graph.DeviceId)))
+                 graphs.GroupBy(graph => BucketOf(graph.Provider, graph.DeviceId, graph.UseOpenVinoCpuProxy)))
         {
             long totalMb = group.Sum(graph => graph.EstimatedMb);
             long budgetMb = BudgetFor(group.Key);

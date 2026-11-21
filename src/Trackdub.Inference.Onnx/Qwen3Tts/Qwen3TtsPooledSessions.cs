@@ -69,12 +69,16 @@ internal sealed class Qwen3TtsPooledSessions : IDisposable
             graphs.Add(("speaker_encoder.onnx", selectedProvider, talkerMayFallBack));
         }
 
+        // Pinned keys take their OpenVINO residency from the factory (WithOpenVinoResidency), so
+        // the preflight must place them in the same bucket: host RAM under the CPU proxy.
+        bool openVinoCpuProxy = OnnxExecutionSessionFactory.UseOpenVinoCpuProxy;
         InferenceSessionPool.Shared.ValidateConcurrentLeaseAdmission(
             graphs
                 .Select(graph => new InferenceSessionPool.ConcurrentLeaseGraph(
                     graph.Provider,
                     null,
-                    SessionPoolKey.EstimateVramMb(Path.Join(modelDir, graph.FileName), graph.Provider, graph.MayFallBack)))
+                    SessionPoolKey.EstimateVramMb(Path.Join(modelDir, graph.FileName), graph.Provider, graph.MayFallBack),
+                    openVinoCpuProxy))
                 .ToArray());
     }
 

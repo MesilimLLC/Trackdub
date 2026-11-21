@@ -1955,6 +1955,26 @@ public sealed class InferenceSessionPoolTests
         });
     }
 
+    [Fact]
+    public void ConcurrentLeaseAdmission_OpenVinoCpuProxy_UsesHostRamBucket()
+    {
+        // Under the CPU proxy an OpenVINO graph lives in host RAM, as its real session key does.
+        // Two 2560 MB graphs exceed the 4096 MB device budget but fit the 8192 MB host budget.
+        using var pool = new InferenceSessionPool(
+            maxSessions: 8,
+            memoryBudgetMb: 4096,
+            hostMemoryBudgetMb: 8192);
+        var proxied = new[]
+        {
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.OpenVino, null, 2560, UseOpenVinoCpuProxy: true),
+            new InferenceSessionPool.ConcurrentLeaseGraph(ExecutionProviderKind.OpenVino, null, 2560, UseOpenVinoCpuProxy: true),
+        };
+        pool.ValidateConcurrentLeaseAdmission(proxied);
+
+        var npu = proxied.Select(graph => graph with { UseOpenVinoCpuProxy = false }).ToArray();
+        Assert.Throws<InvalidOperationException>(() => pool.ValidateConcurrentLeaseAdmission(npu));
+    }
+
     private sealed class RecordingApplicationLogger : IApplicationLogger
     {
         private readonly List<string> messages = [];
