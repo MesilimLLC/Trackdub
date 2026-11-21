@@ -225,6 +225,17 @@ capture_stall_snapshot() {
   } >> "$snap" 2>&1
 }
 
+upload_with_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    fi
+    sleep $((attempt * 10))
+  done
+  return 1
+}
+
 upload_stall_snapshot() {
   timeout 60 aws s3 cp "$WORK/stall-snapshot.txt" "$DEST/stall-snapshot.txt" --region "$AWS_REGION" >/dev/null 2>&1 || true
 }
