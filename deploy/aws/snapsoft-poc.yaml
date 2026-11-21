@@ -5,6 +5,13 @@ Description: >
   permission set is scoped to that region.
 
 Parameters:
+  AvailabilityZones:
+    Type: CommaDelimitedList
+    Default: us-east-1a,us-east-1b,us-east-1c,us-east-1d,us-east-1f
+    Description: >
+      Five zones for the POC subnets, in launch order. Set these explicitly: Fn::GetAZs returns only the zones
+      that have default subnets in the account, so its indexes differ between accounts. us-east-1e does not offer
+      the G6 types.
   VpcCidr:
     Type: String
     Default: 10.77.0.0/16
@@ -72,14 +79,14 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  # Three subnets in three zones: a GPU shortage in one zone is common, and the launcher
-  # retries the other subnets.
+  # Five subnets in the zones listed in AvailabilityZones. GPU capacity is per zone and runs out often; the
+  # launcher tries each subnet in turn.
   Subnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      AvailabilityZone: !Select [0, !GetAZs ""]
-      CidrBlock: !Select [0, !Cidr [!GetAtt Vpc.CidrBlock, 3, 8]]
+      AvailabilityZone: !Select [0, !Ref AvailabilityZones]
+      CidrBlock: !Select [0, !Cidr [!GetAtt Vpc.CidrBlock, 6, 8]]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -91,8 +98,8 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      AvailabilityZone: !Select [1, !GetAZs ""]
-      CidrBlock: !Select [1, !Cidr [!GetAtt Vpc.CidrBlock, 3, 8]]
+      AvailabilityZone: !Select [1, !Ref AvailabilityZones]
+      CidrBlock: !Select [1, !Cidr [!GetAtt Vpc.CidrBlock, 6, 8]]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -104,8 +111,8 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      AvailabilityZone: !Select [2, !GetAZs ""]
-      CidrBlock: !Select [2, !Cidr [!GetAtt Vpc.CidrBlock, 3, 8]]
+      AvailabilityZone: !Select [2, !Ref AvailabilityZones]
+      CidrBlock: !Select [2, !Cidr [!GetAtt Vpc.CidrBlock, 6, 8]]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -129,6 +136,44 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref Subnet3
+      RouteTableId: !Ref PublicRouteTable
+
+  Subnet4:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [3, !Ref AvailabilityZones]
+      CidrBlock: !Select [3, !Cidr [!GetAtt Vpc.CidrBlock, 6, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub trackdub-poc-${AWS::StackName}-4
+        - Key: Project
+          Value: trackdub-poc-e2e
+
+  Subnet5:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [4, !Ref AvailabilityZones]
+      CidrBlock: !Select [5, !Cidr [!GetAtt Vpc.CidrBlock, 6, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub trackdub-poc-${AWS::StackName}-5
+        - Key: Project
+          Value: trackdub-poc-e2e
+
+  Subnet4RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet4
+      RouteTableId: !Ref PublicRouteTable
+
+  Subnet5RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet5
       RouteTableId: !Ref PublicRouteTable
 
   # No inbound rules. Instances are managed through SSM Session Manager and only make outbound calls
@@ -264,7 +309,7 @@ Outputs:
     Value: !Ref Vpc
   SubnetIds:
     Description: Comma-separated; the launcher tries them in order.
-    Value: !Join [",", [!Ref Subnet1, !Ref Subnet2, !Ref Subnet3]]
+    Value: !Join [",", [!Ref Subnet1, !Ref Subnet2, !Ref Subnet3, !Ref Subnet4, !Ref Subnet5]]
   SecurityGroupId:
     Value: !Ref WorkerSecurityGroup
   BucketName:
