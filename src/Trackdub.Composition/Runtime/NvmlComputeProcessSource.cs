@@ -62,9 +62,7 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             {
                 return QueryLocked(out failure);
             }
-            catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException
-                or BadImageFormatException or InvalidOperationException or ArgumentException
-                or NotSupportedException or MarshalDirectiveException or SEHException)
+            catch (Exception exception) when (IsNativeFailure(exception))
             {
                 failure = $"NVML query failed ({exception.GetType().Name}).";
                 return null;
@@ -72,35 +70,56 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         }
     }
 
+    private static bool IsNativeFailure(Exception exception) =>
+        exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException
+            or InvalidOperationException or ArgumentException or NotSupportedException
+            or MarshalDirectiveException or SEHException;
+
     private IReadOnlyList<IReadOnlyList<NvmlComputeProcess>>? QueryLocked(out string? failure)
     {
+        Exports? ready = Prepare(out failure);
+        return ready is null ? null : QueryAllDevices(ready, out failure);
+    }
+
+    /// <summary>Loads NVML once and initializes it, or reports why it cannot be used.</summary>
+    private Exports? Prepare(out string? failure)
+    {
+        if (exports is null && loadFailure is null)
+        {
+            exports = Resolve(out loadFailure);
+        }
+
+        failure = loadFailure;
+        if (exports is null || failure is not null)
+        {
+            return null;
+        }
+
+        failure = EnsureInitialized(exports);
+        return failure is null ? exports : null;
+    }
+
+    private string? EnsureInitialized(Exports ready)
+    {
+        if (initialized)
+        {
+            return null;
+        }
+
+        int status = ready.Init();
+        if (status != Success)
+        {
+            return $"NVML initialization failed (status {status}).";
+        }
+
+        initialized = true;
+        return null;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<NvmlComputeProcess>>? QueryAllDevices(Exports ready, out string? failure)
+    {
         failure = null;
-        if (loadFailure is not null)
-        {
-            failure = loadFailure;
-            return null;
-        }
-
-        exports ??= Resolve(out loadFailure);
-        if (exports is null)
-        {
-            failure = loadFailure;
-            return null;
-        }
-
-        if (!initialized)
-        {
-            int initStatus = exports.Init();
-            if (initStatus != Success)
-            {
-                failure = $"NVML initialization failed (status {initStatus}).";
-                return null;
-            }
-
-            initialized = true;
-        }
-
-        if (exports.GetCount(out uint deviceCount) != Success)
+        if (ready.GetCount(out uint deviceCount) != Success)
         {
             failure = "NVML could not count devices.";
             return null;
@@ -109,17 +128,11 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         var devices = new List<IReadOnlyList<NvmlComputeProcess>>((int)deviceCount);
         for (uint index = 0; index < deviceCount; index++)
         {
-            if (exports.GetHandle(index, out nint device) != Success || device == nint.Zero)
-            {
-                failure = $"NVML could not open device {index}.";
-                return null;
-            }
-
-            IReadOnlyList<NvmlComputeProcess>? processes = QueryDevice(exports, device, index, out failure);
+            // A device that cannot be queried leaves the footprint partial, which would
+            // under-report real usage, so the whole reading is rejected instead.
+            IReadOnlyList<NvmlComputeProcess>? processes = QueryDevice(ready, index, out failure);
             if (processes is null)
             {
-                // A device that cannot be queried leaves the footprint partial, which would
-                // under-report real usage, so the whole reading is rejected instead.
                 return null;
             }
 
@@ -129,74 +142,129 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         return devices;
     }
 
-    private static IReadOnlyList<NvmlComputeProcess>? QueryDevice(Exports exports, nint device, uint index, out string? failure)
+    private static IReadOnlyList<NvmlComputeProcess>? QueryDevice(Exports ready, uint index, out string? failure)
     {
         failure = null;
+        if (ready.GetHandle(index, out nint device) != Success || device == nint.Zero)
+        {
+            failure = $"NVML could not open device {index}.";
+            return null;
+        }
+
         for (int attempt = 0; attempt < MaxQueryAttempts; attempt++)
         {
-            uint count = 0;
-            int status = exports.GetComputeProcesses(device, ref count, null);
-            if (status == Success && count == 0)
+            ListResult result = ListOnce(ready, device, index);
+            if (result.Outcome == ListOutcome.Listed)
             {
-                return [];
+                return result.Processes;
             }
 
-            if (status != InsufficientSize && status != Success)
+            if (result.Outcome == ListOutcome.Failed)
             {
-                failure = $"NVML could not list compute processes on device {index} (status {status}).";
+                failure = result.Failure;
                 return null;
             }
-
-            // Processes can start between the sizing call and the read, so leave slack and retry
-            // when the list still outgrows the buffer.
-            uint capacity = count + ProcessCountSlack;
-            var buffer = new NvmlProcessInfo[capacity];
-            uint filled = capacity;
-            status = exports.GetComputeProcesses(device, ref filled, buffer);
-            if (status == InsufficientSize)
-            {
-                continue;
-            }
-
-            if (status != Success)
-            {
-                failure = $"NVML could not list compute processes on device {index} (status {status}).";
-                return null;
-            }
-
-            var processes = new List<NvmlComputeProcess>((int)filled);
-            for (int i = 0; i < filled && i < buffer.Length; i++)
-            {
-                processes.Add(new NvmlComputeProcess(buffer[i].Pid, buffer[i].UsedGpuMemory));
-            }
-
-            return processes;
         }
 
         failure = $"NVML compute process list on device {index} kept changing size.";
         return null;
     }
 
+    /// <summary>One sizing call and one read; retries are the caller's loop.</summary>
+    private static ListResult ListOnce(Exports ready, nint device, uint index)
+    {
+        uint count = 0;
+        int status = ready.GetComputeProcesses(device, ref count, null);
+        if (status == Success && count == 0)
+        {
+            return ListResult.Listed([]);
+        }
+
+        if (status != Success && status != InsufficientSize)
+        {
+            return ListResult.Failed(ListFailure(index, status));
+        }
+
+        // Processes can start between the sizing call and the read, so leave slack; the list
+        // can still outgrow it, which the caller retries.
+        var buffer = new NvmlProcessInfo[count + ProcessCountSlack];
+        uint filled = (uint)buffer.Length;
+        status = ready.GetComputeProcesses(device, ref filled, buffer);
+        if (status == InsufficientSize)
+        {
+            return ListResult.Retry;
+        }
+
+        return status == Success
+            ? ListResult.Listed(ToProcesses(buffer, filled))
+            : ListResult.Failed(ListFailure(index, status));
+    }
+
+    private static string ListFailure(uint index, int status) =>
+        $"NVML could not list compute processes on device {index} (status {status}).";
+
+    private static IReadOnlyList<NvmlComputeProcess> ToProcesses(NvmlProcessInfo[] buffer, uint filled)
+    {
+        int count = (int)Math.Min(filled, (uint)buffer.Length);
+        var processes = new NvmlComputeProcess[count];
+        for (int i = 0; i < count; i++)
+        {
+            processes[i] = new NvmlComputeProcess(buffer[i].Pid, buffer[i].UsedGpuMemory);
+        }
+
+        return processes;
+    }
+
     private static Exports? Resolve(out string? failure)
     {
         failure = null;
-        if (!NativeLibrary.TryLoad("libnvidia-ml.so.1", out nint library)
-            && !NativeLibrary.TryLoad("libnvidia-ml.so", out library))
+        if (!TryLoadLibrary(out nint library))
         {
             failure = "NVML (libnvidia-ml.so.1) is not available on this host.";
             return null;
         }
 
-        if (TryGetExport<InitDelegate>(library, "nvmlInit_v2", out var init)
-            && TryGetExport<GetCountDelegate>(library, "nvmlDeviceGetCount_v2", out var getCount)
-            && TryGetExport<GetHandleDelegate>(library, "nvmlDeviceGetHandleByIndex_v2", out var getHandle)
-            && TryGetExport<GetComputeProcessesDelegate>(library, "nvmlDeviceGetComputeRunningProcesses_v3", out var getProcesses))
+        Exports? bound = Bind(library);
+        if (bound is null)
         {
-            return new Exports(init, getCount, getHandle, getProcesses);
+            // Nothing from the library will be used, so release the handle instead of keeping
+            // it mapped for the process lifetime.
+            NativeLibrary.Free(library);
+            failure = "The installed NVML does not export the functions the reader needs "
+                + "(including nvmlDeviceGetComputeRunningProcesses_v3).";
         }
 
-        failure = "The installed NVML does not export nvmlDeviceGetComputeRunningProcesses_v3.";
-        return null;
+        return bound;
+    }
+
+    private static bool TryLoadLibrary(out nint library) =>
+        NativeLibrary.TryLoad("libnvidia-ml.so.1", out library)
+        || NativeLibrary.TryLoad("libnvidia-ml.so", out library);
+
+    private static Exports? Bind(nint library)
+    {
+        if (!TryGetExport<InitDelegate>(library, "nvmlInit_v2", out var init))
+        {
+            return null;
+        }
+
+        if (!TryGetExport<GetCountDelegate>(library, "nvmlDeviceGetCount_v2", out var getCount))
+        {
+            return null;
+        }
+
+        if (!TryGetExport<GetHandleDelegate>(library, "nvmlDeviceGetHandleByIndex_v2", out var getHandle))
+        {
+            return null;
+        }
+
+        if (!TryGetExport<GetComputeProcessesDelegate>(
+                library, "nvmlDeviceGetComputeRunningProcesses_v3", out var getProcesses))
+        {
+            return null;
+        }
+
+        return new Exports(init, getCount, getHandle, getProcesses);
     }
 
     private static bool TryGetExport<TDelegate>(nint library, string name, out TDelegate function)
@@ -210,6 +278,26 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
 
         function = Marshal.GetDelegateForFunctionPointer<TDelegate>(address);
         return true;
+    }
+
+    private enum ListOutcome
+    {
+        Listed,
+        Retry,
+        Failed,
+    }
+
+    private readonly record struct ListResult(
+        ListOutcome Outcome,
+        IReadOnlyList<NvmlComputeProcess> Processes,
+        string? Failure)
+    {
+        internal static ListResult Retry { get; } = new(ListOutcome.Retry, [], null);
+
+        internal static ListResult Listed(IReadOnlyList<NvmlComputeProcess> processes) =>
+            new(ListOutcome.Listed, processes, null);
+
+        internal static ListResult Failed(string failure) => new(ListOutcome.Failed, [], failure);
     }
 
     private sealed record Exports(

@@ -89,49 +89,14 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
         out string? failure)
     {
         failure = null;
-        bool listedAny = false;
-        bool found = false;
-        ulong total = 0;
-        foreach (IReadOnlyList<NvmlComputeProcess> processes in devices)
+        NvmlComputeProcess[] listed = devices.SelectMany(processes => processes).ToArray();
+        NvmlComputeProcess[] own = listed.Where(process => process.Pid == processId).ToArray();
+        if (own.Length > 0)
         {
-            foreach (NvmlComputeProcess process in processes)
-            {
-                listedAny = true;
-                if (process.Pid != processId)
-                {
-                    continue;
-                }
-
-                found = true;
-                if (process.UsedGpuMemoryBytes == NvmlValueNotAvailable)
-                {
-                    failure = "NVML lists this process but reports its GPU memory as not available.";
-                    return null;
-                }
-
-                if (process.UsedGpuMemoryBytes == 0)
-                {
-                    failure = "NVML lists this process but reports 0 bytes for it, so the driver is not "
-                        + "attributing its GPU memory in this PID namespace.";
-                    return null;
-                }
-
-                if (process.UsedGpuMemoryBytes > long.MaxValue - total)
-                {
-                    failure = "NVML reported GPU memory beyond the supported range.";
-                    return null;
-                }
-
-                total += process.UsedGpuMemoryBytes;
-            }
+            return SumOwnEntries(own, out failure);
         }
 
-        if (found)
-        {
-            return (long)total;
-        }
-
-        if (!listedAny)
+        if (listed.Length == 0)
         {
             return 0;
         }
@@ -140,4 +105,37 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
             + "older than 555 NVML reports host process ids, which cannot be matched without --pid=host.";
         return null;
     }
+
+    private static long? SumOwnEntries(IEnumerable<NvmlComputeProcess> own, out string? failure)
+    {
+        failure = null;
+        ulong total = 0;
+        foreach (NvmlComputeProcess process in own)
+        {
+            failure = UntrustedReason(process);
+            if (failure is not null)
+            {
+                return null;
+            }
+
+            if (process.UsedGpuMemoryBytes > long.MaxValue - total)
+            {
+                failure = "NVML reported GPU memory beyond the supported range.";
+                return null;
+            }
+
+            total += process.UsedGpuMemoryBytes;
+        }
+
+        return (long)total;
+    }
+
+    /// <summary>Why this process's entry cannot be trusted as a footprint, or null when it can.</summary>
+    private static string? UntrustedReason(NvmlComputeProcess process) => process.UsedGpuMemoryBytes switch
+    {
+        NvmlValueNotAvailable => "NVML lists this process but reports its GPU memory as not available.",
+        0 => "NVML lists this process but reports 0 bytes for it, so the driver is not "
+            + "attributing its GPU memory in this PID namespace.",
+        _ => null,
+    };
 }
