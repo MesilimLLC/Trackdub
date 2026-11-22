@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Trackdub.Composition.Runtime;
+using Trackdub.Contracts;
 
 namespace Trackdub.Composition.Tests;
 
@@ -153,6 +154,84 @@ public sealed class LinuxProcessGpuMemoryReaderTests
         // The reason is cached for the process rather than probing the loader on every read.
         Assert.Null(source.QueryComputeProcesses(out string? second));
         Assert.Equal(failure, second);
+    }
+
+    [Fact]
+    public void Logs_once_when_the_reader_first_reads_this_processes_memory()
+    {
+        var logger = new RecordingLogger();
+        var reader = new LinuxProcessGpuMemoryReader(new FakeSource([Device((Own, 698UL * MiB))]), Own, logger);
+
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemory();
+
+        string line = Assert.Single(logger.Lines);
+        Assert.Contains("is active", line);
+        Assert.Contains("698 MiB", line);
+    }
+
+    [Fact]
+    public void Logs_the_reason_once_when_the_reader_is_unavailable()
+    {
+        var logger = new RecordingLogger();
+        var reader = new LinuxProcessGpuMemoryReader(
+            new FakeSource(null, "NVML (libnvidia-ml.so.1) is not available on this host."), Own, logger);
+
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemoryBytes();
+
+        string line = Assert.Single(logger.Lines);
+        Assert.Contains("is unavailable", line);
+        Assert.Contains("NVML (libnvidia-ml.so.1) is not available on this host.", line);
+        Assert.Contains("reservations only", line);
+    }
+
+    [Fact]
+    public void Logs_again_when_the_reader_changes_between_active_and_unavailable()
+    {
+        var logger = new RecordingLogger();
+        var source = new FakeSource([Device((Own, 100UL * MiB))]);
+        var reader = new LinuxProcessGpuMemoryReader(source, Own, logger);
+
+        reader.ReadDedicatedGpuMemoryBytes();
+        source.Devices = [Device((4242, 5UL * MiB))];
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemoryBytes();
+        source.Devices = [Device((Own, 120UL * MiB))];
+        reader.ReadDedicatedGpuMemoryBytes();
+
+        Assert.Equal(3, logger.Lines.Count);
+        Assert.Contains("is active", logger.Lines[0]);
+        Assert.Contains("is unavailable", logger.Lines[1]);
+        Assert.Contains("is active", logger.Lines[2]);
+    }
+
+    [Fact]
+    public void Reads_without_a_logger_still_work()
+    {
+        LinuxProcessGpuMemoryReader reader = ReaderFor(Device((Own, 64UL * MiB)));
+
+        Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+    }
+
+    private sealed class RecordingLogger : IApplicationLogger
+    {
+        public List<string> Lines { get; } = [];
+
+        public void LogDebug(string message)
+        {
+        }
+
+        public void LogInformation(string message) => Lines.Add(message);
+
+        public void LogWarning(string message, Exception? exception = null)
+        {
+        }
+
+        public void LogError(string message, Exception? exception = null)
+        {
+        }
     }
 
     private sealed class FakeSource(IReadOnlyList<IReadOnlyList<NvmlComputeProcess>>? devices, string? failure = null)
