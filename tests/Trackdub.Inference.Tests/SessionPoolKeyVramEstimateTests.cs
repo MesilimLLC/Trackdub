@@ -177,7 +177,7 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
     [InlineData(ExecutionProviderKind.DirectMl, 253)]
     [InlineData(ExecutionProviderKind.Cpu, 328)]         // 100 * 2 + 128
     [InlineData(ExecutionProviderKind.Dnnl, 328)]
-    [InlineData(ExecutionProviderKind.Cuda, 328)]
+    [InlineData(ExecutionProviderKind.Cuda, 278)]        // 100 * 1.5 + 128
     [InlineData(ExecutionProviderKind.TensorRt, 328)]
     [InlineData(ExecutionProviderKind.OpenVino, 328)]
     public void EstimateFromWeightBytes_ScalesByProvider(ExecutionProviderKind provider, long expectedMb)
@@ -188,6 +188,7 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
     [Theory]
     [InlineData(ExecutionProviderKind.TensorRTRtx)]
     [InlineData(ExecutionProviderKind.DirectMl)]
+    [InlineData(ExecutionProviderKind.Cuda)]
     [InlineData(ExecutionProviderKind.Cpu)]
     public void EstimateFromWeightBytes_ProviderMayFallBack_UsesConservativeFactor(ExecutionProviderKind provider)
     {
@@ -211,7 +212,7 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
         SessionPoolKey cuda = SessionPoolKey.ForEncoder("madlad", encoder, ExecutionProviderKind.Cuda);
 
         Assert.Equal(253, trt.EstimatedVramMb);
-        Assert.Equal(328, cuda.EstimatedVramMb);
+        Assert.Equal(278, cuda.EstimatedVramMb);
     }
 
     [Fact]
@@ -265,8 +266,8 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
 
         long trtMb = SessionPoolKey.EstimateFromWeightBytes(encoderBytes, ExecutionProviderKind.TensorRTRtx)
             + SessionPoolKey.EstimateFromWeightBytes(decoderBytes, ExecutionProviderKind.TensorRTRtx);
-        long unmeasuredMb = SessionPoolKey.EstimateFromWeightBytes(encoderBytes, ExecutionProviderKind.Cuda)
-            + SessionPoolKey.EstimateFromWeightBytes(decoderBytes, ExecutionProviderKind.Cuda);
+        long unmeasuredMb = SessionPoolKey.EstimateFromWeightBytes(encoderBytes, ExecutionProviderKind.TensorRt)
+            + SessionPoolKey.EstimateFromWeightBytes(decoderBytes, ExecutionProviderKind.TensorRt);
 
         Assert.Equal(8_069, trtMb);
         Assert.True(trtMb <= Rtx5070BudgetMb, $"{trtMb} MB should fit {Rtx5070BudgetMb} MB.");
@@ -292,7 +293,34 @@ public sealed class SessionPoolKeyVramEstimateTests : IDisposable
 
         Assert.Equal(8_957, Rtx5070BudgetMb);
         Assert.Equal(8_438, Bundle(ExecutionProviderKind.DirectMl));
-        Assert.Equal(13_274, Bundle(ExecutionProviderKind.Cuda));
+        Assert.Equal(13_274, Bundle(ExecutionProviderKind.TensorRt));
+    }
+
+    /// <summary>
+    /// Qwen3-TTS 1.7B CustomVoice on CUDA: the talker prefill and decode, code predictor and
+    /// vocoder graphs admitted together, sized from the downloaded files. At 2× the set needed
+    /// 23822 MiB and was refused on a 24 GB NVIDIA L4 (19578 MiB budget), although the run peaked
+    /// at 15736 MiB of process GPU memory once the budget was raised.
+    /// </summary>
+    [Fact]
+    public void Qwen3TtsCustomVoiceBundle_FitsL4BudgetOnCuda()
+    {
+        const long talkerBytes = 5_662_777_344L;
+        const long codePredictorBytes = 440_446_976L;
+        const long vocoderBytes = 456_219_776L;
+
+        long Bundle(ExecutionProviderKind provider) =>
+            (2 * SessionPoolKey.EstimateFromWeightBytes(talkerBytes, provider))
+            + SessionPoolKey.EstimateFromWeightBytes(codePredictorBytes, provider)
+            + SessionPoolKey.EstimateFromWeightBytes(vocoderBytes, provider);
+
+        long l4BudgetMb = InferenceSessionPool.ScaleAcceleratorBudgetMb(23_034);
+
+        Assert.Equal(19_578, l4BudgetMb);
+        Assert.Equal(17_994, Bundle(ExecutionProviderKind.Cuda));
+        Assert.Equal(23_822, Bundle(ExecutionProviderKind.TensorRt));
+        Assert.True(Bundle(ExecutionProviderKind.Cuda) <= l4BudgetMb);
+        Assert.True(Bundle(ExecutionProviderKind.TensorRt) > l4BudgetMb);
     }
 
     // ── Minimal ONNX protobuf writer ─────────────────────────────────────────

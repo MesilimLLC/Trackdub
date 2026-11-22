@@ -16,7 +16,7 @@ internal sealed partial class InferenceSessionPool
     /// while small GPUs keep the conservative 4GB guard.
     /// Deliberately a larger fraction than the host-RAM default (quarter): VRAM is the
     /// working set's home, and reservations already include weights plus slack (2x on
-    /// unmeasured providers, a measured 1.25x on TensorRT RTX and DirectML — see
+    /// unmeasured providers, a measured 1.25x on TensorRT RTX and DirectML, 1.5x on CUDA — see
     /// <see cref="SessionPoolKey.ResidentPercentOfWeights"/>), while process-GPU observation
     /// charges any real usage beyond them.
     /// An explicit <c>TRACKDUB_SESSION_VRAM_BUDGET_MB</c> always wins over this default.
