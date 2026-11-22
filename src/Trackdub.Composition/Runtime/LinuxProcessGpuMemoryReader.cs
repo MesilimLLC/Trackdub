@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Trackdub.Contracts;
 using Trackdub.Contracts.Benchmarking;
 
 namespace Trackdub.Composition.Runtime;
@@ -43,19 +44,26 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
     /// <summary>NVML_VALUE_NOT_AVAILABLE for the 64-bit <c>usedGpuMemory</c> field.</summary>
     internal const ulong NvmlValueNotAvailable = ulong.MaxValue;
 
+    private const int StateActive = 1;
+    private const int StateUnavailable = 2;
+
     private readonly INvmlComputeProcessSource source;
     private readonly uint processId;
+    private readonly IApplicationLogger? logger;
     private volatile string? lastFailure;
+    private int reportedState;
 
-    public LinuxProcessGpuMemoryReader()
-        : this(NvmlNativeComputeProcessSource.Shared, checked((uint)Environment.ProcessId))
+    public LinuxProcessGpuMemoryReader(IApplicationLogger? logger = null)
+        : this(NvmlNativeComputeProcessSource.Shared, checked((uint)Environment.ProcessId), logger)
     {
     }
 
-    internal LinuxProcessGpuMemoryReader(INvmlComputeProcessSource source, uint processId)
+    internal LinuxProcessGpuMemoryReader(
+        INvmlComputeProcessSource source, uint processId, IApplicationLogger? logger = null)
     {
         this.source = source;
         this.processId = processId;
+        this.logger = logger;
     }
 
     public string UnavailableReason => lastFailure ?? "No current Linux process GPU measurement is available.";
@@ -67,16 +75,48 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
 
     private long? Read()
     {
-        IReadOnlyList<IReadOnlyList<NvmlComputeProcess>>? devices = source.QueryComputeProcesses(out string? failure);
+        long? total = ReadTotal(out string? failure);
+        lastFailure = failure;
+        ReportStateChange(total, failure);
+        return total;
+    }
+
+    private long? ReadTotal(out string? failure)
+    {
+        IReadOnlyList<IReadOnlyList<NvmlComputeProcess>>? devices = source.QueryComputeProcesses(out failure);
         if (devices is null)
         {
-            lastFailure = failure ?? "NVML could not list compute processes.";
+            failure ??= "NVML could not list compute processes.";
             return null;
         }
 
-        long? total = SelectOwnUsage(devices, processId, out failure);
-        lastFailure = failure;
-        return total;
+        return SelectOwnUsage(devices, processId, out failure);
+    }
+
+    /// <summary>
+    /// Writes one information line the first time the reader is read and again whenever it flips
+    /// between active and unavailable, so a run's log shows which admission model the pool used
+    /// without logging on every admission decision.
+    /// </summary>
+    private void ReportStateChange(long? total, string? failure)
+    {
+        if (logger is null)
+        {
+            return;
+        }
+
+        int state = total is null ? StateUnavailable : StateActive;
+        if (Interlocked.Exchange(ref reportedState, state) == state)
+        {
+            return;
+        }
+
+        logger.LogInformation(state == StateActive
+            ? $"Process GPU memory reader (Linux/NVML) is active: this process holds "
+                + $"{total.GetValueOrDefault() / (1024 * 1024)} MiB on the GPU, which accelerator admission "
+                + "counts against the per-device budget."
+            : $"Process GPU memory reader (Linux/NVML) is unavailable: {failure} Accelerator admission "
+                + "uses the pool's own reservations only.");
     }
 
     /// <summary>

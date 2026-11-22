@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Trackdub.Application.Benchmarking;
 using Trackdub.Composition.Headless;
 using Trackdub.Composition.Runtime;
+using Trackdub.Contracts;
 using Trackdub.Contracts.Benchmarking;
 using Trackdub.Infrastructure.Diagnostics;
 using Trackdub.Inference.Onnx.Pool;
@@ -45,6 +46,21 @@ public sealed class ResourceTelemetryRegistrationTests
         {
             Assert.IsType<UnavailableProcessGpuMemoryReader>(reader);
         }
+    }
+
+    [Fact]
+    public void Linux_reader_logs_through_the_registered_application_logger()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Only the Linux reader reports through the application logger.");
+        var services = new ServiceCollection();
+        services.AddTrackdub();
+        var logger = new LineRecordingLogger();
+        services.Replace(ServiceDescriptor.Singleton<IApplicationLogger>(logger));
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IProcessGpuMemoryReader>().ReadDedicatedGpuMemoryBytes();
+
+        Assert.Contains(logger.Lines, line => line.StartsWith("Process GPU memory reader (Linux/NVML) is ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -277,5 +293,42 @@ public sealed class ResourceTelemetryRegistrationTests
         using var provider = services.BuildServiceProvider();
         Assert.Same(collector, provider.GetRequiredService<IResourceTelemetryCollector>());
         Assert.Same(validator, provider.GetRequiredService<IResourceTelemetryValidator>());
+    }
+
+    private sealed class LineRecordingLogger : IApplicationLogger
+    {
+        private readonly object gate = new();
+        private readonly List<string> lines = [];
+
+        public IReadOnlyList<string> Lines
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return lines.ToArray();
+                }
+            }
+        }
+
+        public void LogDebug(string message)
+        {
+        }
+
+        public void LogInformation(string message)
+        {
+            lock (gate)
+            {
+                lines.Add(message);
+            }
+        }
+
+        public void LogWarning(string message, Exception? exception = null)
+        {
+        }
+
+        public void LogError(string message, Exception? exception = null)
+        {
+        }
     }
 }
