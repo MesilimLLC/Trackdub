@@ -30,7 +30,8 @@ plus every external-data sidecar its tensors reference:
 |---|---|---|
 | TensorRT RTX | 1.25× | Measured: MADLAD-400 3B `trt_rtx_mixed_fp16_fp32` encoder + decoder (6.55 GB of external weights) raised process GPU usage by ~8 GB on a 12 GB RTX 5070, about 1.2× weights. The compiled engines for that pair total 7.94 GB (1.21×). |
 | DirectML | 1.25× | Measured: qwen3-asr-0.6b encoder + decoder-init + decoder-step (6445 MiB of per-session weights) raised process GPU usage by 6526 MiB on a 12 GB RTX 5070 under Windows ML 2.4.89 (ORT 1.27.1), about 1.0× weights. |
-| All others (CPU, DNNL, CUDA, TensorRT, OpenVINO, …) | 2× | Not measured; conservative allowance for weights, initialization and pre-packing copies, and activation slack. |
+| CUDA | 1.5× | Measured once: Qwen3-TTS 1.7B CustomVoice (talker prefill and decode at 5400 MiB of external weights each, code predictor 420 MiB, vocoder 435 MiB; 11655 MiB in all) on a 24 GB NVIDIA L4 (g6.xlarge). Process GPU usage peaked at 15736 MiB with earlier pipeline stages still resident. The two talker graphs were not resident together; if they were, the set would need at most about 14888 MiB, 1.28× weights. One clip on one GPU, so the factor stays well above that. Evidence: [MesilimLLC/Trackdub#677](https://github.com/MesilimLLC/Trackdub/issues/677). |
+| All others (CPU, DNNL, TensorRT, OpenVINO, …) | 2× | Not measured; conservative allowance for weights, initialization and pre-packing copies, and activation slack. |
 
 The pool key records the provider chosen before session creation, after any TensorRT RTX
 fallback decided at that point, so the factor follows that provider. A pooled single-session
@@ -71,12 +72,17 @@ accelerator budget 8957 MiB):
 | Bundle | Weights | Estimate | Result |
 |---|---|---|---|
 | MADLAD `trt_rtx_mixed_fp16_fp32` on TensorRT RTX | 2549 + 3702 MiB | 3314 + 4755 = 8069 MiB | Admitted; it runs with ~800 MB of VRAM to spare. |
-| Same files on CUDA (unmeasured, 2×) | 2549 + 3702 MiB | 5226 + 7532 = 12758 MiB | Refused; MADLAD falls back to CPU. |
+| Same files on CUDA (1.5×) | 2549 + 3702 MiB | 3951 + 5681 = 9632 MiB | Refused; MADLAD falls back to CPU. |
 | MADLAD bundled `quantized` (inline weights) on DirectML | 1275 + 1782 MiB | 1721 + 2355 = 4076 MiB | Admitted. On CPU (2×) it needs a host budget of at least 6370 MiB. |
 | qwen3-asr-0.6b on DirectML | 711 + 2867 + 2867 MiB | 1016 + 3711 + 3711 = 8438 MiB | Admitted; measured 6526 MiB. At 2× it needed 13274 MiB and failed the ASR stage. |
 
 Before external-data sidecars were counted, the `trt_rtx_mixed_fp16_fp32` pair reserved about
 260 MiB, so admission never refused or evicted anything for it.
+
+On a 24 GB NVIDIA L4 (23034 MiB reported, default accelerator budget 19578 MiB), Qwen3-TTS 1.7B
+CustomVoice on CUDA reserves 8228 + 8228 + 758 + 780 = 17994 MiB for its talker prefill, talker
+decode, code predictor and vocoder graphs, which are admitted together, so the set fits. At 2×
+the same set needed 23822 MiB and was refused with the fail-fast admission message.
 
 ## Raising the limits
 

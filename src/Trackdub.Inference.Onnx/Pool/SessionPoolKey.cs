@@ -192,18 +192,24 @@ internal sealed record SessionPoolKey
     /// </summary>
     /// <remarks>
     /// TensorRT RTX and DirectML hold each session's weights roughly once, both measured on a
-    /// 12 GB RTX 5070:
+    /// 12 GB RTX 5070; CUDA was measured once on a 24 GB NVIDIA L4:
     /// <list type="bullet">
     /// <item>TensorRT RTX: MADLAD-400 3B <c>trt_rtx_mixed_fp16_fp32</c> encoder + decoder
     /// (6.55 GB of external weights) raised process GPU usage by ~8 GB, about 1.2× weights.</item>
     /// <item>DirectML (Windows ML 2.4.89, ORT 1.27.1): qwen3-asr-0.6b encoder + decoder-init +
     /// decoder-step (711 MiB inline plus a 2867 MiB sidecar each decoder graph loads, 6445 MiB
     /// per-session weights) raised process GPU usage by 6526 MiB, about 1.0×.</item>
+    /// <item>CUDA (L4, 23034 MiB): Qwen3-TTS 1.7B CustomVoice talker prefill and decode (5400
+    /// MiB of external weights each), code predictor (420 MiB) and vocoder (435 MiB), 11655 MiB
+    /// in all. Process GPU usage peaked at 15736 MiB with earlier pipeline stages still
+    /// resident. The two talker graphs were not resident together; if they were, the set would
+    /// need at most about 14888 MiB, 1.28× weights.</item>
     /// </list>
-    /// 125% plus the per-graph allowance covers both. Every other provider is unmeasured and
-    /// keeps the conservative 2× (weights, initialization and pre-packing copies, activation
-    /// slack). On Windows, process-GPU observation still charges any real usage beyond an
-    /// estimate.
+    /// 125% plus the per-graph allowance covers the first two. 150% covers the CUDA set with
+    /// margin: it rests on one clip on one GPU, so it stays well above the measured 1.28×. Every
+    /// other provider is unmeasured and keeps the conservative 2× (weights, initialization and
+    /// pre-packing copies, activation slack). On Windows, process-GPU observation still charges
+    /// any real usage beyond an estimate.
     /// <para>
     /// Set <paramref name="providerMayFallBack"/> when session creation can still fall back
     /// from TensorRT RTX to another provider after the key is admitted (the pooled
@@ -212,9 +218,14 @@ internal sealed record SessionPoolKey
     /// </para>
     /// </remarks>
     internal static int ResidentPercentOfWeights(ExecutionProviderKind provider, bool providerMayFallBack = false) =>
-        !providerMayFallBack && provider is ExecutionProviderKind.TensorRTRtx or ExecutionProviderKind.DirectMl
-            ? 125
-            : 200;
+        providerMayFallBack
+            ? 200
+            : provider switch
+            {
+                ExecutionProviderKind.TensorRTRtx or ExecutionProviderKind.DirectMl => 125,
+                ExecutionProviderKind.Cuda => 150,
+                _ => 200,
+            };
 
     /// <summary>
     /// Resident estimate for <paramref name="weightBytes"/> of model weights on
