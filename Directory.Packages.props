@@ -11,14 +11,14 @@
     <WindowsMlOnnxRuntimeVersion>1.27.1</WindowsMlOnnxRuntimeVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="AWSSDK.S3" Version="4.1.0" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.1.2" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
     <PackageVersion Include="Avalonia" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.6" />
     <PackageVersion Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
-    <PackageVersion Include="Dapper" Version="2.1.89" />
+    <PackageVersion Include="Dapper" Version="2.1.100" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <!--
       Managed glossary analyzers intentionally use Lucene.NET 4.8 beta packages.
@@ -92,7 +92,7 @@
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <!-- Trackdub.Api -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
-    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.1.0" />
+    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.1.0.3" />
 
     <!-- Roslyn analyzer SDK for Trackdub.Analyzers + its in-tree test project. Analyzer tests use
          the in-box CSharpCompilation + GetAnalyzerDiagnosticsAsync path (no third-party test harness),
