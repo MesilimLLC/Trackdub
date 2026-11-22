@@ -56,8 +56,8 @@ of that gender, preferring presets native to the target language (male zh → `u
 Pipeline flags go through `--pipeline-args`, for example `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"`.
 
 Options: `--instance-type` (`g6.xlarge`, `g6.2xlarge`, `g6e.xlarge`, `g6e.2xlarge`; default `g6e.xlarge`),
-`--max-minutes`, `--vram-budget-mb` (session pool VRAM admission budget; defaults to 30000 on `g6.*`, see Known
-failures), `--ami`, `--dry-run` (renders and prints the plan, uploads and launches nothing).
+`--max-minutes`, `--vram-budget-mb` (session pool VRAM admission budget; optional, the pool detects it from the GPU
+by default, see Known failures), `--ami`, `--dry-run` (renders and prints the plan, uploads and launches nothing).
 
 The launcher uploads clips to `s3://<bucket>/runs/<run-id>/input/`, then tries each subnet until one has capacity.
 Clip filenames must be unique.
@@ -86,7 +86,7 @@ suggested fix where one is known.
 | `FAILED at input: could not download` | S3 read failed | Check the object exists under `input/`, rerun the launch for that clip |
 | `UPLOAD FAILED` | Results could not reach S3 after 3 tries | Results are only on the instance; the data volume is deleted at termination. Open an incident before relaunching |
 | `NO RESULT` | The pipeline exited before writing `result.json` | Read `run.log` and the clip's `progress.jsonl` |
-| `STALLED in stage 'tts'` on `g6.*` with GPU at 0% | Session pool admission budget (85% of the L4's 23 GB) is below the Qwen3-TTS reservation estimate; the wait never ends | The launcher sets `--vram-budget-mb 30000` on `g6.*` by default. If you overrode it, raise it again |
+| `STALLED in stage 'tts'` or `exceeds its admission budget` with GPU at 0% | The session pool's admission budget is below the reservation estimate for the Qwen3-TTS graphs held together (about 18.0 GB on CUDA; the L4's detected budget is 19.6 GB, so a stock L4 fits) | Pass `--vram-budget-mb` with a value above the estimate, or use a larger GPU |
 | Launcher: `No subnet had capacity` | No g6/g6e capacity in the three zones | Retry later, or use another instance type |
 
 The export overrun is still open. The 0.35 setting in the first retry still left a 4.9 s overrun on the test clip.
@@ -121,7 +121,7 @@ the default Spleeter separator and the stock AMI:
 Both runs reported 361 s in their summaries, and the time from host ready to batch end was 367 s on the L4 and 366 s on the L40S. We have not checked why the summaries match.
 
 Host preparation covers the data volume mount, the repo checkout, the GHCR login, the image pull, and seeding the
-model volume. It runs once per instance. The launcher sets a default VRAM budget of 30000 MB on `g6.*` only. An explicit `--vram-budget-mb` is passed through on any instance type. The translation time
+model volume. It runs once per instance. The launcher pins no VRAM budget; the session pool detects it from the GPU. An explicit `--vram-budget-mb` is passed through on any instance type. The translation time
 differs by GPU in this single run; we have not looked into why.
 
 Reusing a data-volume snapshot to skip host preparation is not available yet. `deploy/aws/run-batch.sh` formats

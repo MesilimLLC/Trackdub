@@ -32,8 +32,8 @@ Options:
   --repo-commit SHA      Commit whose scripts the instance uses. Default: the commit in the image tag, or HEAD.
   --ami ID               Override the Deep Learning Base GPU AMI lookup.
   --max-minutes N        Hard cost cap for the instance (default: 180).
-  --vram-budget-mb N     Session pool VRAM admission budget for the container. Default: 30000 on g6.*,
-                         the detected budget on g6e.*. See the note at the default below.
+  --vram-budget-mb N     Session pool VRAM admission budget for the container. Default: none, so the
+                         pool uses the budget it detects from the GPU.
   --dry-run              Render the configuration and print the plan; upload and launch nothing.
 USAGE
 }
@@ -102,12 +102,6 @@ case "$INSTANCE_TYPE" in
   g6.xlarge|g6.2xlarge|g6e.xlarge|g6e.2xlarge) ;;
   *) fail "Instance type must be g6.* or g6e.* (the POC permission set blocks other types): $INSTANCE_TYPE" ;;
 esac
-# The pool reserves twice the weight size for CUDA sessions, and one Qwen3-TTS synthesis holds the
-# prefill and decode graphs together (~21.6 GB reserved). The L4's detected budget is 19.6 GB, so the
-# admission wait never ends. Actual use is well under 23 GB, so g6.* gets a budget above the estimate.
-if [[ -z "$VRAM_BUDGET_MB" && "$INSTANCE_TYPE" == g6.* ]]; then
-  VRAM_BUDGET_MB=30000
-fi
 [[ -z "$VRAM_BUDGET_MB" || "$VRAM_BUDGET_MB" =~ ^[1-9][0-9]*$ ]] || fail "--vram-budget-mb must be a positive integer: $VRAM_BUDGET_MB"
 if [[ "$IMAGE" != *@sha256:* && "$IMAGE" != *:sha-*-server && "$IMAGE" != *:container-v*-server ]]; then
   fail "Image must be pinned (@sha256 digest, :sha-<commit>-server or :container-vX.Y.Z-server): $IMAGE"
