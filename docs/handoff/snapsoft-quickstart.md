@@ -107,6 +107,31 @@ aws ssm delete-parameter --region us-east-1 --name /trackdub/ghcr-read-token
 The bucket is retained when the stack is deleted, so results are not lost by accident. Empty and delete it
 explicitly.
 
+## Cold start
+
+Measured on the published `main` image, `ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server`,
+with a 40-second English clip, the default Spleeter separator, and the stock AMI:
+
+| Instance | Host ready after boot | Clip total | Translation | TTS |
+|---|---|---|---|---|
+| `g6.xlarge` (L4, 23 GB) | 384 s | 361 s | 34 s | 166 s |
+| `g6e.xlarge` (L40S, 46 GB) | 261 s | 361 s | 95 s | 149 s |
+
+Host preparation covers the data volume mount, the repo checkout, the GHCR login, the image pull, and seeding the
+model volume. It runs once per instance. The launcher sets the VRAM budget on `g6.*` only. The translation time
+differs by GPU in this single run; we have not looked into why.
+
+To skip host preparation on later jobs, snapshot the data volume (`/mnt/trackdub-data`) after host preparation
+finishes and attach that snapshot to new instances. This has not been tested yet.
+
+To record the image digest on an instance, after the pull, run:
+
+```bash
+docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server
+```
+
+This command has not been run on an instance yet.
+
 ## Cost
 
 `g6e.xlarge` is about $1.86/hour on demand in us-east-1, plus storage. In the first test, host preparation took
