@@ -139,6 +139,6 @@ This command has not been run on an instance yet.
 ## Cost
 
 `g6e.xlarge` is about $1.86/hour on demand in us-east-1, plus storage. Plan with the cold-start measurements above:
-on `g6e.xlarge`, host ready took 261 s, and the 40-second clip batch ran 367 s from host ready to batch end. An earlier
+on `g6e.xlarge`, host ready took 261 s, and the 40-second clip batch ran 366 s from host ready to batch end. An earlier
 first test reported about 4.5 minutes of host preparation and about 4 minutes per clip; the cold-start numbers
 supersede it. Use a new `--run-id` for every batch.
