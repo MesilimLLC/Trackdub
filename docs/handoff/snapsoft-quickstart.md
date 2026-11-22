@@ -86,7 +86,7 @@ suggested fix where one is known.
 | `FAILED at input: could not download` | S3 read failed | Check the object exists under `input/`, rerun the launch for that clip |
 | `UPLOAD FAILED` | Results could not reach S3 after 3 tries | Results are only on the instance; the data volume is deleted at termination. Open an incident before relaunching |
 | `NO RESULT` | The pipeline exited before writing `result.json` | Read `run.log` and the clip's `progress.jsonl` |
-| `STALLED in stage 'tts'` or `exceeds its admission budget` with GPU at 0% | The session pool's admission budget is below the reservation estimate for the Qwen3-TTS graphs held together (about 18.0 GB on CUDA; the L4's detected budget is 19.6 GB, so a stock L4 fits) | Pass `--vram-budget-mb` with a value above the estimate, or use a larger GPU |
+| `STALLED in stage 'tts'` or `exceeds its admission budget` with GPU at 0% | The session pool's admission budget is below the reservation estimate for the Qwen3-TTS graphs held together: about 18.0 GB on CUDA, against the L4's detected 19.6 GB, so a stock L4 fits. A server image built before the CUDA 1.5x reservation factor (merge commit `ae5cb0d`) reserves about 23.8 GB for the same set and does not fit | Use an image built from `main` at or after `ae5cb0d`, or pass `--vram-budget-mb` with a value above the estimate (30000 admitted the measured run on an older image) |
 | Launcher: `No subnet had capacity` | No g6/g6e capacity in the three zones | Retry later, or use another instance type |
 
 The export overrun is still open. The 0.35 setting in the first retry still left a 4.9 s overrun on the test clip.
