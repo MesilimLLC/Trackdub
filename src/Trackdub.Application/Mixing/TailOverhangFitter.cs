@@ -36,6 +36,8 @@ public sealed class TailOverhangFitter(
     private readonly IArtifactStore artifactStore =
         artifactStore ?? throw new ArgumentNullException(nameof(artifactStore));
 
+    private sealed record FittedClip(int Index, MixSpeechClip Clip, string FilePath);
+
     public async Task<TailFitResult> FitAsync(MixPlan plan, Guid stageRunId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -45,27 +47,16 @@ public sealed class TailOverhangFitter(
         List<string> createdFilePaths = [];
         foreach (MixPlanWarning warning in plan.Warnings)
         {
-            int clipIndex = FindFittableClipIndex(clips, warning);
-            string? fittedPath = null;
-            if (clipIndex >= 0)
-            {
-                (MixSpeechClip Clip, string Path)? fitted = await TryFitAsync(
-                    clips[clipIndex], warning, stageRunId, cancellationToken).ConfigureAwait(false);
-                if (fitted is { } result)
-                {
-                    clips[clipIndex] = result.Clip;
-                    fittedPath = result.Path;
-                }
-            }
-
-            if (fittedPath is null)
+            FittedClip? fitted = await TryFitWarningAsync(clips, warning, stageRunId, cancellationToken)
+                .ConfigureAwait(false);
+            if (fitted is null)
             {
                 remainingWarnings.Add(warning);
+                continue;
             }
-            else
-            {
-                createdFilePaths.Add(fittedPath);
-            }
+
+            clips[fitted.Index] = fitted.Clip;
+            createdFilePaths.Add(fitted.FilePath);
         }
 
         return createdFilePaths.Count == 0
@@ -73,26 +64,36 @@ public sealed class TailOverhangFitter(
             : new TailFitResult(plan with { SpeechClips = clips, Warnings = remainingWarnings }, createdFilePaths);
     }
 
-    private static int FindFittableClipIndex(List<MixSpeechClip> clips, MixPlanWarning warning)
+    private async Task<FittedClip?> TryFitWarningAsync(
+        List<MixSpeechClip> clips,
+        MixPlanWarning warning,
+        Guid stageRunId,
+        CancellationToken cancellationToken)
     {
-        if (warning.Code != MixPlanWarningCode.TakeExceedsSourceAudio ||
-            warning.OverhangSeconds is not double overhang ||
-            !double.IsFinite(overhang) ||
-            overhang <= 0d)
-        {
-            return -1;
-        }
-
-        return clips.FindIndex(clip =>
-            clip.SegmentId == warning.SegmentId &&
-            !clip.IsSilentGap &&
-            !string.IsNullOrWhiteSpace(clip.TakeRelativePath) &&
-            clip.TakeDurationSeconds is double duration &&
-            double.IsFinite(duration) &&
-            duration > 0d);
+        int index = FindFittableClipIndex(clips, warning);
+        return index < 0
+            ? null
+            : await TryFitAsync(index, clips[index], warning, stageRunId, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<(MixSpeechClip Clip, string Path)?> TryFitAsync(
+    private static int FindFittableClipIndex(List<MixSpeechClip> clips, MixPlanWarning warning) =>
+        IsMeasuredTailOverhang(warning)
+            ? clips.FindIndex(clip => clip.SegmentId == warning.SegmentId && HasPlacedTake(clip))
+            : -1;
+
+    private static bool IsMeasuredTailOverhang(MixPlanWarning warning) =>
+        warning.Code == MixPlanWarningCode.TakeExceedsSourceAudio && IsPositiveFinite(warning.OverhangSeconds);
+
+    private static bool HasPlacedTake(MixSpeechClip clip) =>
+        !clip.IsSilentGap &&
+        !string.IsNullOrWhiteSpace(clip.TakeRelativePath) &&
+        IsPositiveFinite(clip.TakeDurationSeconds);
+
+    private static bool IsPositiveFinite(double? value) =>
+        value is double number && double.IsFinite(number) && number > 0d;
+
+    private async Task<FittedClip?> TryFitAsync(
+        int index,
         MixSpeechClip clip,
         MixPlanWarning warning,
         Guid stageRunId,
@@ -101,7 +102,7 @@ public sealed class TailOverhangFitter(
         double duration = clip.TakeDurationSeconds!.Value;
         double overhang = warning.OverhangSeconds!.Value;
         double targetDuration = duration - overhang - SafetyMarginSeconds;
-        if (targetDuration <= 0d || duration / targetDuration > MaxTempoRatio)
+        if (!IsWithinFitLimit(duration, targetDuration))
         {
             return null;
         }
@@ -109,6 +110,28 @@ public sealed class TailOverhangFitter(
         double tempoRatio = duration / targetDuration;
         string outputRelativePath = ProjectArtifactPaths.GetExportTailFitTakeRelativePath(stageRunId, clip.SegmentId);
         string outputPath = artifactStore.GetPath(outputRelativePath);
+        if (!await TryStretchAsync(clip, warning, tempoRatio, outputPath, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        logger?.LogInformation(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{warning.SegmentReference}: compressed the take {tempoRatio:0.###}x to remove {warning.OverhangSeconds:0.###} s that ran past the end of the source audio."));
+        MixSpeechClip fitted = clip with { TakeRelativePath = outputRelativePath, TakeDurationSeconds = targetDuration };
+        return new FittedClip(index, fitted, outputPath);
+    }
+
+    private static bool IsWithinFitLimit(double duration, double targetDuration) =>
+        targetDuration > 0d && duration / targetDuration <= MaxTempoRatio;
+
+    private async Task<bool> TryStretchAsync(
+        MixSpeechClip clip,
+        MixPlanWarning warning,
+        double tempoRatio,
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -120,6 +143,7 @@ public sealed class TailOverhangFitter(
                     EnableRubberband: true,
                     TtsTimingOptions.Default.RubberbandStretchThreshold),
                 cancellationToken).ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -128,13 +152,8 @@ public sealed class TailOverhangFitter(
                 $"{warning.SegmentReference}: could not fit the take to the end of the source audio: {ex.Message}",
                 ex);
             DeleteQuietly(outputPath);
-            return null;
+            return false;
         }
-
-        logger?.LogInformation(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{warning.SegmentReference}: compressed the take {tempoRatio:0.###}x to remove {overhang:0.###} s that ran past the end of the source audio."));
-        return (clip with { TakeRelativePath = outputRelativePath, TakeDurationSeconds = targetDuration }, outputPath);
     }
 
     private static void DeleteQuietly(string path)
@@ -143,11 +162,9 @@ public sealed class TailOverhangFitter(
         {
             File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            // Best effort: a partial file that cannot be removed only costs disk space.
         }
     }
 }
