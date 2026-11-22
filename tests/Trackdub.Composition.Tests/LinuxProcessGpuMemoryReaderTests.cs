@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using Trackdub.Composition.Runtime;
 using Trackdub.Contracts;
 
@@ -208,11 +209,62 @@ public sealed class LinuxProcessGpuMemoryReaderTests
     }
 
     [Fact]
+    public void Writes_the_state_line_to_the_status_output_even_without_a_logger()
+    {
+        using var output = new StringWriter();
+        var reader = new LinuxProcessGpuMemoryReader(
+            new FakeSource([Device((Own, 698UL * MiB))]), Own, logger: null, statusOutput: output);
+
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemoryBytes();
+
+        string line = Assert.Single(output.ToString().Split(output.NewLine, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("is active", line);
+        Assert.Contains("698 MiB", line);
+    }
+
+    [Fact]
+    public void Writes_the_unavailable_reason_to_the_status_output_once_per_flip()
+    {
+        using var output = new StringWriter();
+        var source = new FakeSource([Device((Own, 100UL * MiB))]);
+        var reader = new LinuxProcessGpuMemoryReader(source, Own, logger: null, statusOutput: output);
+
+        reader.ReadDedicatedGpuMemoryBytes();
+        source.Devices = [Device((4242, 5UL * MiB))];
+        reader.ReadDedicatedGpuMemoryBytes();
+        reader.ReadDedicatedGpuMemoryBytes();
+
+        string[] lines = output.ToString().Split(output.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("is active", lines[0]);
+        Assert.Contains("is unavailable", lines[1]);
+        Assert.Contains("reservations only", lines[1]);
+    }
+
+    [Fact]
+    public void A_failing_status_output_does_not_fail_the_reading()
+    {
+        var reader = new LinuxProcessGpuMemoryReader(
+            new FakeSource([Device((Own, 64UL * MiB))]), Own, logger: null, statusOutput: new ThrowingWriter());
+
+        Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+        Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+    }
+
+    [Fact]
     public void Reads_without_a_logger_still_work()
     {
         LinuxProcessGpuMemoryReader reader = ReaderFor(Device((Own, 64UL * MiB)));
 
         Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+    }
+
+    private sealed class ThrowingWriter : TextWriter
+    {
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void WriteLine(string? value) => throw new IOException("stderr is closed.");
     }
 
     private sealed class RecordingLogger : IApplicationLogger
