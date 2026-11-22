@@ -1069,6 +1069,44 @@ public sealed class ExportStageHandlerTests
         Assert.Contains("/tail-fit/", clip.TakeRelativePath);
         Assert.Equal(6.0d - TailOverhangFitter.SafetyMarginSeconds, clip.StartSeconds + clip.TakeDurationSeconds!.Value, precision: 9);
         Assert.True(File.Exists(artifactStore.GetPath(clip.TakeRelativePath!)));
+        MixPlan savedPlan = (await new MixPlanStore(artifactStore).LoadAsync(TestContext.Current.CancellationToken))!;
+        Assert.Empty(savedPlan.Warnings);
+        Assert.Equal(clip.TakeRelativePath, Assert.Single(savedPlan.SpeechClips, speechClip => !speechClip.IsSilentGap).TakeRelativePath);
+    }
+
+    [Fact]
+    public async Task ExportAsync_leaves_the_saved_mix_plan_on_the_original_take_when_a_fitted_export_fails()
+    {
+        using var temp = new TempDirectory();
+        TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
+        TranscriptProjectState state = WithTakeDuration(context.State, 6.5d);
+        SeedTakeFile(temp.Path);
+        var artifactStore = new FakeArtifactStore(temp.Path);
+        var mixRenderer = new FakeMixRenderer();
+        ExportStageHandler handler = CreateHandler(
+            artifactStore,
+            mixRenderer,
+            new FakeLoudnessNormalizer(),
+            new ThrowingExportRenderer(new IOException("Export render failed.")),
+            new FakeMediaProbe { Snapshot = CreateProbeSnapshot(6.0d) },
+            new FakeMediaAssetRepository(),
+            new FakeProjectStageRunStore(),
+            tailOverhangFitter: new TailOverhangFitter(new FakeAudioTimeStretchService(), artifactStore));
+        string outputPath = Path.Join(temp.Path, "delivery", "lesson-dub.mp4");
+
+        await Assert.ThrowsAsync<ExportStageException>(() => handler.ExportAsync(
+            state,
+            new ExportStageRequest(context.Project.Id, outputPath, []),
+            TestContext.Current.CancellationToken));
+
+        MixSpeechClip fittedClip = Assert.Single(
+            Assert.Single(mixRenderer.Calls).MixPlan.SpeechClips, speechClip => !speechClip.IsSilentGap);
+        Assert.Contains("/tail-fit/", fittedClip.TakeRelativePath);
+        Assert.False(File.Exists(artifactStore.GetPath(fittedClip.TakeRelativePath!)));
+        MixPlan savedPlan = (await new MixPlanStore(artifactStore).LoadAsync(TestContext.Current.CancellationToken))!;
+        Assert.Equal(
+            "artifacts/tts/take-0001.wav",
+            Assert.Single(savedPlan.SpeechClips, speechClip => !speechClip.IsSilentGap).TakeRelativePath);
     }
 
     [Fact]

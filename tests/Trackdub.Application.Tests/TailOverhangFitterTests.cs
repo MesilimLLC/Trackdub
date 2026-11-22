@@ -131,14 +131,20 @@ public sealed class TailOverhangFitterTests : IDisposable
     }
 
     [Fact]
-    public async Task FitAsync_propagates_cancellation()
+    public async Task FitAsync_propagates_cancellation_and_removes_every_file_it_wrote()
     {
-        var canceling = new ThrowingStretchService(new OperationCanceledException());
-        MixSpeechClip clip = Clip(startSeconds: 0d, takeDurationSeconds: 5d);
-        MixPlan plan = PlanOf([clip], Overhang(clip, overhangSeconds: 0.3d));
+        // The first take fits; canceling while the second is being stretched must remove both outputs,
+        // because the caller only learns about files from a returned result.
+        var canceling = new ThrowingStretchService(new OperationCanceledException(), succeedFirst: 1);
+        MixSpeechClip first = Clip(startSeconds: 0d, takeDurationSeconds: 5d, segmentIndex: 0);
+        MixSpeechClip last = Clip(startSeconds: 5d, takeDurationSeconds: 5d, segmentIndex: 1);
+        MixPlan plan = PlanOf([first, last], Overhang(first, 0.3d), Overhang(last, 0.3d));
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => new TailOverhangFitter(canceling, store)
             .FitAsync(plan, Guid.NewGuid(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, canceling.OutputPaths.Count);
+        Assert.All(canceling.OutputPaths, path => Assert.False(File.Exists(path), path));
     }
 
     private Task<TailFitResult> FitAsync(MixPlan plan, Guid? stageRunId = null) =>
@@ -192,16 +198,23 @@ public sealed class TailOverhangFitterTests : IDisposable
             DuckingRegions: [],
             warnings);
 
-    private sealed class ThrowingStretchService(Exception exception) : IAudioTimeStretchService
+    private sealed class ThrowingStretchService(Exception exception, int succeedFirst = 0) : IAudioTimeStretchService
     {
-        public string? LastOutputPath { get; private set; }
+        public List<string> OutputPaths { get; } = [];
+
+        public string? LastOutputPath => OutputPaths.Count == 0 ? null : OutputPaths[^1];
 
         public Task<AudioTimeStretchResult> StretchAsync(
             AudioTimeStretchRequest request,
             CancellationToken cancellationToken)
         {
-            LastOutputPath = request.OutputPath;
+            OutputPaths.Add(request.OutputPath);
             File.WriteAllBytes(request.OutputPath, [9]);
+            if (OutputPaths.Count <= succeedFirst)
+            {
+                return Task.FromResult(new AudioTimeStretchResult(Trackdub.Domain.Tts.TtsStretchEngine.Atempo, UsedFallback: false));
+            }
+
             throw exception;
         }
     }

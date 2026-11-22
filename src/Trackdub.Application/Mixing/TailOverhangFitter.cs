@@ -27,8 +27,8 @@ public sealed class TailOverhangFitter(
 {
     public const double MaxTempoRatio = 1.25d;
 
-    // The overhang check tolerates 10 ms; ffmpeg's tempo filter can land a few ms either side of the
-    // requested length, so aim a little short of the source end.
+    // MixPlanBuilder tolerates a 10 ms overhang, and ffmpeg's tempo filter can land a few ms either side of
+    // the requested length. Aim 50 ms short of the source end so the fitted take clears that check with room.
     internal const double SafetyMarginSeconds = 0.05d;
 
     private readonly IAudioTimeStretchService audioTimeStretchService =
@@ -45,18 +45,28 @@ public sealed class TailOverhangFitter(
         List<MixSpeechClip> clips = [.. plan.SpeechClips];
         List<MixPlanWarning> remainingWarnings = [];
         List<string> createdFilePaths = [];
-        foreach (MixPlanWarning warning in plan.Warnings)
+        try
         {
-            FittedClip? fitted = await TryFitWarningAsync(clips, warning, stageRunId, cancellationToken)
-                .ConfigureAwait(false);
-            if (fitted is null)
+            foreach (MixPlanWarning warning in plan.Warnings)
             {
-                remainingWarnings.Add(warning);
-                continue;
-            }
+                FittedClip? fitted = await TryFitWarningAsync(clips, warning, stageRunId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (fitted is null)
+                {
+                    remainingWarnings.Add(warning);
+                    continue;
+                }
 
-            clips[fitted.Index] = fitted.Clip;
-            createdFilePaths.Add(fitted.FilePath);
+                clips[fitted.Index] = fitted.Clip;
+                createdFilePaths.Add(fitted.FilePath);
+            }
+        }
+        catch (Exception)
+        {
+            // The caller only learns about files from a returned result, so nothing it can clean up exists
+            // once this throws: remove the earlier fits here, then let the exception (often a cancellation) go on.
+            createdFilePaths.ForEach(DeleteQuietly);
+            throw;
         }
 
         return createdFilePaths.Count == 0
@@ -145,7 +155,12 @@ public sealed class TailOverhangFitter(
                 cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            DeleteQuietly(outputPath);
+            throw;
+        }
+        catch (Exception ex)
         {
             // Keep the original warning: it names the real problem and the export reports it.
             logger?.LogWarning(

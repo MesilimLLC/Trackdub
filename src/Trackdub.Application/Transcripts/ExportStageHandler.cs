@@ -125,9 +125,10 @@ public sealed class ExportStageHandler(
             await RunPreflightChecksAsync(
                 currentState, mediaAsset, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
 
-            MixPlan mixPlan = await BuildAndSaveMixPlanAsync(
+            BuiltMixPlan builtMixPlan = await BuildAndSaveMixPlanAsync(
                 currentState, mediaAsset, request, stageRun, failureRelativePath, outputPath,
                 rollbackArtifactPaths, cancellationToken).ConfigureAwait(false);
+            MixPlan mixPlan = builtMixPlan.Plan;
 
             RenderedSubtitleArtifacts subtitles = await CheckSubtitleCuesAsync(
                 currentState, request, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
@@ -151,6 +152,7 @@ public sealed class ExportStageHandler(
                 rollbackArtifactPaths, cancellationToken).ConfigureAwait(false);
 
             exportSucceeded = true;
+            await PublishFittedMixPlanAsync(builtMixPlan).ConfigureAwait(false);
             return result;
         }
         catch (ExportStageException)
@@ -260,7 +262,7 @@ public sealed class ExportStageHandler(
         }
     }
 
-    private async Task<MixPlan> BuildAndSaveMixPlanAsync(
+    private async Task<BuiltMixPlan> BuildAndSaveMixPlanAsync(
         TranscriptProjectState currentState,
         MediaAsset mediaAsset,
         ExportStageRequest request,
@@ -321,6 +323,7 @@ public sealed class ExportStageHandler(
                 });
             }
         }
+        MixPlan builtPlan = mixPlan;
         if (tailOverhangFitter is not null && mixPlan.Warnings.Count > 0)
         {
             TailFitResult fit = await tailOverhangFitter
@@ -328,7 +331,9 @@ public sealed class ExportStageHandler(
             mixPlan = fit.Plan;
             rollbackArtifactPaths.AddRange(fit.CreatedFilePaths);
         }
-        await mixPlanStore.SaveAsync(mixPlan, cancellationToken).ConfigureAwait(false);
+        // Save the plan as built. A fitted plan references files that a failed export rolls back, so it is
+        // published only after the export has succeeded (see PublishFittedMixPlanAsync).
+        await mixPlanStore.SaveAsync(builtPlan, cancellationToken).ConfigureAwait(false);
         if (mixPlan.Warnings.Count > 0)
         {
             await FailWithReportAsync(
@@ -339,7 +344,30 @@ public sealed class ExportStageHandler(
                 BuildTakeFailureCauses(mixPlan),
                 cancellationToken).ConfigureAwait(false);
         }
-        return mixPlan;
+        return new BuiltMixPlan(mixPlan, WasFitted: !ReferenceEquals(builtPlan, mixPlan));
+    }
+
+    private sealed record BuiltMixPlan(MixPlan Plan, bool WasFitted);
+
+    // Best effort and after delivery: the export has already succeeded, so a failure here must not turn it
+    // into a failed export. The plan saved earlier stays valid; it just still shows the unfitted takes.
+    private async Task PublishFittedMixPlanAsync(BuiltMixPlan built)
+    {
+        if (!built.WasFitted)
+        {
+            return;
+        }
+
+        try
+        {
+            await mixPlanStore.SaveAsync(built.Plan, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(
+                $"Export succeeded but the fitted mix plan could not be saved; the saved plan still shows the unfitted takes: {ex.Message}",
+                ex);
+        }
     }
 
     private async Task<double> ProbeAudioDurationAsync(string relativePath, CancellationToken cancellationToken)
