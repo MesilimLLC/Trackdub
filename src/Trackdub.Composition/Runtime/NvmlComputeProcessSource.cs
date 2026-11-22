@@ -171,7 +171,7 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         failure = null;
         for (int attempt = 0; attempt < MaxQueryAttempts; attempt++)
         {
-            ListResult result = ListOnce(lister, device);
+            ListResult result = new ListQuery(lister, device).Run();
             if (result.Outcome == ListOutcome.Listed)
             {
                 return result.Processes;
@@ -187,52 +187,6 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         failure = $"NVML {lister.Name} process list on device {device.Index} kept changing size.";
         return null;
     }
-
-    /// <summary>One sizing call and one read; retries are the caller's loop.</summary>
-    private static ListResult ListOnce(ProcessLister lister, NvmlDevice device)
-    {
-        uint count = 0;
-        var size = new ListSize(lister.Get(device.Handle, ref count, null), count);
-        return SizingOutcome(lister, device, size) ?? ReadList(lister, device, size);
-    }
-
-    /// <summary>The result the sizing call already decides, or null when the list must be read.</summary>
-    private static ListResult? SizingOutcome(ProcessLister lister, NvmlDevice device, ListSize size)
-    {
-        if (size.Status == Success && size.Count == 0)
-        {
-            return ListResult.Listed([]);
-        }
-
-        if (size.Status == NotSupported && lister.UnsupportedMeansEmpty)
-        {
-            return ListResult.Listed([]);
-        }
-
-        return size.Status is Success or InsufficientSize
-            ? null
-            : ListResult.Failed(ListFailure(lister, device, size.Status));
-    }
-
-    private static ListResult ReadList(ProcessLister lister, NvmlDevice device, ListSize size)
-    {
-        // Processes can start between the sizing call and the read, so leave slack; the list
-        // can still outgrow it, which the caller retries.
-        var buffer = new NvmlProcessInfo[size.Count + ProcessCountSlack];
-        uint filled = (uint)buffer.Length;
-        int status = lister.Get(device.Handle, ref filled, buffer);
-        if (status == InsufficientSize)
-        {
-            return ListResult.Retry;
-        }
-
-        return status == Success
-            ? ListResult.Listed(ToProcesses(buffer.AsSpan(0, (int)Math.Min(filled, (uint)buffer.Length))))
-            : ListResult.Failed(ListFailure(lister, device, status));
-    }
-
-    private static string ListFailure(ProcessLister lister, NvmlDevice device, int status) =>
-        $"NVML could not list {lister.Name} processes on device {device.Index} (status {status}).";
 
     private static IReadOnlyList<NvmlComputeProcess> ToProcesses(ReadOnlySpan<NvmlProcessInfo> infos)
     {
@@ -349,6 +303,54 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         }
     }
 
+    /// <summary>One sizing call and one read of a device's process list; retries are the caller's loop.</summary>
+    private sealed class ListQuery(ProcessLister lister, NvmlDevice device)
+    {
+        private int status;
+        private uint count;
+
+        internal ListResult Run()
+        {
+            status = lister.Get(device.Handle, ref count, null);
+            return DecidedBySizing() ?? Read();
+        }
+
+        private ListResult? DecidedBySizing()
+        {
+            if (status == Success && count == 0)
+            {
+                return ListResult.Listed([]);
+            }
+
+            if (status == NotSupported && lister.UnsupportedMeansEmpty)
+            {
+                return ListResult.Listed([]);
+            }
+
+            return status is Success or InsufficientSize ? null : Failed();
+        }
+
+        private ListResult Read()
+        {
+            // Processes can start between the sizing call and the read, so leave slack; the list
+            // can still outgrow it, which the caller retries.
+            var buffer = new NvmlProcessInfo[count + ProcessCountSlack];
+            uint filled = (uint)buffer.Length;
+            status = lister.Get(device.Handle, ref filled, buffer);
+            if (status == InsufficientSize)
+            {
+                return ListResult.Retry;
+            }
+
+            return status == Success
+                ? ListResult.Listed(ToProcesses(buffer.AsSpan(0, (int)Math.Min(filled, (uint)buffer.Length))))
+                : Failed();
+        }
+
+        private ListResult Failed() => ListResult.Failed(
+            $"NVML could not list {lister.Name} processes on device {device.Index} (status {status}).");
+    }
+
     private sealed class ListResult
     {
         private ListResult()
@@ -375,8 +377,6 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         Compute,
         Graphics,
     }
-
-    private readonly record struct ListSize(int Status, uint Count);
 
     private sealed record ProcessLister(ListKind Kind, GetProcessesDelegate Get)
     {
