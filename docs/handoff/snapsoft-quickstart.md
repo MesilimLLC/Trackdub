@@ -107,7 +107,38 @@ aws ssm delete-parameter --region us-east-1 --name /trackdub/ghcr-read-token
 The bucket is retained when the stack is deleted, so results are not lost by accident. Empty and delete it
 explicitly.
 
+## Cold start
+
+Measured on the image built from `main` at commit `1ed89aa`, pulled as
+`ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server`. The clip was 40 seconds of English, with
+the default Spleeter separator and the stock AMI:
+
+| Instance | Host ready after boot | Clip total | Translation | TTS |
+|---|---|---|---|---|
+| `g6.xlarge` (L4, 23 GB) | 384 s | 361 s | 34 s | 166 s |
+| `g6e.xlarge` (L40S, 46 GB) | 261 s | 361 s | 95 s | 149 s |
+
+Both runs reported 361 s in their summaries, and the time from host ready to batch end was 367 s on the L4 and 366 s on the L40S. We have not checked why the summaries match.
+
+Host preparation covers the data volume mount, the repo checkout, the GHCR login, the image pull, and seeding the
+model volume. It runs once per instance. The launcher sets a default VRAM budget of 30000 MB on `g6.*` only. An explicit `--vram-budget-mb` is passed through on any instance type. The translation time
+differs by GPU in this single run; we have not looked into why.
+
+Reusing a data-volume snapshot to skip host preparation is not available yet. `deploy/aws/run-batch.sh` formats
+the unmounted data disk on every run (`mkfs.xfs -f`), which would erase a restored model cache. The launcher also
+always creates a new data volume. Making this work needs launcher and bootstrap changes.
+
+To record the image digest on an instance, after the pull, run, with `IMAGE` set to the same image you passed to the launcher:
+
+```bash
+docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE"
+```
+
+This command has not been run on an instance yet.
+
 ## Cost
 
-`g6e.xlarge` is about $1.86/hour on demand in us-east-1, plus storage. In the first test, host preparation took
-about 4.5 minutes, and a 40-second clip took about 4 minutes to process. Use a new `--run-id` for every batch.
+`g6e.xlarge` is about $1.86/hour on demand in us-east-1, plus storage. Plan with the cold-start measurements above:
+on `g6e.xlarge`, host ready took 261 s, and the 40-second clip batch ran 366 s from host ready to batch end. An earlier
+first test reported about 4.5 minutes of host preparation and about 4 minutes per clip; the cold-start numbers
+supersede it. Use a new `--run-id` for every batch.
