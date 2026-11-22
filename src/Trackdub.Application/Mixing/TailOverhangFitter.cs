@@ -36,6 +36,10 @@ public sealed class TailOverhangFitter(
     private readonly IArtifactStore artifactStore =
         artifactStore ?? throw new ArgumentNullException(nameof(artifactStore));
 
+    private sealed record FitContext(List<MixSpeechClip> Clips, Guid StageRunId);
+
+    private sealed record FitCandidate(int Index, MixSpeechClip Clip, MixPlanWarning Warning);
+
     private sealed record FittedClip(int Index, MixSpeechClip Clip, string FilePath);
 
     public async Task<TailFitResult> FitAsync(MixPlan plan, Guid stageRunId, CancellationToken cancellationToken)
@@ -43,13 +47,14 @@ public sealed class TailOverhangFitter(
         ArgumentNullException.ThrowIfNull(plan);
 
         List<MixSpeechClip> clips = [.. plan.SpeechClips];
+        var context = new FitContext(clips, stageRunId);
         List<MixPlanWarning> remainingWarnings = [];
         List<string> createdFilePaths = [];
         try
         {
             foreach (MixPlanWarning warning in plan.Warnings)
             {
-                FittedClip? fitted = await TryFitWarningAsync(clips, warning, stageRunId, cancellationToken)
+                FittedClip? fitted = await TryFitWarningAsync(context, warning, cancellationToken)
                     .ConfigureAwait(false);
                 if (fitted is null)
                 {
@@ -75,15 +80,16 @@ public sealed class TailOverhangFitter(
     }
 
     private async Task<FittedClip?> TryFitWarningAsync(
-        List<MixSpeechClip> clips,
+        FitContext context,
         MixPlanWarning warning,
-        Guid stageRunId,
         CancellationToken cancellationToken)
     {
-        int index = FindFittableClipIndex(clips, warning);
+        int index = FindFittableClipIndex(context.Clips, warning);
         return index < 0
             ? null
-            : await TryFitAsync(index, clips[index], warning, stageRunId, cancellationToken).ConfigureAwait(false);
+            : await TryFitAsync(
+                new FitCandidate(index, context.Clips[index], warning), context.StageRunId, cancellationToken)
+                .ConfigureAwait(false);
     }
 
     private static int FindFittableClipIndex(List<MixSpeechClip> clips, MixPlanWarning warning) =>
@@ -103,12 +109,12 @@ public sealed class TailOverhangFitter(
         value is double number && double.IsFinite(number) && number > 0d;
 
     private async Task<FittedClip?> TryFitAsync(
-        int index,
-        MixSpeechClip clip,
-        MixPlanWarning warning,
+        FitCandidate candidate,
         Guid stageRunId,
         CancellationToken cancellationToken)
     {
+        MixSpeechClip clip = candidate.Clip;
+        MixPlanWarning warning = candidate.Warning;
         double duration = clip.TakeDurationSeconds!.Value;
         double overhang = warning.OverhangSeconds!.Value;
         double targetDuration = duration - overhang - SafetyMarginSeconds;
@@ -120,53 +126,50 @@ public sealed class TailOverhangFitter(
         double tempoRatio = duration / targetDuration;
         string outputRelativePath = ProjectArtifactPaths.GetExportTailFitTakeRelativePath(stageRunId, clip.SegmentId);
         string outputPath = artifactStore.GetPath(outputRelativePath);
-        if (!await TryStretchAsync(clip, warning, tempoRatio, outputPath, cancellationToken).ConfigureAwait(false))
+        var request = new AudioTimeStretchRequest(
+            artifactStore.GetPath(clip.TakeRelativePath!),
+            outputPath,
+            tempoRatio,
+            EnableRubberband: true,
+            TtsTimingOptions.Default.RubberbandStretchThreshold);
+        if (!await TryStretchAsync(request, warning.SegmentReference, cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
 
         logger?.LogInformation(string.Create(
             CultureInfo.InvariantCulture,
-            $"{warning.SegmentReference}: compressed the take {tempoRatio:0.###}x to remove {warning.OverhangSeconds:0.###} s that ran past the end of the source audio."));
+            $"{warning.SegmentReference}: compressed the take {tempoRatio:0.###}x to remove {overhang:0.###} s that ran past the end of the source audio."));
         MixSpeechClip fitted = clip with { TakeRelativePath = outputRelativePath, TakeDurationSeconds = targetDuration };
-        return new FittedClip(index, fitted, outputPath);
+        return new FittedClip(candidate.Index, fitted, outputPath);
     }
 
     private static bool IsWithinFitLimit(double duration, double targetDuration) =>
         targetDuration > 0d && duration / targetDuration <= MaxTempoRatio;
 
     private async Task<bool> TryStretchAsync(
-        MixSpeechClip clip,
-        MixPlanWarning warning,
-        double tempoRatio,
-        string outputPath,
+        AudioTimeStretchRequest request,
+        string segmentReference,
         CancellationToken cancellationToken)
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            await audioTimeStretchService.StretchAsync(
-                new AudioTimeStretchRequest(
-                    artifactStore.GetPath(clip.TakeRelativePath!),
-                    outputPath,
-                    tempoRatio,
-                    EnableRubberband: true,
-                    TtsTimingOptions.Default.RubberbandStretchThreshold),
-                cancellationToken).ConfigureAwait(false);
+            Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath)!);
+            await audioTimeStretchService.StretchAsync(request, cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException)
         {
-            DeleteQuietly(outputPath);
+            DeleteQuietly(request.OutputPath);
             throw;
         }
         catch (Exception ex)
         {
             // Keep the original warning: it names the real problem and the export reports it.
             logger?.LogWarning(
-                $"{warning.SegmentReference}: could not fit the take to the end of the source audio: {ex.Message}",
+                $"{segmentReference}: could not fit the take to the end of the source audio: {ex.Message}",
                 ex);
-            DeleteQuietly(outputPath);
+            DeleteQuietly(request.OutputPath);
             return false;
         }
     }
