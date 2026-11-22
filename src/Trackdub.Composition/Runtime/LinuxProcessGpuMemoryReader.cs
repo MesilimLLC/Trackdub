@@ -25,6 +25,11 @@ namespace Trackdub.Composition.Runtime;
 /// and the pool keeps accounting for its own reservations only.
 /// </para>
 /// <para>
+/// NVML's compute list covers CUDA contexts and excludes graphics ones. Trackdub's inference
+/// providers (CUDA, TensorRT) allocate through compute contexts, so the compute list is this
+/// process's footprint; a graphics-only context on the same GPU would not be counted.
+/// </para>
+/// <para>
 /// NVML has no adapter LUID, so only the process total is reported and every device is charged the
 /// full total, the conservative bound the pool already uses when a reader gives no breakdown.
 /// </para>

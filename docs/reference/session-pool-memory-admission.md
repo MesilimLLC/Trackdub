@@ -122,8 +122,10 @@ no source and keep reservation-only accounting.
 
 ### Linux (NVML)
 
-NVML is injected by the NVIDIA container toolkit whenever a GPU is passed through, so the reader
-needs no extra setup in the server image. Measured on an NVIDIA L4 with driver 595.112.07, Docker
+NVML is injected by the NVIDIA container toolkit when the container's `NVIDIA_DRIVER_CAPABILITIES`
+includes `utility` (the toolkit's default, `utility,compute`, does). An explicit list must keep
+`utility` next to `compute`: `compute` alone still runs CUDA but omits `libnvidia-ml.so.1`, and the
+pool then falls back to reservation-only admission. The server image needs no other setup. Measured on an NVIDIA L4 with driver 595.112.07, Docker
 29.9.3 and NVIDIA Container Toolkit 1.20.1:
 
 - In a default container (its own PID namespace) NVML lists the process under its container PID,

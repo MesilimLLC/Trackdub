@@ -101,9 +101,14 @@ public sealed class TrackdubBuilderProcessGpuAdmissionTests
         using var factory = new TrackdubBuilder().Build();
         try
         {
-            // Windows reads performance counters and Linux reads NVML; elsewhere there is no
-            // platform reader and the pool keeps its reservation-only model.
-            if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            // Windows reads performance counters (WINDOWS build only) and Linux reads NVML;
+            // elsewhere there is no platform reader and the pool keeps its reservation-only model.
+#if WINDOWS
+            const bool hasProcessGpuSource = true;
+#else
+            bool hasProcessGpuSource = OperatingSystem.IsLinux();
+#endif
+            if (hasProcessGpuSource)
             {
                 Assert.NotNull(SharedPoolOptions.ProcessGpuMemoryReader);
                 factory.Dispose();

@@ -20,8 +20,13 @@ public sealed class ResourceTelemetryRegistrationCollection;
 public sealed class ResourceTelemetryRegistrationTests
 {
     // Windows reads the GPU Process Memory counters and Linux reads NVML; other platforms have
-    // no process-GPU source, so the pool keeps its reservation-only model there.
-    private static bool HasProcessGpuSource => OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
+    // no process-GPU source, so the pool keeps its reservation-only model there. The Windows
+    // reader exists only in the WINDOWS build, so the predicate follows that build define.
+#if WINDOWS
+    private static bool HasProcessGpuSource => true;
+#else
+    private static bool HasProcessGpuSource => OperatingSystem.IsLinux();
+#endif
 
     [Fact]
     public void Core_composition_registers_the_reader_for_the_platform()
