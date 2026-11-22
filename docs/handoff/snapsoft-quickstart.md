@@ -109,13 +109,16 @@ explicitly.
 
 ## Cold start
 
-Measured on the published `main` image, `ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server`,
-with a 40-second English clip, the default Spleeter separator, and the stock AMI:
+Measured on the image built from `main` at commit `1ed89aa`, pulled as
+`ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server`. The clip was 40 seconds of English, with
+the default Spleeter separator and the stock AMI:
 
 | Instance | Host ready after boot | Clip total | Translation | TTS |
 |---|---|---|---|---|
 | `g6.xlarge` (L4, 23 GB) | 384 s | 361 s | 34 s | 166 s |
 | `g6e.xlarge` (L40S, 46 GB) | 261 s | 361 s | 95 s | 149 s |
+
+Both runs reported 361 s in their summaries, and the time from host ready to batch end was 367 s on the L4 and 366 s on the L40S. We have not checked why the summaries match.
 
 Host preparation covers the data volume mount, the repo checkout, the GHCR login, the image pull, and seeding the
 model volume. It runs once per instance. The launcher sets the VRAM budget on `g6.*` only. The translation time
@@ -124,10 +127,10 @@ differs by GPU in this single run; we have not looked into why.
 To skip host preparation on later jobs, snapshot the data volume (`/mnt/trackdub-data`) after host preparation
 finishes and attach that snapshot to new instances. This has not been tested yet.
 
-To record the image digest on an instance, after the pull, run:
+To record the image digest on an instance, after the pull, run, with `IMAGE` set to the same image you passed to the launcher:
 
 ```bash
-docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/mesilimllc/trackdub:sha-1ed89aa4a6a2923871c56ad27ba1bc834b75aece-server
+docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE"
 ```
 
 This command has not been run on an instance yet.
