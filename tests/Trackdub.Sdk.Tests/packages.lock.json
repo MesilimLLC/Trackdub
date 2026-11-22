@@ -4,9 +4,9 @@
     "net11.0": {
       "coverlet.collector": {
         "type": "Direct",
-        "requested": "[6.0.4, )",
-        "resolved": "6.0.4",
-        "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
+        "requested": "[10.1.1, )",
+        "resolved": "10.1.1",
+        "contentHash": "iRWGpNzKG6/pA0VzAt+WDzFAPMHvs/E4ZxeSYiEaAa7MzFhAcWcIWd7RDNLhCBenpSNdJCwm42UcQP4nGUbwJQ=="
       },
       "FsCheck.Xunit": {
         "type": "Direct",
@@ -464,7 +464,7 @@
       "trackdub.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Dapper": "[2.1.89, )",
+          "Dapper": "[2.1.100, )",
           "Lucene.Net.Analysis.Common": "[4.8.0-beta00018, )",
           "Lucene.Net.Analysis.Kuromoji": "[4.8.0-beta00018, )",
           "Lucene.Net.Analysis.SmartCn": "[4.8.0-beta00018, )",
@@ -507,9 +507,9 @@
       },
       "Dapper": {
         "type": "CentralTransitive",
-        "requested": "[2.1.89, )",
-        "resolved": "2.1.89",
-        "contentHash": "1VjFE664wnxvuhlgP8kS4PeFFF4jqD3VkbIHW6Zlc52zuibgcz5ICnIHcQXlTp6pURpPNGLV0ZpNe5x9KePJnA=="
+        "requested": "[2.1.100, )",
+        "resolved": "2.1.100",
+        "contentHash": "zKwgGfxkDIVLGU2WIsl57DwTgj17+fa5v0u2eiVMxU92GXN2fRIn2M8QMGtyGFrPSbVOYKgGFxAxEFL6CB9tTw=="
       },
       "FsCheck": {
         "type": "CentralTransitive",
@@ -740,9 +740,9 @@
     "net11.0-windows10.0.19041": {
       "coverlet.collector": {
         "type": "Direct",
-        "requested": "[6.0.4, )",
-        "resolved": "6.0.4",
-        "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
+        "requested": "[10.1.1, )",
+        "resolved": "10.1.1",
+        "contentHash": "iRWGpNzKG6/pA0VzAt+WDzFAPMHvs/E4ZxeSYiEaAa7MzFhAcWcIWd7RDNLhCBenpSNdJCwm42UcQP4nGUbwJQ=="
       },
       "FsCheck.Xunit": {
         "type": "Direct",
@@ -1182,7 +1182,7 @@
       "trackdub.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Dapper": "[2.1.89, )",
+          "Dapper": "[2.1.100, )",
           "Lucene.Net.Analysis.Common": "[4.8.0-beta00018, )",
           "Lucene.Net.Analysis.Kuromoji": "[4.8.0-beta00018, )",
           "Lucene.Net.Analysis.SmartCn": "[4.8.0-beta00018, )",
@@ -1225,9 +1225,9 @@
       },
       "Dapper": {
         "type": "CentralTransitive",
-        "requested": "[2.1.89, )",
-        "resolved": "2.1.89",
-        "contentHash": "1VjFE664wnxvuhlgP8kS4PeFFF4jqD3VkbIHW6Zlc52zuibgcz5ICnIHcQXlTp6pURpPNGLV0ZpNe5x9KePJnA=="
+        "requested": "[2.1.100, )",
+        "resolved": "2.1.100",
+        "contentHash": "zKwgGfxkDIVLGU2WIsl57DwTgj17+fa5v0u2eiVMxU92GXN2fRIn2M8QMGtyGFrPSbVOYKgGFxAxEFL6CB9tTw=="
       },
       "FsCheck": {
         "type": "CentralTransitive",
