@@ -50,20 +50,25 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
     private readonly INvmlComputeProcessSource source;
     private readonly uint processId;
     private readonly IApplicationLogger? logger;
+    private readonly TextWriter? statusOutput;
     private volatile string? lastFailure;
     private int reportedState;
 
     public LinuxProcessGpuMemoryReader(IApplicationLogger? logger = null)
-        : this(NvmlNativeComputeProcessSource.Shared, checked((uint)Environment.ProcessId), logger)
+        : this(NvmlNativeComputeProcessSource.Shared, checked((uint)Environment.ProcessId), logger, Console.Error)
     {
     }
 
     internal LinuxProcessGpuMemoryReader(
-        INvmlComputeProcessSource source, uint processId, IApplicationLogger? logger = null)
+        INvmlComputeProcessSource source,
+        uint processId,
+        IApplicationLogger? logger = null,
+        TextWriter? statusOutput = null)
     {
         this.source = source;
         this.processId = processId;
         this.logger = logger;
+        this.statusOutput = statusOutput;
     }
 
     public string UnavailableReason => lastFailure ?? "No current Linux process GPU measurement is available.";
@@ -94,13 +99,15 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
     }
 
     /// <summary>
-    /// Writes one information line the first time the reader is read and again whenever it flips
-    /// between active and unavailable, so a run's log shows which admission model the pool used
-    /// without logging on every admission decision.
+    /// Reports one line the first time the reader is read and again whenever it flips between
+    /// active and unavailable, so a run's log shows which admission model the pool used without
+    /// logging on every admission decision. The line goes to the application logger and to the
+    /// status writer (stderr in production): the file logger is not collected from containers, and
+    /// stdout carries machine-readable output such as the batch report.
     /// </summary>
     private void ReportStateChange(long? total, string? failure)
     {
-        if (logger is null)
+        if (logger is null && statusOutput is null)
         {
             return;
         }
@@ -111,12 +118,15 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
             return;
         }
 
-        logger.LogInformation(state == StateActive
+        string message = state == StateActive
             ? $"Process GPU memory reader (Linux/NVML) is active: this process holds "
                 + $"{total.GetValueOrDefault() / (1024 * 1024)} MiB on the GPU, which accelerator admission "
                 + "counts against the per-device budget."
             : $"Process GPU memory reader (Linux/NVML) is unavailable: {failure} Accelerator admission "
-                + "uses the pool's own reservations only.");
+                + "uses the pool's own reservations only.";
+
+        logger?.LogInformation(message);
+        statusOutput?.WriteLine(message);
     }
 
     /// <summary>

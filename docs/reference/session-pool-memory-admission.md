@@ -149,9 +149,9 @@ drivers before 555 returning host process ids to containers, which only `--pid=h
 matchable); the process is listed with 0 bytes or with the memory marked not available (a forum
 report describes 0 bytes for container processes on driver 555, which did not reproduce on 595);
 or any device cannot be queried (a graphics list that reports `NVML_ERROR_NOT_SUPPORTED` counts as empty, since a GPU without graphics support has no graphics contexts; this handling is unverified, because the L4 answered the graphics query normally). Neither older-driver behavior has been verified here. The reason is surfaced
-as the reader's `UnavailableReason`, and the reader writes one information line to the application log the first
+as the reader's `UnavailableReason`, and the reader writes one information line to the application log and to stderr the first
 time it is read and again whenever it flips between active and unavailable ("Process GPU memory reader (Linux/NVML)
-is active ..." or "... is unavailable: <reason>"), so a run's log shows which admission model the pool used. Empty lists on every device mean the process holds no GPU
+is active ..." or "... is unavailable: <reason>"), so a run's log shows which admission model the pool used. The stderr copy exists because the file log is not collected from containers; stdout is left alone because the batch report is JSON there. Empty lists on every device mean the process holds no GPU
 memory. A multi-GPU host is charged the process total on each device, which can refuse work an
 adapter-aware reading would admit.
 
