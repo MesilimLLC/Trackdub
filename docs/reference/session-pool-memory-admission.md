@@ -118,7 +118,7 @@ no source and keep reservation-only accounting.
 | Platform | Source | Attribution |
 |---|---|---|
 | Windows | The process's `GPU Process Memory` performance-counter instances. | Per adapter LUID, mapped to pool devices. |
-| Linux | NVML's per-process compute list (`nvmlDeviceGetComputeRunningProcesses_v3` in `libnvidia-ml.so.1`), entries for this process id summed across devices. | Process total only, so every device is charged the full total. |
+| Linux | NVML's per-process compute and graphics lists (`nvmlDeviceGetComputeRunningProcesses_v3` and `nvmlDeviceGetGraphicsRunningProcesses_v3` in `libnvidia-ml.so.1`), merged per device by process id (larger value, never added), entries for this process id summed across devices. | Process total only, so every device is charged the full total. |
 
 ### Linux (NVML)
 
@@ -134,14 +134,21 @@ pool then falls back to reservation-only admission. The server image needs no ot
 - Two concurrent containers each saw only their own process, so one container never reads another's
   footprint even when both are PID 1 in their own namespace.
 - With `--pid=host` the process is listed under its host PID, also with accurate memory.
+- Compute and graphics lists overlap, measured with a probe holding a CUDA context, an EGL
+  context, or both. A CUDA-only process (698 MiB) is in the compute list only. A graphics-only
+  process (259 MiB after a 256 MiB render target) is in the graphics list only, so the compute list
+  alone would report it as holding nothing. A process with both is in both lists with the same
+  process-wide total, graphics memory included (701 MiB after the EGL context, 957 MiB after the
+  render target, matching `nvidia-smi`'s `C+G` row). The reader therefore merges the two lists per
+  process by taking the larger value, never the sum.
 
 The reading is reported as unavailable, and the pool falls back to reservation-only accounting,
-whenever it cannot be trusted to describe this process: NVML or its v3 export is missing; processes
+whenever it cannot be trusted to describe this process: NVML or its v3 exports are missing; processes
 are listed but none carries this process id (reports on NVIDIA's issue tracker and forum describe
 drivers before 555 returning host process ids to containers, which only `--pid=host` makes
 matchable); the process is listed with 0 bytes or with the memory marked not available (a forum
 report describes 0 bytes for container processes on driver 555, which did not reproduce on 595);
-or any device cannot be queried. Neither older-driver behavior has been verified here. The reason is surfaced
+or any device cannot be queried (a graphics list that reports `NVML_ERROR_NOT_SUPPORTED` counts as empty, since a GPU without graphics support has no graphics contexts; this handling is unverified, because the L4 answered the graphics query normally). Neither older-driver behavior has been verified here. The reason is surfaced
 as the reader's `UnavailableReason`. Empty lists on every device mean the process holds no GPU
 memory. A multi-GPU host is charged the process total on each device, which can refuse work an
 adapter-aware reading would admit.

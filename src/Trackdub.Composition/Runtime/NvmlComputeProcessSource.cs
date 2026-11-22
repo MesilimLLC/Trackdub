@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 
 namespace Trackdub.Composition.Runtime;
 
-/// <summary>One compute process NVML lists on a device, with the memory it reports for it.</summary>
+/// <summary>One process NVML lists on a device, with the memory it reports for it.</summary>
 internal readonly record struct NvmlComputeProcess(uint Pid, ulong UsedGpuMemoryBytes);
 
 /// <summary>
@@ -33,16 +33,19 @@ internal interface INvmlComputeProcessSource
 /// decision.
 /// </para>
 /// <para>
-/// Only <c>nvmlDeviceGetComputeRunningProcesses_v3</c> is used: its <c>nvmlProcessInfo_t</c> is
+/// Only the <c>_v3</c> entry points are used (<c>nvmlDeviceGetComputeRunningProcesses_v3</c> and
+/// <c>nvmlDeviceGetGraphicsRunningProcesses_v3</c>): their <c>nvmlProcessInfo_t</c> is
 /// <c>{pid, usedGpuMemory, gpuInstanceId, computeInstanceId}</c> (NVML API reference), while the
-/// older entry points use a different struct layout. A driver without the v3 export reports an
-/// explicit unavailable result.
+/// older entry points use a different struct layout. A driver without the v3 exports reports an
+/// explicit unavailable result. Both lists are read for every device and merged per process by
+/// <see cref="NvmlProcessListMerge"/>.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("linux")]
 internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
 {
     private const int Success = 0;
+    private const int NotSupported = 3;
     private const int InsufficientSize = 7;
     private const int MaxQueryAttempts = 4;
     private const int ProcessCountSlack = 8;
@@ -152,9 +155,23 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         }
 
         var device = new NvmlDevice(index, handle);
+        IReadOnlyList<NvmlComputeProcess>? compute = QueryList(ready.Lists.Compute, device, out failure);
+        if (compute is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<NvmlComputeProcess>? graphics = QueryList(ready.Lists.Graphics, device, out failure);
+        return graphics is null ? null : NvmlProcessListMerge.ByProcess(compute, graphics);
+    }
+
+    private static IReadOnlyList<NvmlComputeProcess>? QueryList(
+        ProcessLister lister, NvmlDevice device, out string? failure)
+    {
+        failure = null;
         for (int attempt = 0; attempt < MaxQueryAttempts; attempt++)
         {
-            ListResult result = ListOnce(ready, device);
+            ListResult result = ListOnce(lister, device);
             if (result.Outcome == ListOutcome.Listed)
             {
                 return result.Processes;
@@ -167,30 +184,35 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             }
         }
 
-        failure = $"NVML compute process list on device {device.Index} kept changing size.";
+        failure = $"NVML {lister.Name} process list on device {device.Index} kept changing size.";
         return null;
     }
 
     /// <summary>One sizing call and one read; retries are the caller's loop.</summary>
-    private static ListResult ListOnce(Exports ready, NvmlDevice device)
+    private static ListResult ListOnce(ProcessLister lister, NvmlDevice device)
     {
         uint count = 0;
-        int status = ready.GetComputeProcesses(device.Handle, ref count, null);
+        int status = lister.Get(device.Handle, ref count, null);
         if (status == Success && count == 0)
+        {
+            return ListResult.Listed([]);
+        }
+
+        if (status == NotSupported && lister.UnsupportedMeansEmpty)
         {
             return ListResult.Listed([]);
         }
 
         if (status != Success && status != InsufficientSize)
         {
-            return ListResult.Failed(ListFailure(device, status));
+            return ListResult.Failed(ListFailure(lister, device, status));
         }
 
         // Processes can start between the sizing call and the read, so leave slack; the list
         // can still outgrow it, which the caller retries.
         var buffer = new NvmlProcessInfo[count + ProcessCountSlack];
         uint filled = (uint)buffer.Length;
-        status = ready.GetComputeProcesses(device.Handle, ref filled, buffer);
+        status = lister.Get(device.Handle, ref filled, buffer);
         if (status == InsufficientSize)
         {
             return ListResult.Retry;
@@ -198,11 +220,11 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
 
         return status == Success
             ? ListResult.Listed(ToProcesses(buffer.AsSpan(0, (int)Math.Min(filled, (uint)buffer.Length))))
-            : ListResult.Failed(ListFailure(device, status));
+            : ListResult.Failed(ListFailure(lister, device, status));
     }
 
-    private static string ListFailure(NvmlDevice device, int status) =>
-        $"NVML could not list compute processes on device {device.Index} (status {status}).";
+    private static string ListFailure(ProcessLister lister, NvmlDevice device, int status) =>
+        $"NVML could not list {lister.Name} processes on device {device.Index} (status {status}).";
 
     private static IReadOnlyList<NvmlComputeProcess> ToProcesses(ReadOnlySpan<NvmlProcessInfo> infos)
     {
@@ -231,7 +253,7 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             // it mapped for the process lifetime.
             library.Free();
             failure = "The installed NVML does not export the functions the reader needs "
-                + "(including nvmlDeviceGetComputeRunningProcesses_v3).";
+                + "(including the _v3 compute and graphics process queries).";
         }
 
         return bound;
@@ -254,13 +276,29 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             return null;
         }
 
-        if (!library.TryGetExport<GetComputeProcessesDelegate>(
-                "nvmlDeviceGetComputeRunningProcesses_v3", out var getProcesses))
+        ProcessLists? lists = BindProcessLists(library);
+        return lists is null ? null : new Exports(init, getCount, getHandle, lists);
+    }
+
+    private static ProcessLists? BindProcessLists(NvmlLibrary library)
+    {
+        if (!library.TryGetExport<GetProcessesDelegate>(
+                "nvmlDeviceGetComputeRunningProcesses_v3", out var getCompute))
         {
             return null;
         }
 
-        return new Exports(init, getCount, getHandle, getProcesses);
+        if (!library.TryGetExport<GetProcessesDelegate>(
+                "nvmlDeviceGetGraphicsRunningProcesses_v3", out var getGraphics))
+        {
+            return null;
+        }
+
+        // A GPU without graphics support has no graphics contexts, so "not supported" reads as an
+        // empty list there; the compute list has no such reading and fails the whole query.
+        return new ProcessLists(
+            new ProcessLister("compute", getCompute, UnsupportedMeansEmpty: false),
+            new ProcessLister("graphics", getGraphics, UnsupportedMeansEmpty: true));
     }
 
     private enum ListOutcome
@@ -324,11 +362,15 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             new() { Outcome = ListOutcome.Failed, Failure = failure };
     }
 
+    private sealed record ProcessLister(string Name, GetProcessesDelegate Get, bool UnsupportedMeansEmpty);
+
+    private sealed record ProcessLists(ProcessLister Compute, ProcessLister Graphics);
+
     private sealed record Exports(
         InitDelegate Init,
         GetCountDelegate GetCount,
         GetHandleDelegate GetHandle,
-        GetComputeProcessesDelegate GetComputeProcesses);
+        ProcessLists Lists);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int InitDelegate();
@@ -340,12 +382,12 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
     private delegate int GetHandleDelegate(uint index, out nint device);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int GetComputeProcessesDelegate(
+    private delegate int GetProcessesDelegate(
         nint device, ref uint infoCount, [In, Out] NvmlProcessInfo[]? infos);
 
     /// <summary>
-    /// Mirrors <c>nvmlProcessInfo_t</c> as <c>nvmlDeviceGetComputeRunningProcesses_v3</c> fills it;
-    /// field order must match the native layout.
+    /// Mirrors <c>nvmlProcessInfo_t</c> as the <c>_v3</c> compute and graphics process queries fill
+    /// it; field order must match the native layout.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct NvmlProcessInfo
@@ -354,5 +396,47 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         public ulong UsedGpuMemory;
         public uint GpuInstanceId;
         public uint ComputeInstanceId;
+    }
+}
+
+/// <summary>Combines a device's compute and graphics process lists into one entry per process.</summary>
+internal static class NvmlProcessListMerge
+{
+    /// <summary>
+    /// One entry per process id, taking the larger of its compute and graphics totals.
+    /// </summary>
+    /// <remarks>
+    /// Measured on an NVIDIA L4 (driver 595.112.07): a process holding both a CUDA and a graphics
+    /// context appears in both lists with the same process-wide total, graphics memory included, so
+    /// adding the lists would double-count it. A process with only a graphics context appears in the
+    /// graphics list alone, which is why the compute list by itself under-reports it. Entries for the
+    /// same id within one list are added first, so a process listed several times on a device keeps
+    /// its full footprint.
+    /// </remarks>
+    internal static IReadOnlyList<NvmlComputeProcess> ByProcess(
+        IReadOnlyList<NvmlComputeProcess> compute,
+        IReadOnlyList<NvmlComputeProcess> graphics)
+    {
+        Dictionary<uint, ulong> merged = TotalsByProcess(compute);
+        foreach ((uint pid, ulong bytes) in TotalsByProcess(graphics))
+        {
+            merged[pid] = merged.TryGetValue(pid, out ulong seen) ? Math.Max(seen, bytes) : bytes;
+        }
+
+        return merged.Select(entry => new NvmlComputeProcess(entry.Key, entry.Value)).ToArray();
+    }
+
+    private static Dictionary<uint, ulong> TotalsByProcess(IReadOnlyList<NvmlComputeProcess> processes)
+    {
+        var totals = new Dictionary<uint, ulong>();
+        foreach (NvmlComputeProcess process in processes)
+        {
+            ulong seen = totals.GetValueOrDefault(process.Pid);
+            totals[process.Pid] = ulong.MaxValue - seen < process.UsedGpuMemoryBytes
+                ? ulong.MaxValue
+                : seen + process.UsedGpuMemoryBytes;
+        }
+
+        return totals;
     }
 }

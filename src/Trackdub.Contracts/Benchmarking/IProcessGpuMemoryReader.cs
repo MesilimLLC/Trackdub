@@ -10,7 +10,7 @@ namespace Trackdub.Contracts.Benchmarking;
 /// adapter-wide budget minus usage, so its reading also moves with every other process on the
 /// same GPU. On Windows this reader instead uses the per-process "GPU Process Memory"
 /// performance counter set, whose instance names are keyed by process id; on Linux it sums this
-/// process's entries in NVML's per-process compute list.
+/// process's entries across NVML's per-process compute and graphics lists.
 /// </para>
 /// <para>
 /// The two ports answer different questions and are not interchangeable: use this one to

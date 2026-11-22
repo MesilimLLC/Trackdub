@@ -5,7 +5,7 @@ using Trackdub.Composition.Runtime;
 namespace Trackdub.Composition.Tests;
 
 /// <summary>
-/// How the Linux reader turns NVML's per-device compute process lists into this process's
+/// How the Linux reader turns NVML's per-device process lists into this process's
 /// footprint, and when it refuses to report one.
 /// </summary>
 [SupportedOSPlatform("linux")]

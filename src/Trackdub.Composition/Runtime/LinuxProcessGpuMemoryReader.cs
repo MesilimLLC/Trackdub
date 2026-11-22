@@ -4,16 +4,18 @@ using Trackdub.Contracts.Benchmarking;
 namespace Trackdub.Composition.Runtime;
 
 /// <summary>
-/// Reads this process's dedicated GPU memory on Linux from NVML's per-process compute list.
+/// Reads this process's dedicated GPU memory on Linux from NVML's per-process compute and graphics
+/// lists.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>nvmlDeviceGetComputeRunningProcesses_v3</c> lists each process with a CUDA context on a
-/// device together with the memory it holds ("all of the memory used by the application", NVML API
-/// reference), so summing the entries for this process id across devices gives the process-isolated
-/// footprint <see cref="IAvailableVramReader"/> cannot attribute. The reading is the NVML
-/// counterpart of the Windows per-process performance counters and feeds the same admission floor
-/// in the shared session pool.
+/// <c>nvmlDeviceGetComputeRunningProcesses_v3</c> and <c>nvmlDeviceGetGraphicsRunningProcesses_v3</c>
+/// list each process with a CUDA or graphics context on a device together with the memory it holds
+/// ("all of the memory used by the application", NVML API reference), so summing the entries for
+/// this process id across devices gives the process-isolated footprint
+/// <see cref="IAvailableVramReader"/> cannot attribute. The reading is the NVML counterpart of the
+/// Windows per-process performance counters and feeds the same admission floor in the shared
+/// session pool.
 /// </para>
 /// <para>
 /// Which process id NVML reports depends on the driver and the PID namespace. Measured on an NVIDIA
@@ -25,9 +27,10 @@ namespace Trackdub.Composition.Runtime;
 /// and the pool keeps accounting for its own reservations only.
 /// </para>
 /// <para>
-/// NVML's compute list covers CUDA contexts and excludes graphics ones. Trackdub's inference
-/// providers (CUDA, TensorRT) allocate through compute contexts, so the compute list is this
-/// process's footprint; a graphics-only context on the same GPU would not be counted.
+/// The two lists are merged per device by <see cref="NvmlProcessListMerge"/>, never added. Measured
+/// on the same L4, a process with both context types appears in both lists with the same
+/// process-wide total (graphics memory included), and a graphics-only process appears in the
+/// graphics list alone, so reading only the compute list would report it as holding nothing.
 /// </para>
 /// <para>
 /// NVML has no adapter LUID, so only the process total is reported and every device is charged the
