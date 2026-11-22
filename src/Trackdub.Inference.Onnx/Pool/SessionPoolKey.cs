@@ -201,15 +201,17 @@ internal sealed record SessionPoolKey
     /// per-session weights) raised process GPU usage by 6526 MiB, about 1.0×.</item>
     /// <item>CUDA (L4, 23034 MiB): Qwen3-TTS 1.7B CustomVoice talker prefill and decode (5400
     /// MiB of external weights each), code predictor (420 MiB) and vocoder (435 MiB), 11655 MiB
-    /// in all. Process GPU usage peaked at 15736 MiB with earlier pipeline stages still
-    /// resident. The two talker graphs were not resident together; if they were, the set would
-    /// need at most about 14888 MiB, 1.28× weights.</item>
+    /// in all. Observed process GPU usage peaked at 15736 MiB, with earlier pipeline stages
+    /// still resident. Residency per graph was not logged. Summing the per-graph growth steps,
+    /// attributed from session-creation timestamps, estimates about 14888 MiB (1.28× weights)
+    /// if both talker graphs were resident together; that is an estimate, not a bound.</item>
     /// </list>
-    /// 125% plus the per-graph allowance covers the first two. 150% covers the CUDA set with
-    /// margin: it rests on one clip on one GPU, so it stays well above the measured 1.28×. Every
-    /// other provider is unmeasured and keeps the conservative 2× (weights, initialization and
-    /// pre-packing copies, activation slack). On Windows, process-GPU observation still charges
-    /// any real usage beyond an estimate.
+    /// 125% plus the per-graph allowance covers the first two. For CUDA, 150% plus the per-graph
+    /// allowance reserves 17994 MiB for that set, above both the observed 15736 MiB peak and the
+    /// 14888 MiB estimate; it rests on one clip on one GPU. Every other provider is unmeasured
+    /// and keeps the conservative 2× (weights, initialization and pre-packing copies, activation
+    /// slack). On Windows, process-GPU observation still charges any real usage beyond an
+    /// estimate.
     /// <para>
     /// Set <paramref name="providerMayFallBack"/> when session creation can still fall back
     /// from TensorRT RTX to another provider after the key is admitted (the pooled
