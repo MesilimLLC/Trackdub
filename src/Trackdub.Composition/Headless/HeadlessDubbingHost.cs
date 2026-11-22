@@ -96,6 +96,10 @@ public sealed class HeadlessDubbingHost : IDisposable
             processGpuReader = null;
             adapterLuidMap = null;
         }
+#else
+        // No adapter LUIDs off Windows: the reader reports a process total only, which the pool
+        // charges to every device. Null when the platform has no process-GPU source.
+        processGpuReader = HeadlessCompositionRoot.BindSharedPoolProcessGpuAdmission(serviceProvider);
 #endif
 
         return new HeadlessDubbingHost(new HeadlessDubbingSessionFactory(serviceProvider), serviceProvider, processGpuReader, adapterLuidMap);

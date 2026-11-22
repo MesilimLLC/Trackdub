@@ -9,7 +9,8 @@ namespace Trackdub.Contracts.Benchmarking;
 /// <see cref="IAvailableVramReader"/> cannot provide: DXGI's <c>QueryVideoMemoryInfo</c> reports
 /// adapter-wide budget minus usage, so its reading also moves with every other process on the
 /// same GPU. On Windows this reader instead uses the per-process "GPU Process Memory"
-/// performance counter set, whose instance names are keyed by process id.
+/// performance counter set, whose instance names are keyed by process id; on Linux it sums this
+/// process's entries in NVML's per-process compute list.
 /// </para>
 /// <para>
 /// The two ports answer different questions and are not interchangeable: use this one to

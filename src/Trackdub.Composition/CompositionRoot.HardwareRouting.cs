@@ -183,7 +183,16 @@ public static partial class CompositionRoot
 #if WINDOWS
         services.TryAddSingleton<Trackdub.Contracts.Benchmarking.IProcessGpuMemoryReader, WindowsProcessGpuMemoryReader>();
 #else
-        services.TryAddSingleton<Trackdub.Contracts.Benchmarking.IProcessGpuMemoryReader, UnavailableProcessGpuMemoryReader>();
+        // Linux reads NVML's per-process compute list; a host without the NVIDIA driver gets an
+        // explicit unavailable reading from the same reader. Other platforms have no source.
+        if (OperatingSystem.IsLinux())
+        {
+            services.TryAddSingleton<Trackdub.Contracts.Benchmarking.IProcessGpuMemoryReader, LinuxProcessGpuMemoryReader>();
+        }
+        else
+        {
+            services.TryAddSingleton<Trackdub.Contracts.Benchmarking.IProcessGpuMemoryReader, UnavailableProcessGpuMemoryReader>();
+        }
 #endif
     }
 

@@ -210,7 +210,7 @@ internal sealed record SessionPoolKey
     /// allowance reserves 17994 MiB for that set, above both the observed 15736 MiB peak and the
     /// 14888 MiB estimate; it rests on one clip on one GPU. Every other provider is unmeasured
     /// and keeps the conservative 2× (weights, initialization and pre-packing copies, activation
-    /// slack). On Windows, process-GPU observation still charges any real usage beyond an
+    /// slack). On Windows and Linux, process-GPU observation still charges any real usage beyond an
     /// estimate.
     /// <para>
     /// Set <paramref name="providerMayFallBack"/> when session creation can still fall back

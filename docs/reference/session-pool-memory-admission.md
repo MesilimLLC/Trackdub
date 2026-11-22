@@ -107,13 +107,42 @@ the process if the actual workload exceeds physical memory.
 
 ## Process-isolated GPU observation
 
-Reservations are estimates. On Windows the shared pool also accounts for this process's *actual*
-dedicated GPU memory: the host registers the process-isolated reading (`gpuBytes`, summed from the
-process's `GPU Process Memory` performance-counter instances) as the pool's observation source, and
-each GPU admission decision uses its adapter's measured footprint when attribution is available,
-or the full process total as a conservative upper bound when it is not. GPU memory the pool never reserved — driver contexts, runtime arenas,
-non-pooled consumers — consumes the same per-device budget instead of being invisible to
-admission.
+Reservations are estimates. On Windows and Linux the shared pool also accounts for this process's
+*actual* dedicated GPU memory: the host registers the process-isolated reading (`gpuBytes`) as the
+pool's observation source, and each GPU admission decision uses its adapter's measured footprint
+when attribution is available, or the full process total as a conservative upper bound when it is
+not. GPU memory the pool never reserved — driver contexts, runtime arenas, non-pooled consumers —
+consumes the same per-device budget instead of being invisible to admission. Other platforms have
+no source and keep reservation-only accounting.
+
+| Platform | Source | Attribution |
+|---|---|---|
+| Windows | The process's `GPU Process Memory` performance-counter instances. | Per adapter LUID, mapped to pool devices. |
+| Linux | NVML's per-process compute list (`nvmlDeviceGetComputeRunningProcesses_v3` in `libnvidia-ml.so.1`), entries for this process id summed across devices. | Process total only, so every device is charged the full total. |
+
+### Linux (NVML)
+
+NVML is injected by the NVIDIA container toolkit whenever a GPU is passed through, so the reader
+needs no extra setup in the server image. Measured on an NVIDIA L4 with driver 595.112.07, Docker
+29.9.3 and NVIDIA Container Toolkit 1.20.1:
+
+- In a default container (its own PID namespace) NVML lists the process under its container PID,
+  the number `Environment.ProcessId` returns, with accurate memory: 186 MiB for a bare CUDA context
+  and 698 MiB after a further 512 MiB allocation, within 8 MiB of the device-level delta.
+- Two concurrent containers each saw only their own process, so one container never reads another's
+  footprint even when both are PID 1 in their own namespace.
+- With `--pid=host` the process is listed under its host PID, also with accurate memory.
+
+The reading is reported as unavailable, and the pool falls back to reservation-only accounting,
+whenever it cannot be trusted to describe this process: NVML or its v3 export is missing; processes
+are listed but none carries this process id (reports on NVIDIA's issue tracker and forum describe
+drivers before 555 returning host process ids to containers, which only `--pid=host` makes
+matchable); the process is listed with 0 bytes or with the memory marked not available (a forum
+report describes 0 bytes for container processes on driver 555, which did not reproduce on 595);
+or any device cannot be queried. Neither older-driver behavior has been verified here. The reason is surfaced
+as the reader's `UnavailableReason`. Empty lists on every device mean the process holds no GPU
+memory. A multi-GPU host is charged the process total on each device, which can refuse work an
+adapter-aware reading would admit.
 
 What the observation means in practice:
 
