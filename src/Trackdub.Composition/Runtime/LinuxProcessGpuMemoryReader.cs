@@ -126,7 +126,19 @@ internal sealed class LinuxProcessGpuMemoryReader : IProcessGpuMemoryReader
                 + "uses the pool's own reservations only.";
 
         logger?.LogInformation(message);
-        statusOutput?.WriteLine(message);
+        TryWriteStatus(message);
+    }
+
+    private void TryWriteStatus(string message)
+    {
+        try
+        {
+            statusOutput?.WriteLine(message);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // A closed or broken stderr must not fail the measurement the line only describes.
+        }
     }
 
     /// <summary>

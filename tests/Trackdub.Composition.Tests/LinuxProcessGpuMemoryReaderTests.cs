@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using Trackdub.Composition.Runtime;
 using Trackdub.Contracts;
 
@@ -242,11 +243,28 @@ public sealed class LinuxProcessGpuMemoryReaderTests
     }
 
     [Fact]
+    public void A_failing_status_output_does_not_fail_the_reading()
+    {
+        var reader = new LinuxProcessGpuMemoryReader(
+            new FakeSource([Device((Own, 64UL * MiB))]), Own, logger: null, statusOutput: new ThrowingWriter());
+
+        Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+        Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+    }
+
+    [Fact]
     public void Reads_without_a_logger_still_work()
     {
         LinuxProcessGpuMemoryReader reader = ReaderFor(Device((Own, 64UL * MiB)));
 
         Assert.Equal(64 * MiB, reader.ReadDedicatedGpuMemoryBytes());
+    }
+
+    private sealed class ThrowingWriter : TextWriter
+    {
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void WriteLine(string? value) => throw new IOException("stderr is closed.");
     }
 
     private sealed class RecordingLogger : IApplicationLogger
