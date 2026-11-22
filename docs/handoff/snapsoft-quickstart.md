@@ -121,7 +121,7 @@ the default Spleeter separator and the stock AMI:
 Both runs reported 361 s in their summaries, and the time from host ready to batch end was 367 s on the L4 and 366 s on the L40S. We have not checked why the summaries match.
 
 Host preparation covers the data volume mount, the repo checkout, the GHCR login, the image pull, and seeding the
-model volume. It runs once per instance. The launcher sets the VRAM budget on `g6.*` only. The translation time
+model volume. It runs once per instance. The launcher sets a default VRAM budget of 30000 MB on `g6.*` only. An explicit `--vram-budget-mb` is passed through on any instance type. The translation time
 differs by GPU in this single run; we have not looked into why.
 
 Reusing a data-volume snapshot to skip host preparation is not available yet. `deploy/aws/run-batch.sh` formats
