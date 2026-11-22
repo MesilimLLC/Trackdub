@@ -85,6 +85,7 @@ public sealed partial class MixPlanBuilderTests
         MixPlanWarning warning = Assert.Single(plan.Warnings);
         Assert.Equal(MixPlanWarningCode.TakeExceedsSourceAudio, warning.Code);
         Assert.Equal(1, warning.SegmentIndex);
+        Assert.Equal(1d, warning.OverhangSeconds!.Value, precision: 6);
     }
 
     [Fact]

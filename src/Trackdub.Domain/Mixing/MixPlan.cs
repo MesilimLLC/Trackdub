@@ -152,6 +152,12 @@ public sealed record MixPlanWarning(
     MixPlanWarningCode Code = MixPlanWarningCode.InvalidTake)
 {
     public string SegmentReference => $"Segment {SegmentIndex + 1}";
+
+    /// <summary>
+    /// For <see cref="MixPlanWarningCode.TakeExceedsSourceAudio"/>, how many seconds the take runs past
+    /// the end of the source audio; null for every other warning.
+    /// </summary>
+    public double? OverhangSeconds { get; init; }
 }
 
 public enum MixPlanWarningCode

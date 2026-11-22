@@ -82,7 +82,7 @@ suggested fix where one is known.
 
 | Verdict contains | Cause | Fix |
 |---|---|---|
-| `FAILED at export: Dubbed take extends … s past the end` | TTS overran the source; the exporter won't truncate | `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"` (default limit 0.20), or shorten the translation for that clip |
+| `FAILED at export: Dubbed take extends … s past the end` | TTS overran the source by more than the exporter fits on its own: it compresses a take that runs past the end of the clip by exactly its overhang, up to 1.25x, and won't truncate beyond that | Shorten the translation for that clip, or `--pipeline-args "--tts-rubberband-stretch --tts-auto-stretch-max-overrun 0.35"` (default limit 0.20) to compress earlier |
 | `FAILED at input: could not download` | S3 read failed | Check the object exists under `input/`, rerun the launch for that clip |
 | `UPLOAD FAILED` | Results could not reach S3 after 3 tries | Results are only on the instance; the data volume is deleted at termination. Open an incident before relaunching |
 | `NO RESULT` | The pipeline exited before writing `result.json` | Read `run.log` and the clip's `progress.jsonl` |

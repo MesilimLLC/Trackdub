@@ -32,7 +32,8 @@ public sealed class ExportStageHandler(
     IApplicationLogger? logger = null,
     ITtsCandidateGroupRepository? candidateGroupRepository = null,
     IRuntimePlanningPreferences? runtimePlanningPreferences = null,
-    TimelineMediaMixPreparer? timelineMediaMixPreparer = null)
+    TimelineMediaMixPreparer? timelineMediaMixPreparer = null,
+    TailOverhangFitter? tailOverhangFitter = null)
 {
     private const double DurationToleranceSeconds = 0.5d;
     private const double MaxMatchOriginalUpwardBoostDb = 9d;
@@ -67,6 +68,7 @@ public sealed class ExportStageHandler(
     private readonly IExportTierGate? exportTierGate = exportTierGate;
     private readonly ITtsCandidateGroupRepository? candidateGroupRepository = candidateGroupRepository;
     private readonly IRuntimePlanningPreferences? runtimePlanningPreferences = runtimePlanningPreferences;
+    private readonly TailOverhangFitter? tailOverhangFitter = tailOverhangFitter;
 
     public async Task<ExportStageResult> ExportAsync(
         TranscriptProjectState currentState,
@@ -124,7 +126,8 @@ public sealed class ExportStageHandler(
                 currentState, mediaAsset, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
 
             MixPlan mixPlan = await BuildAndSaveMixPlanAsync(
-                currentState, mediaAsset, request, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
+                currentState, mediaAsset, request, stageRun, failureRelativePath, outputPath,
+                rollbackArtifactPaths, cancellationToken).ConfigureAwait(false);
 
             RenderedSubtitleArtifacts subtitles = await CheckSubtitleCuesAsync(
                 currentState, request, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
@@ -264,6 +267,7 @@ public sealed class ExportStageHandler(
         StageRunRecord stageRun,
         string failureRelativePath,
         string outputPath,
+        List<string> rollbackArtifactPaths,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<TtsCandidateGroup>? candidateGroups = candidateGroupRepository is not null
@@ -316,6 +320,13 @@ public sealed class ExportStageHandler(
                             : artifact).ToArray()
                 });
             }
+        }
+        if (tailOverhangFitter is not null && mixPlan.Warnings.Count > 0)
+        {
+            TailFitResult fit = await tailOverhangFitter
+                .FitAsync(mixPlan, stageRun.Id, cancellationToken).ConfigureAwait(false);
+            mixPlan = fit.Plan;
+            rollbackArtifactPaths.AddRange(fit.CreatedFilePaths);
         }
         await mixPlanStore.SaveAsync(mixPlan, cancellationToken).ConfigureAwait(false);
         if (mixPlan.Warnings.Count > 0)

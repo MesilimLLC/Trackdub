@@ -305,6 +305,7 @@ public static partial class CompositionRoot
         // Required by ExportStageHandler on headless paths (SDK/CLI/API/Worker); the Avalonia
         // shell additionally registers it earlier so its singleton view model can consume it.
         services.TryAddSingleton<SubtitleExportService>();
+        services.TryAddScoped<TailOverhangFitter>();
         services.TryAddScoped<ExportStageHandler>();
         services.TryAddScoped<ExportWorkflow>();
         services.TryAddScoped<EditingHistoryWorkflow>();

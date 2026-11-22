@@ -129,7 +129,10 @@ public sealed class MixPlanBuilder(IArtifactStore? artifactStore = null)
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
                             $"Dubbed take extends {overhangSeconds:0.###} s past the end of the source audio ({sourceAudioEndSecondsValue:0.###} s) and would be cut off at export. Stretch the take to fit, trim it, or raise the auto-stretch limit."),
-                        MixPlanWarningCode.TakeExceedsSourceAudio));
+                        MixPlanWarningCode.TakeExceedsSourceAudio)
+                    {
+                        OverhangSeconds = overhangSeconds
+                    });
                 }
             }
         }
