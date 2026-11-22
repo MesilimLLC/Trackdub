@@ -192,27 +192,35 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
     private static ListResult ListOnce(ProcessLister lister, NvmlDevice device)
     {
         uint count = 0;
-        int status = lister.Get(device.Handle, ref count, null);
-        if (status == Success && count == 0)
+        var size = new ListSize(lister.Get(device.Handle, ref count, null), count);
+        return SizingOutcome(lister, device, size) ?? ReadList(lister, device, size);
+    }
+
+    /// <summary>The result the sizing call already decides, or null when the list must be read.</summary>
+    private static ListResult? SizingOutcome(ProcessLister lister, NvmlDevice device, ListSize size)
+    {
+        if (size.Status == Success && size.Count == 0)
         {
             return ListResult.Listed([]);
         }
 
-        if (status == NotSupported && lister.UnsupportedMeansEmpty)
+        if (size.Status == NotSupported && lister.UnsupportedMeansEmpty)
         {
             return ListResult.Listed([]);
         }
 
-        if (status != Success && status != InsufficientSize)
-        {
-            return ListResult.Failed(ListFailure(lister, device, status));
-        }
+        return size.Status is Success or InsufficientSize
+            ? null
+            : ListResult.Failed(ListFailure(lister, device, size.Status));
+    }
 
+    private static ListResult ReadList(ProcessLister lister, NvmlDevice device, ListSize size)
+    {
         // Processes can start between the sizing call and the read, so leave slack; the list
         // can still outgrow it, which the caller retries.
-        var buffer = new NvmlProcessInfo[count + ProcessCountSlack];
+        var buffer = new NvmlProcessInfo[size.Count + ProcessCountSlack];
         uint filled = (uint)buffer.Length;
-        status = lister.Get(device.Handle, ref filled, buffer);
+        int status = lister.Get(device.Handle, ref filled, buffer);
         if (status == InsufficientSize)
         {
             return ListResult.Retry;
@@ -297,8 +305,8 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
         // A GPU without graphics support has no graphics contexts, so "not supported" reads as an
         // empty list there; the compute list has no such reading and fails the whole query.
         return new ProcessLists(
-            new ProcessLister("compute", getCompute, UnsupportedMeansEmpty: false),
-            new ProcessLister("graphics", getGraphics, UnsupportedMeansEmpty: true));
+            new ProcessLister(ListKind.Compute, getCompute),
+            new ProcessLister(ListKind.Graphics, getGraphics));
     }
 
     private enum ListOutcome
@@ -362,7 +370,20 @@ internal sealed class NvmlNativeComputeProcessSource : INvmlComputeProcessSource
             new() { Outcome = ListOutcome.Failed, Failure = failure };
     }
 
-    private sealed record ProcessLister(string Name, GetProcessesDelegate Get, bool UnsupportedMeansEmpty);
+    private enum ListKind
+    {
+        Compute,
+        Graphics,
+    }
+
+    private readonly record struct ListSize(int Status, uint Count);
+
+    private sealed record ProcessLister(ListKind Kind, GetProcessesDelegate Get)
+    {
+        internal string Name => Kind == ListKind.Compute ? "compute" : "graphics";
+
+        internal bool UnsupportedMeansEmpty => Kind == ListKind.Graphics;
+    }
 
     private sealed record ProcessLists(ProcessLister Compute, ProcessLister Graphics);
 
