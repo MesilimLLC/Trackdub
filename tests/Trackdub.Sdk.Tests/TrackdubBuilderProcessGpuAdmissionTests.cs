@@ -17,6 +17,14 @@ namespace Trackdub.Sdk.Tests;
 /// </summary>
 public sealed class TrackdubBuilderProcessGpuAdmissionTests
 {
+    // Windows reads performance counters (WINDOWS build only) and Linux reads NVML; elsewhere
+    // there is no platform reader and the pool keeps its reservation-only model.
+#if WINDOWS
+    private static bool HasProcessGpuSource => true;
+#else
+    private static bool HasProcessGpuSource => OperatingSystem.IsLinux();
+#endif
+
     [Fact]
     public void Build_binds_gpu_device_luids_and_dispose_preserves_a_newer_owner()
     {
@@ -101,15 +109,17 @@ public sealed class TrackdubBuilderProcessGpuAdmissionTests
         using var factory = new TrackdubBuilder().Build();
         try
         {
-#if WINDOWS
-            Assert.NotNull(SharedPoolOptions.ProcessGpuMemoryReader);
-            factory.Dispose();
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-#else
-            // No platform reader here: the pool keeps its reservation-only model.
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-            factory.Dispose();
-#endif
+            if (HasProcessGpuSource)
+            {
+                Assert.NotNull(SharedPoolOptions.ProcessGpuMemoryReader);
+                factory.Dispose();
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+            }
+            else
+            {
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+                factory.Dispose();
+            }
         }
         finally
         {

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Trackdub.Application.Benchmarking;
 using Trackdub.Composition.Headless;
+using Trackdub.Composition.Runtime;
 using Trackdub.Contracts.Benchmarking;
 using Trackdub.Infrastructure.Diagnostics;
 using Trackdub.Inference.Onnx.Pool;
@@ -18,6 +19,55 @@ public sealed class ResourceTelemetryRegistrationCollection;
 [Collection(nameof(ResourceTelemetryRegistrationTests))]
 public sealed class ResourceTelemetryRegistrationTests
 {
+    // Windows reads the GPU Process Memory counters and Linux reads NVML; other platforms have
+    // no process-GPU source, so the pool keeps its reservation-only model there. The Windows
+    // reader exists only in the WINDOWS build, so the predicate follows that build define.
+#if WINDOWS
+    private static bool HasProcessGpuSource => true;
+#else
+    private static bool HasProcessGpuSource => OperatingSystem.IsLinux();
+#endif
+
+    [Fact]
+    public void Core_composition_registers_the_reader_for_the_platform()
+    {
+        var services = new ServiceCollection();
+        services.AddTrackdub();
+        using var provider = services.BuildServiceProvider();
+
+        IProcessGpuMemoryReader reader = provider.GetRequiredService<IProcessGpuMemoryReader>();
+
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.IsType<LinuxProcessGpuMemoryReader>(reader);
+        }
+        else if (!OperatingSystem.IsWindows())
+        {
+            Assert.IsType<UnavailableProcessGpuMemoryReader>(reader);
+        }
+    }
+
+    [Fact]
+    public void Headless_does_not_bind_an_unavailable_reader_where_the_platform_has_no_source()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows binds whatever reader the host registered.");
+        IProcessGpuMemoryReader? previous = SharedPoolOptions.ProcessGpuMemoryReader;
+        var services = new ServiceCollection();
+        services.AddSingleton<IProcessGpuMemoryReader>(new UnavailableProcessGpuMemoryReader());
+        services.AddHeadlessTrackdub();
+        using var provider = services.BuildServiceProvider();
+
+        try
+        {
+            Assert.Null(HeadlessCompositionRoot.BindSharedPoolProcessGpuAdmission(provider));
+            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+        }
+        finally
+        {
+            SharedPoolOptions.UseProcessGpuMemoryReader(previous);
+        }
+    }
+
     [Fact]
     public void Core_composition_registers_gpu_reader_and_preserves_host_override()
     {
@@ -98,12 +148,15 @@ public sealed class ResourceTelemetryRegistrationTests
         try
         {
             IProcessGpuMemoryReader reader = host.Services.GetRequiredService<IProcessGpuMemoryReader>();
-#if WINDOWS
-            Assert.Same(reader, SharedPoolOptions.ProcessGpuMemoryReader);
-#else
-            // No platform reader here: the pool keeps its reservation-only model.
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-#endif
+            if (HasProcessGpuSource)
+            {
+                Assert.Same(reader, SharedPoolOptions.ProcessGpuMemoryReader);
+            }
+            else
+            {
+                // No platform reader here: the pool keeps its reservation-only model.
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+            }
         }
         finally
         {
@@ -119,27 +172,30 @@ public sealed class ResourceTelemetryRegistrationTests
         using var second = HeadlessDubbingHost.Create();
         try
         {
-#if WINDOWS
-            // The latest host wins the process-wide registration.
-            Assert.Same(
-                second.Services.GetRequiredService<IProcessGpuMemoryReader>(),
-                SharedPoolOptions.ProcessGpuMemoryReader);
+            if (HasProcessGpuSource)
+            {
+                // The latest host wins the process-wide registration.
+                Assert.Same(
+                    second.Services.GetRequiredService<IProcessGpuMemoryReader>(),
+                    SharedPoolOptions.ProcessGpuMemoryReader);
 
-            // Disposing the older host must not tear down the newer host's registration.
-            first.Dispose();
-            Assert.Same(
-                second.Services.GetRequiredService<IProcessGpuMemoryReader>(),
-                SharedPoolOptions.ProcessGpuMemoryReader);
+                // Disposing the older host must not tear down the newer host's registration.
+                first.Dispose();
+                Assert.Same(
+                    second.Services.GetRequiredService<IProcessGpuMemoryReader>(),
+                    SharedPoolOptions.ProcessGpuMemoryReader);
 
-            // Disposing the owning host clears the binding instead of leaking a stale reader
-            // into later hosts and tests in the same process.
-            second.Dispose();
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-#else
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-            first.Dispose();
-            second.Dispose();
-#endif
+                // Disposing the owning host clears the binding instead of leaking a stale reader
+                // into later hosts and tests in the same process.
+                second.Dispose();
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+            }
+            else
+            {
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+                first.Dispose();
+                second.Dispose();
+            }
         }
         finally
         {
@@ -161,16 +217,19 @@ public sealed class ResourceTelemetryRegistrationTests
         try
         {
             IProcessGpuMemoryReader? bound = HeadlessCompositionRoot.BindSharedPoolProcessGpuAdmission(provider);
-#if WINDOWS
-            Assert.Same(provider.GetRequiredService<IProcessGpuMemoryReader>(), bound);
-            Assert.Same(bound, SharedPoolOptions.ProcessGpuMemoryReader);
-            HeadlessCompositionRoot.ClearSharedPoolProcessGpuAdmission(bound);
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-#else
-            // No platform reader here: the pool keeps its reservation-only model.
-            Assert.Null(bound);
-            Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
-#endif
+            if (HasProcessGpuSource)
+            {
+                Assert.Same(provider.GetRequiredService<IProcessGpuMemoryReader>(), bound);
+                Assert.Same(bound, SharedPoolOptions.ProcessGpuMemoryReader);
+                HeadlessCompositionRoot.ClearSharedPoolProcessGpuAdmission(bound);
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+            }
+            else
+            {
+                // No platform reader here: the pool keeps its reservation-only model.
+                Assert.Null(bound);
+                Assert.Null(SharedPoolOptions.ProcessGpuMemoryReader);
+            }
         }
         finally
         {

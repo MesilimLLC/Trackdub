@@ -172,17 +172,24 @@ public static class HeadlessCompositionRoot
     /// this once the <see cref="IServiceProvider"/> is built — <see cref="HeadlessDubbingHost"/> and
     /// the SDK's <c>TrackdubBuilder.Build</c> — or the advertised default-on admission silently
     /// stays reservation-only for that path. Best-effort: a failing reader must never fail
-    /// composition. On platforms without a Windows reader the pool keeps its reservation-only
-    /// model and this returns null.
+    /// composition. On a platform with no process-GPU source (neither the Windows nor the Linux
+    /// reader) the pool keeps its reservation-only model and this returns null.
     /// </summary>
     /// <returns>The bound reader (null when there is nothing to bind).</returns>
     public static IProcessGpuMemoryReader? BindSharedPoolProcessGpuAdmission(IServiceProvider services)
     {
         IProcessGpuMemoryReader? reader = null;
-#if WINDOWS
         try
         {
             reader = services.GetService<IProcessGpuMemoryReader>();
+#if !WINDOWS
+            // The unavailable reader is the registration for platforms without a source;
+            // binding it would arm nothing.
+            if (reader is UnavailableProcessGpuMemoryReader)
+            {
+                reader = null;
+            }
+#endif
             if (reader is not null)
             {
                 SharedPoolOptions.UseProcessGpuMemoryReader(reader);
@@ -192,7 +199,7 @@ public static class HeadlessCompositionRoot
         {
             reader = null;
         }
-#endif
+
         return reader;
     }
 
