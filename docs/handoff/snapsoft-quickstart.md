@@ -124,8 +124,9 @@ Host preparation covers the data volume mount, the repo checkout, the GHCR login
 model volume. It runs once per instance. The launcher sets the VRAM budget on `g6.*` only. The translation time
 differs by GPU in this single run; we have not looked into why.
 
-To skip host preparation on later jobs, snapshot the data volume (`/mnt/trackdub-data`) after host preparation
-finishes and attach that snapshot to new instances. This has not been tested yet.
+Reusing a data-volume snapshot to skip host preparation is not available yet. `deploy/aws/run-batch.sh` formats
+the unmounted data disk on every run (`mkfs.xfs -f`), which would erase a restored model cache. The launcher also
+always creates a new data volume. Making this work needs launcher and bootstrap changes.
 
 To record the image digest on an instance, after the pull, run, with `IMAGE` set to the same image you passed to the launcher:
 
