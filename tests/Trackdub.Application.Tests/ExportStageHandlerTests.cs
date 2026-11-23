@@ -1190,7 +1190,8 @@ public sealed class ExportStageHandlerTests
             ArtifactKind.TtsTake,
             "artifacts/tts/take-0002.wav",
             durationSeconds: 1.0d,
-            DateTimeOffset.UtcNow) with { DurationSeconds = null };
+            DateTimeOffset.UtcNow);
+        secondTakeArtifact = secondTakeArtifact with { DurationSeconds = null };
         TtsTake secondTake = TtsTake
             .Create(context.Project.Id, Guid.NewGuid(), secondTranslatedSegment.Id, segmentIndex: 1)
             .Complete(
@@ -1201,7 +1202,8 @@ public sealed class ExportStageHandlerTests
                 provider: "fake",
                 modelId: "kokoro",
                 voiceId: "af_heart",
-                durationOverrunRatio: null) with { DurationSamples = null, SampleRate = null };
+                durationOverrunRatio: null);
+        secondTake = secondTake with { DurationSamples = null, SampleRate = null };
         return state with
         {
             ProjectState = state.ProjectState with { Artifacts = [.. state.ProjectState.Artifacts, secondTakeArtifact] },
