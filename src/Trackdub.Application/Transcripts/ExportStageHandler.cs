@@ -292,7 +292,10 @@ public sealed class ExportStageHandler(
                 timelineMediaMixPreparer, currentState, cancellationToken).ConfigureAwait(false),
             BackgroundMediaGainDb: request.BackgroundMediaGainDb);
         MixPlan mixPlan = mixPlanBuilder.Build(buildRequest);
-        if (mixPlan.Warnings.Count == 0)
+        // Durations are probed whenever the only warnings are tail overhangs, not only when there are none:
+        // fitting can clear those warnings, and a take whose duration is still unknown would then reach the
+        // renderer without ever being checked against the end of the source audio.
+        if (mixPlan.Warnings.All(static warning => warning.Code == MixPlanWarningCode.TakeExceedsSourceAudio))
         {
             var durationsByPath = new Dictionary<string, double>(StringComparer.Ordinal);
             ProjectArtifact sourceArtifact = currentState.ProjectState.Artifacts
