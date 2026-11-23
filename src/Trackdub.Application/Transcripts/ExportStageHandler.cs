@@ -32,7 +32,8 @@ public sealed class ExportStageHandler(
     IApplicationLogger? logger = null,
     ITtsCandidateGroupRepository? candidateGroupRepository = null,
     IRuntimePlanningPreferences? runtimePlanningPreferences = null,
-    TimelineMediaMixPreparer? timelineMediaMixPreparer = null)
+    TimelineMediaMixPreparer? timelineMediaMixPreparer = null,
+    TailOverhangFitter? tailOverhangFitter = null)
 {
     private const double DurationToleranceSeconds = 0.5d;
     private const double MaxMatchOriginalUpwardBoostDb = 9d;
@@ -67,6 +68,7 @@ public sealed class ExportStageHandler(
     private readonly IExportTierGate? exportTierGate = exportTierGate;
     private readonly ITtsCandidateGroupRepository? candidateGroupRepository = candidateGroupRepository;
     private readonly IRuntimePlanningPreferences? runtimePlanningPreferences = runtimePlanningPreferences;
+    private readonly TailOverhangFitter? tailOverhangFitter = tailOverhangFitter;
 
     public async Task<ExportStageResult> ExportAsync(
         TranscriptProjectState currentState,
@@ -123,8 +125,10 @@ public sealed class ExportStageHandler(
             await RunPreflightChecksAsync(
                 currentState, mediaAsset, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
 
-            MixPlan mixPlan = await BuildAndSaveMixPlanAsync(
-                currentState, mediaAsset, request, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
+            BuiltMixPlan builtMixPlan = await BuildAndSaveMixPlanAsync(
+                currentState, mediaAsset, request, stageRun, failureRelativePath, outputPath,
+                rollbackArtifactPaths, cancellationToken).ConfigureAwait(false);
+            MixPlan mixPlan = builtMixPlan.Plan;
 
             RenderedSubtitleArtifacts subtitles = await CheckSubtitleCuesAsync(
                 currentState, request, stageRun, failureRelativePath, outputPath, cancellationToken).ConfigureAwait(false);
@@ -148,6 +152,7 @@ public sealed class ExportStageHandler(
                 rollbackArtifactPaths, cancellationToken).ConfigureAwait(false);
 
             exportSucceeded = true;
+            await PublishFittedMixPlanAsync(builtMixPlan).ConfigureAwait(false);
             return result;
         }
         catch (ExportStageException)
@@ -257,13 +262,14 @@ public sealed class ExportStageHandler(
         }
     }
 
-    private async Task<MixPlan> BuildAndSaveMixPlanAsync(
+    private async Task<BuiltMixPlan> BuildAndSaveMixPlanAsync(
         TranscriptProjectState currentState,
         MediaAsset mediaAsset,
         ExportStageRequest request,
         StageRunRecord stageRun,
         string failureRelativePath,
         string outputPath,
+        List<string> rollbackArtifactPaths,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<TtsCandidateGroup>? candidateGroups = candidateGroupRepository is not null
@@ -286,7 +292,10 @@ public sealed class ExportStageHandler(
                 timelineMediaMixPreparer, currentState, cancellationToken).ConfigureAwait(false),
             BackgroundMediaGainDb: request.BackgroundMediaGainDb);
         MixPlan mixPlan = mixPlanBuilder.Build(buildRequest);
-        if (mixPlan.Warnings.Count == 0)
+        // Durations are probed whenever the only warnings are tail overhangs, not only when there are none:
+        // fitting can clear those warnings, and a take whose duration is still unknown would then reach the
+        // renderer without ever being checked against the end of the source audio.
+        if (mixPlan.Warnings.All(static warning => warning.Code == MixPlanWarningCode.TakeExceedsSourceAudio))
         {
             var durationsByPath = new Dictionary<string, double>(StringComparer.Ordinal);
             ProjectArtifact sourceArtifact = currentState.ProjectState.Artifacts
@@ -317,7 +326,17 @@ public sealed class ExportStageHandler(
                 });
             }
         }
-        await mixPlanStore.SaveAsync(mixPlan, cancellationToken).ConfigureAwait(false);
+        MixPlan builtPlan = mixPlan;
+        if (tailOverhangFitter is not null && mixPlan.Warnings.Count > 0)
+        {
+            TailFitResult fit = await tailOverhangFitter
+                .FitAsync(mixPlan, stageRun.Id, cancellationToken).ConfigureAwait(false);
+            mixPlan = fit.Plan;
+            rollbackArtifactPaths.AddRange(fit.CreatedFilePaths);
+        }
+        // Save the plan as built. A fitted plan references files that a failed export rolls back, so it is
+        // published only after the export has succeeded (see PublishFittedMixPlanAsync).
+        await mixPlanStore.SaveAsync(builtPlan, cancellationToken).ConfigureAwait(false);
         if (mixPlan.Warnings.Count > 0)
         {
             await FailWithReportAsync(
@@ -328,7 +347,30 @@ public sealed class ExportStageHandler(
                 BuildTakeFailureCauses(mixPlan),
                 cancellationToken).ConfigureAwait(false);
         }
-        return mixPlan;
+        return new BuiltMixPlan(mixPlan, WasFitted: !ReferenceEquals(builtPlan, mixPlan));
+    }
+
+    private sealed record BuiltMixPlan(MixPlan Plan, bool WasFitted);
+
+    // Best effort and after delivery: the export has already succeeded, so a failure here must not turn it
+    // into a failed export. The plan saved earlier stays valid; it just still shows the unfitted takes.
+    private async Task PublishFittedMixPlanAsync(BuiltMixPlan built)
+    {
+        if (!built.WasFitted)
+        {
+            return;
+        }
+
+        try
+        {
+            await mixPlanStore.SaveAsync(built.Plan, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(
+                $"Export succeeded but the fitted mix plan could not be saved; the saved plan still shows the unfitted takes: {ex.Message}",
+                ex);
+        }
     }
 
     private async Task<double> ProbeAudioDurationAsync(string relativePath, CancellationToken cancellationToken)

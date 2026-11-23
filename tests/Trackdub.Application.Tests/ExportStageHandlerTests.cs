@@ -6,6 +6,7 @@ using Trackdub.Contracts.Pipeline;
 using Trackdub.Domain;
 using Trackdub.Domain.Artifacts;
 using Trackdub.Domain.Media;
+using Trackdub.Domain.Mixing;
 using Trackdub.Domain.Projects;
 using Trackdub.Domain.Speakers;
 using Trackdub.Domain.StageRuns;
@@ -1033,6 +1034,205 @@ public sealed class ExportStageHandlerTests
         Assert.Equal(StageRunStatus.Failed, Assert.Single(stageRunStore.All).Status);
     }
 
+    [Fact]
+    public async Task ExportAsync_fits_a_take_that_overhangs_the_source_audio_instead_of_failing()
+    {
+        using var temp = new TempDirectory();
+        TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
+        // A 6.5s take cannot start before 0, so it ends 0.5s past the 6.0s source.
+        TranscriptProjectState state = WithTakeDuration(context.State, 6.5d);
+        SeedTakeFile(temp.Path);
+        var artifactStore = new FakeArtifactStore(temp.Path);
+        var stretchService = new FakeAudioTimeStretchService();
+        var mixRenderer = new FakeMixRenderer();
+        ExportStageHandler handler = CreateHandler(
+            artifactStore,
+            mixRenderer,
+            new FakeLoudnessNormalizer(),
+            new FakeExportRenderer(),
+            new FakeMediaProbe { Snapshot = CreateProbeSnapshot(6.0d) },
+            new FakeMediaAssetRepository(),
+            new FakeProjectStageRunStore(),
+            tailOverhangFitter: new TailOverhangFitter(stretchService, artifactStore));
+        string outputPath = Path.Join(temp.Path, "delivery", "lesson-dub.mp4");
+
+        ExportStageResult result = await handler.ExportAsync(
+            state,
+            new ExportStageRequest(context.Project.Id, outputPath, []),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(StageRunStatus.Completed, result.StageRun.Status);
+        double expectedDuration = 6.5d - 0.5d - TailOverhangFitter.SafetyMarginSeconds;
+        Assert.Equal(6.5d / expectedDuration, Assert.Single(stretchService.StretchRatios), precision: 9);
+        MixSpeechClip clip = Assert.Single(
+            Assert.Single(mixRenderer.Calls).MixPlan.SpeechClips, speechClip => !speechClip.IsSilentGap);
+        Assert.Contains("/tail-fit/", clip.TakeRelativePath);
+        Assert.Equal(6.0d - TailOverhangFitter.SafetyMarginSeconds, clip.StartSeconds + clip.TakeDurationSeconds!.Value, precision: 9);
+        Assert.True(File.Exists(artifactStore.GetPath(clip.TakeRelativePath!)));
+        MixPlan savedPlan = (await new MixPlanStore(artifactStore).LoadAsync(TestContext.Current.CancellationToken))!;
+        Assert.Empty(savedPlan.Warnings);
+        Assert.Equal(clip.TakeRelativePath, Assert.Single(savedPlan.SpeechClips, speechClip => !speechClip.IsSilentGap).TakeRelativePath);
+    }
+
+    [Fact]
+    public async Task ExportAsync_leaves_the_saved_mix_plan_on_the_original_take_when_a_fitted_export_fails()
+    {
+        using var temp = new TempDirectory();
+        TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
+        TranscriptProjectState state = WithTakeDuration(context.State, 6.5d);
+        SeedTakeFile(temp.Path);
+        var artifactStore = new FakeArtifactStore(temp.Path);
+        var mixRenderer = new FakeMixRenderer();
+        ExportStageHandler handler = CreateHandler(
+            artifactStore,
+            mixRenderer,
+            new FakeLoudnessNormalizer(),
+            new ThrowingExportRenderer(new IOException("Export render failed.")),
+            new FakeMediaProbe { Snapshot = CreateProbeSnapshot(6.0d) },
+            new FakeMediaAssetRepository(),
+            new FakeProjectStageRunStore(),
+            tailOverhangFitter: new TailOverhangFitter(new FakeAudioTimeStretchService(), artifactStore));
+        string outputPath = Path.Join(temp.Path, "delivery", "lesson-dub.mp4");
+
+        await Assert.ThrowsAsync<ExportStageException>(() => handler.ExportAsync(
+            state,
+            new ExportStageRequest(context.Project.Id, outputPath, []),
+            TestContext.Current.CancellationToken));
+
+        MixSpeechClip fittedClip = Assert.Single(
+            Assert.Single(mixRenderer.Calls).MixPlan.SpeechClips, speechClip => !speechClip.IsSilentGap);
+        Assert.Contains("/tail-fit/", fittedClip.TakeRelativePath);
+        Assert.False(File.Exists(artifactStore.GetPath(fittedClip.TakeRelativePath!)));
+        MixPlan savedPlan = (await new MixPlanStore(artifactStore).LoadAsync(TestContext.Current.CancellationToken))!;
+        Assert.Equal(
+            "artifacts/tts/take-0001.wav",
+            Assert.Single(savedPlan.SpeechClips, speechClip => !speechClip.IsSilentGap).TakeRelativePath);
+    }
+
+    [Fact]
+    public async Task ExportAsync_still_reports_a_take_that_would_need_more_compression_than_the_fit_limit()
+    {
+        using var temp = new TempDirectory();
+        TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
+        // 7.5s against 6.0s needs 7.5 / 5.95 = 1.26x, just over the 1.25x limit.
+        TranscriptProjectState state = WithTakeDuration(context.State, 7.5d);
+        SeedTakeFile(temp.Path);
+        var artifactStore = new FakeArtifactStore(temp.Path);
+        var stretchService = new FakeAudioTimeStretchService();
+        var mixRenderer = new FakeMixRenderer();
+        ExportStageHandler handler = CreateHandler(
+            artifactStore,
+            mixRenderer,
+            new FakeLoudnessNormalizer(),
+            new FakeExportRenderer(),
+            new FakeMediaProbe { Snapshot = CreateProbeSnapshot(6.0d) },
+            new FakeMediaAssetRepository(),
+            new FakeProjectStageRunStore(),
+            tailOverhangFitter: new TailOverhangFitter(stretchService, artifactStore));
+        string outputPath = Path.Join(temp.Path, "delivery", "lesson-dub.mp4");
+
+        ExportStageException exception = await Assert.ThrowsAsync<ExportStageException>(() =>
+            handler.ExportAsync(
+                state,
+                new ExportStageRequest(context.Project.Id, outputPath, []),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("take-exceeds-source-audio", Assert.Single(exception.Report.Causes).Code);
+        Assert.Empty(stretchService.StretchRatios);
+        Assert.Empty(mixRenderer.Calls);
+    }
+
+    [Fact]
+    public async Task ExportAsync_probes_unknown_take_durations_before_fitting_so_an_unchecked_take_cannot_slip_through()
+    {
+        using var temp = new TempDirectory();
+        TestExportContext context = CreateContext(temp.Path, includeCompletedTake: true, durationSeconds: 6.0d);
+        // Take 1 is 6.5s and fits at about 1.09x. Take 2 has no stored duration; the probe reports 6.0s,
+        // which cannot be fitted. Fitting take 1 must not hide take 2 from the overhang check.
+        TranscriptProjectState state = WithUnknownDurationSecondTake(WithTakeDuration(context.State, 6.5d), context);
+        SeedTakeFile(temp.Path);
+        var artifactStore = new FakeArtifactStore(temp.Path);
+        var probe = new FakeMediaProbe { Snapshot = CreateProbeSnapshot(6.0d) };
+        var mixRenderer = new FakeMixRenderer();
+        ExportStageHandler handler = CreateHandler(
+            artifactStore,
+            mixRenderer,
+            new FakeLoudnessNormalizer(),
+            new FakeExportRenderer(),
+            probe,
+            new FakeMediaAssetRepository(),
+            new FakeProjectStageRunStore(),
+            tailOverhangFitter: new TailOverhangFitter(new FakeAudioTimeStretchService(), artifactStore));
+        string outputPath = Path.Join(temp.Path, "delivery", "lesson-dub.mp4");
+
+        ExportStageException exception = await Assert.ThrowsAsync<ExportStageException>(() => handler.ExportAsync(
+            state,
+            new ExportStageRequest(context.Project.Id, outputPath, []),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("take-exceeds-source-audio", Assert.Single(exception.Report.Causes).Code);
+        Assert.EndsWith("take-0002.wav", Assert.Single(probe.Calls));
+        Assert.Empty(mixRenderer.Calls);
+    }
+
+    private static TranscriptProjectState WithUnknownDurationSecondTake(
+        TranscriptProjectState state,
+        TestExportContext context)
+    {
+        Guid speakerId = state.TranscriptSegments[0].SpeakerId!.Value;
+        TranscriptSegment secondTranscriptSegment = TranscriptSegment.Create(
+            state.CurrentTranscriptRevision!.Id, 1, 2.0d, 3.0d, "Goodbye", speakerId, "en");
+        TranslatedSegment secondTranslatedSegment = TranslatedSegment.Create(
+            state.CurrentTranslationRevision!.Id, 1, 2.0d, 3.0d, "Adios");
+        ProjectArtifact secondTakeArtifact = CreateArtifact(
+            context.Project.Id,
+            context.MediaAsset.Id,
+            ArtifactKind.TtsTake,
+            "artifacts/tts/take-0002.wav",
+            durationSeconds: 1.0d,
+            DateTimeOffset.UtcNow);
+        secondTakeArtifact = secondTakeArtifact with { DurationSeconds = null };
+        TtsTake secondTake = TtsTake
+            .Create(context.Project.Id, Guid.NewGuid(), secondTranslatedSegment.Id, segmentIndex: 1)
+            .Complete(
+                secondTakeArtifact.Id,
+                stageRunId: Guid.NewGuid(),
+                durationSamples: 48000,
+                sampleRate: 48000,
+                provider: "fake",
+                modelId: "kokoro",
+                voiceId: "af_heart",
+                durationOverrunRatio: null);
+        secondTake = secondTake with { DurationSamples = null, SampleRate = null };
+        return state with
+        {
+            ProjectState = state.ProjectState with { Artifacts = [.. state.ProjectState.Artifacts, secondTakeArtifact] },
+            TranscriptSegments = [.. state.TranscriptSegments, secondTranscriptSegment],
+            TranslatedSegments = [.. state.TranslatedSegments, secondTranslatedSegment],
+            TtsTakes = [.. state.TtsTakes, secondTake]
+        };
+    }
+
+    private static TranscriptProjectState WithTakeDuration(TranscriptProjectState state, double takeDurationSeconds) =>
+        state with
+        {
+            ProjectState = state.ProjectState with
+            {
+                Artifacts = state.ProjectState.Artifacts
+                    .Select(artifact => artifact.Kind == ArtifactKind.TtsTake
+                        ? artifact with { DurationSeconds = takeDurationSeconds }
+                        : artifact)
+                    .ToList()
+            }
+        };
+
+    private static void SeedTakeFile(string rootPath)
+    {
+        string path = Path.Join(rootPath, "artifacts", "tts", "take-0001.wav");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, [1, 2, 3, 4]);
+    }
+
     [Theory]
     [InlineData(null, 7.5d, "take-exceeds-source-audio")]
     [InlineData(0d, 7.5d, "take-exceeds-source-audio")]
@@ -1525,7 +1725,8 @@ public sealed class ExportStageHandlerTests
         IProjectStageRunStore stageRunStore,
         IFileFingerprintService? fileFingerprintService = null,
         IVideoRecomposer? videoRecomposer = null,
-        IExportTierGate? exportTierGate = null) =>
+        IExportTierGate? exportTierGate = null,
+        TailOverhangFitter? tailOverhangFitter = null) =>
         new(
             new MixPlanBuilder(),
             new MixPlanStore(artifactStore),
@@ -1539,7 +1740,8 @@ public sealed class ExportStageHandlerTests
             mediaProbe,
             new SubtitleExportService(),
             videoRecomposer ?? new FakeVideoRecomposer(),
-            exportTierGate);
+            exportTierGate,
+            tailOverhangFitter: tailOverhangFitter);
 
     private static TestExportContext CreateContext(
         string rootPath,

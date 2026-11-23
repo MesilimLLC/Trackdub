@@ -346,6 +346,21 @@ public static class ProjectArtifactPaths
         return $"{ExportDirectoryRelativePath}/{stageRunId:D}/export-manifest.json";
     }
 
+    public static string GetExportTailFitTakeRelativePath(Guid stageRunId, Guid segmentId)
+    {
+        if (stageRunId == Guid.Empty)
+        {
+            throw new ArgumentException("Stage run id is required.", nameof(stageRunId));
+        }
+
+        if (segmentId == Guid.Empty)
+        {
+            throw new ArgumentException("Segment id is required.", nameof(segmentId));
+        }
+
+        return $"{ExportDirectoryRelativePath}/{stageRunId:D}/tail-fit/{segmentId:D}.wav";
+    }
+
     public static string GetExportFailureReportRelativePath(Guid stageRunId)
     {
         if (stageRunId == Guid.Empty)

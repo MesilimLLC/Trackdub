@@ -8,8 +8,9 @@ import sys
 
 OVERRUN_PATTERN = re.compile(r"extends ([0-9]+(?:\.[0-9]+)?) s past the end")
 OVERRUN_HINT = (
-    "TTS overran the source; rerun with --tts-rubberband-stretch and a higher "
-    "--tts-auto-stretch-max-overrun (e.g. 0.35), or shorten the translation"
+    "TTS overran the source by more than the exporter fits on its own (up to 1.25x on the last take); "
+    "shorten the translation, or rerun with --tts-rubberband-stretch and a higher "
+    "--tts-auto-stretch-max-overrun (e.g. 0.35)"
 )
 
 
