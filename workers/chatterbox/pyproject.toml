@@ -10,8 +10,8 @@ dependencies = []
 
 [project.optional-dependencies]
 model = [
-    "torch==2.11.*",
-    "torchaudio==2.11.*",
+    "torch==2.13.*",
+    "torchaudio==2.11.1",
     "chatterbox-tts==0.1.7",
     # resemble-perth 1.0.1 imports pkg_resources, deprecated and removed in
     # setuptools 81+; cap below 81 so ChatterboxTTS model load keeps working
@@ -24,34 +24,38 @@ model = [
 [dependency-groups]
 dev = ["pytest>=9.0.3,<10"]
 
-# torch/torchaudio MUST come from the CUDA index (PyPI wheels are CPU-only,
+# torch MUST come from the CUDA index (PyPI torch wheels are CPU-only,
 # which silently works but never touches the GPU). The pin above plus this
 # index is what makes `uv lock`/`uv sync` reproduce the exact CUDA stack.
+# torchaudio deliberately does NOT come from the CUDA index: TorchAudio 2.11
+# is in maintenance phase and its PyPI wheel (py3-none, requires torch>=2.11)
+# is forward-compatible with torch 2.13, so 2.11.1 covers this pin.
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128" }]
-torchaudio = [{ index = "pytorch-cu128" }]
+torch = [{ index = "pytorch-cu130" }]
 
 # chatterbox-tts 0.1.7 pins torch==2.6.0 exactly, but torch 2.6 has no CUDA
-# build new enough for Blackwell (sm_120 needs CUDA 12.8+). Override to the
-# 2.11 CUDA stack and prove compatibility by running the model, not by
-# trusting the pin. Revisit if chatterbox-tts relaxes its torch requirement.
+# build new enough for Blackwell (sm_120 needs CUDA 13.0 via the cu130
+# stack). Override to the 2.13 CUDA stack and prove compatibility by running
+# the model, not by trusting the pin. Revisit if chatterbox-tts relaxes its
+# torch requirement.
 #
 # The remaining overrides force Dependabot-patched floors for packages the
 # worker never imports (gradio/starlette/pillow serve chatterbox's demo UI)
 # or consumes narrowly (transformers/diffusers). chatterbox-tts 0.1.7 pins
 # gradio==6.8.0 exactly, which in turn caps pillow<13 and starlette<1, so
 # these floors only resolve as overrides. setuptools stays capped below 81 by
-# the model-extra pin above; see the override comment. torch stays on 2.11.*: the patched
-# 2.13 line needs a CUDA-stack re-verification before it can replace the pin.
+# the model-extra pin above; see the override comment. torch rides the cu130
+# CUDA stack at 2.13.* (first patched line for GHSA-rrmf-rvhw-rf47); torchaudio
+# stays at 2.11.1 from PyPI per the maintenance-phase forward-compat note.
 [tool.uv]
 override-dependencies = [
-    "torch==2.11.*",
-    "torchaudio==2.11.*",
+    "torch==2.13.*",
+    "torchaudio==2.11.1",
     "gradio==6.16.0",
     "pillow>=13.0.0",
     "starlette>=1.0.1",
