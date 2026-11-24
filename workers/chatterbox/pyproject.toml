@@ -13,10 +13,13 @@ model = [
     "torch==2.13.*",
     "torchaudio==2.11.1",
     "chatterbox-tts==0.1.7",
-    # resemble-perth 1.0.1 imports pkg_resources, deprecated and removed in
-    # setuptools 81+; cap below 81 so ChatterboxTTS model load keeps working
-    # (verified in the 2026-10-08 live run; see workers/README.md "Evidence").
-    "setuptools>=80,<81",
+    # resemble-perth 1.0.1 imports pkg_resources.resource_filename, which
+    # setuptools 81+ removed. The vendored shim below (path dependency)
+    # provides it from importlib.resources, so setuptools rides the patched
+    # 84.1.0 floor. Keep the shim until Perth ships a pkg_resources-free
+    # release.
+    "trackdub-pkg-resources-shim",
+    "setuptools>=84.1.0",
 ]
 
 # Conformance tests (`python -m pytest tests/ -q`) are stdlib-only, but the
@@ -37,6 +40,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
+trackdub-pkg-resources-shim = { path = "shims/pkg_resources_shim", editable = false }
 
 # chatterbox-tts 0.1.7 pins torch==2.6.0 exactly, but torch 2.6 has no CUDA
 # build new enough for Blackwell (sm_120 needs CUDA 13.0 via the cu130
@@ -62,11 +66,11 @@ override-dependencies = [
     "diffusers>=0.38.0",
     "safetensors>=0.8.0",
     "transformers>=5.10.0",
-    # setuptools is deliberately NOT raised: resemble-perth 1.0.1 (chatterbox's
-    # watermarker, constructed unconditionally in ChatterboxTTS.__init__) imports
-    # pkg_resources, which setuptools removed in 81+. The Dependabot patch floors
-    # (83.0.0/84.1.0) all break model load, so those two low/medium alerts stay
-    # open until Perth ships a pkg_resources-free release.
+    # setuptools rides 84.1.0 (patched): resemble-perth's sole pkg_resources
+    # call is covered by the vendored shim path dependency above, not by a
+    # setuptools version cap. Remove the shim only when Perth ships a
+    # pkg_resources-free release.
+    "setuptools>=84.1.0",
 ]
 
 [tool.pytest.ini_options]
